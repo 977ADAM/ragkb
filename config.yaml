@@ -1,0 +1,58 @@
+# Конфигурация RAG-системы.
+# Переменные окружения перекрывают эти значения: RAGKB_LLM_BACKEND, RAGKB_EMBEDDING_MODEL и т.д.
+
+docs_dir: data/docs
+index_dir: data/index
+language: ru
+
+chunking:
+  size: 900          # символов; ~230 токенов для русского текста
+  overlap: 150
+  min_size: 120
+  respect_structure: true
+
+embedding:
+  # tfidf — работает сразу, без моделей и сети (baseline, для тестов и CI)
+  # ollama — рекомендуется для боевой эксплуатации: bge-m3 или multilingual-e5
+  backend: tfidf
+  model: bge-m3
+  base_url: http://localhost:11434
+  batch_size: 32
+  query_prefix: ""   # для e5-моделей: "query: "
+  doc_prefix: ""     # для e5-моделей: "passage: "
+  tfidf_dim: 4096
+
+store:
+  # chroma — ChromaDB: HNSW-индекс, фильтры по метаданным, инкрементальное
+  #          обновление документов (ragkb update / delete)
+  # numpy  — матрица в памяти, точный перебор, без внешних зависимостей
+  backend: chroma
+  collection: knowledge_base
+  chroma_host: ""      # пусто = встроенный режим (файлы в index_dir/chroma)
+  chroma_port: 8000
+  upsert_batch: 500
+  hnsw_construction_ef: 200
+  hnsw_search_ef: 100
+  hnsw_m: 16
+
+retrieval:
+  top_k: 5
+  candidates: 30
+  use_bm25: true
+  use_dense: true
+  rrf_k: 60
+  use_mmr: true
+  mmr_lambda: 0.7
+  min_score: 0.0
+  reranker: none     # "sentence-transformers" для cross-encoder реранка
+  reranker_model: BAAI/bge-reranker-v2-m3
+
+llm:
+  # extractive — без нейросети, собирает ответ из фрагментов
+  # ollama — локальная модель; openai — любой OpenAI-совместимый endpoint
+  backend: extractive
+  model: qwen2.5:7b-instruct
+  base_url: http://localhost:11434
+  temperature: 0.1
+  max_tokens: 1024
+  timeout: 180

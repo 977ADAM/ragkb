@@ -1,0 +1,61 @@
+# Полностью локальный контур: Ollama + RAG-сервис. Наружу ничего не уходит.
+#
+#   docker compose up -d
+#   docker compose exec ollama ollama pull bge-m3
+#   docker compose exec ollama ollama pull qwen2.5:7b-instruct
+#   docker compose exec rag ragkb index
+#
+# Затем открыть http://localhost:8000
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_models:/root/.ollama
+    ports:
+      - "11434:11434"
+    # Раскомментируйте при наличии GPU NVIDIA:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  rag:
+    build: .
+    depends_on:
+      - ollama
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data/docs:/app/data/docs:ro    # документы монтируются только на чтение
+      - rag_index:/app/data/index
+    environment:
+      RAGKB_EMBEDDING_BACKEND: ollama
+      RAGKB_EMBEDDING_MODEL: bge-m3
+      RAGKB_EMBEDDING_URL: http://ollama:11434
+      RAGKB_LLM_BACKEND: ollama
+      RAGKB_LLM_MODEL: qwen2.5:7b-instruct
+      RAGKB_LLM_URL: http://ollama:11434
+      # Chroma во встроенном режиме: база лежит в томе rag_index,
+      # отдельный сервис не нужен. Чтобы вынести её в свой контейнер —
+      # раскомментируйте сервис chroma ниже и эту переменную.
+      RAGKB_STORE_BACKEND: chroma
+      # RAGKB_CHROMA_HOST: chroma
+    command: ragkb serve --host 0.0.0.0 --port 8000
+
+  # Отдельный сервер Chroma нужен, только если к базе обращается несколько
+  # приложений или её администрируют отдельно от RAG-сервиса.
+  # chroma:
+  #   image: chromadb/chroma:latest
+  #   volumes:
+  #     - chroma_data:/data
+  #   ports:
+  #     - "8001:8000"
+
+volumes:
+  ollama_models:
+  rag_index:
+  # chroma_data:
