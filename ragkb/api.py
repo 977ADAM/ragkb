@@ -49,11 +49,17 @@ def create_app(cfg: Config) -> FastAPI:
         return state["pipeline"]
 
     @app.get("/health")
-    def health() -> dict[str, Any]:
+    def health(user: User | None = Depends(optional_user)) -> dict[str, Any]:
+        # Без аутентификации отдаём только статус: HEALTHCHECK должен работать,
+        # но состав индекса, имя эмбеддера и пути наружу не уходят.
         try:
-            return {"status": "ok", **pipeline().stats()}
+            stats = pipeline().stats()
         except HTTPException as exc:
-            return {"status": "no_index", "detail": exc.detail}
+            return {"status": "no_index"} if user is None else {
+                "status": "no_index",
+                "detail": exc.detail,
+            }
+        return {"status": "ok"} if user is None else {"status": "ok", **stats}
 
     @app.post("/ask")
     def ask(req: AskRequest, user: User = Depends(current_user)) -> dict[str, Any]:
@@ -81,7 +87,7 @@ def create_app(cfg: Config) -> FastAPI:
         return {"query": req.query, "results": [h.to_dict() for h in hits]}
 
     @app.post("/reindex")
-    def reindex() -> dict[str, Any]:
+    def reindex(user: User = Depends(require_admin)) -> dict[str, Any]:
         report = build_index(cfg)
         state["pipeline"] = None  # индекс изменился — перезагружаем при следующем запросе
         return {

@@ -196,6 +196,32 @@ def test_index_page_open_when_auth_disabled():
     assert _client("disabled").get("/").status_code == 200
 
 
+# --------------------------------------------------- health и reindex
+
+def test_health_open_without_authentication():
+    assert _client().get("/health").status_code == 200
+
+
+def test_health_hides_index_internals_from_anonymous():
+    body = _client().get("/health").json()
+    assert set(body) == {"status"}, body
+
+
+def test_health_status_is_truthful_without_index():
+    assert _client().get("/health").json()["status"] == "no_index"
+
+
+def test_reindex_forbidden_without_admin_group():
+    headers = {"X-Forwarded-Preferred-Username": "ivanov",
+               "X-Forwarded-Groups": "hr"}
+    resp = _client().post("/reindex", headers=headers)
+    assert resp.status_code == 403, resp.status_code
+
+
+def test_reindex_unauthenticated_gives_401():
+    assert _client().post("/reindex").status_code == 401
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
