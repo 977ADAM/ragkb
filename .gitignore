@@ -2,3 +2,14 @@ ragkb.egg-info
 
 .venv
 
+# Артефакты сборки индекса — пересоздаются командой ragkb index
+data/index/
+
+__pycache__/
+*.pyc
+
+.DS_Store
+
+# Секреты развёртывания и сертификаты контура
+.env
+certs/
