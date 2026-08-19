@@ -82,6 +82,22 @@ class LLMConfig:
 
 
 @dataclass
+class AuthConfig:
+    # mode: "proxy" — логин приходит заголовком от oauth2-proxy
+    #       "disabled" — аутентификации нет, всё работает от имени anonymous
+    # По умолчанию закрыто: забытая настройка должна давать отказ,
+    # а не открытый наружу сервис.
+    mode: str = "proxy"
+    # Заголовки семейства X-Forwarded-*, которые oauth2-proxy передаёт наверх
+    # опцией --pass-user-headers. НЕ X-Auth-Request-*: те выставляются
+    # в заголовки ответа для режима nginx auth_request.
+    header: str = "X-Forwarded-Preferred-Username"
+    email_header: str = "X-Forwarded-Email"
+    groups_header: str = "X-Forwarded-Groups"
+    admin_group: str = "ragkb-admins"
+
+
+@dataclass
 class Config:
     # Где лежат исходные документы и где хранится индекс.
     docs_dir: str = "data/docs"
@@ -92,6 +108,7 @@ class Config:
     store: StoreConfig = field(default_factory=StoreConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
+    auth: AuthConfig = field(default_factory=AuthConfig)
 
     @classmethod
     def load(cls, path: str | os.PathLike | None = None) -> "Config":
@@ -114,6 +131,7 @@ class Config:
             "store": StoreConfig,
             "retrieval": RetrievalConfig,
             "llm": LLMConfig,
+            "auth": AuthConfig,
         }
         kwargs: dict[str, Any] = {}
         for key, value in (data or {}).items():
@@ -138,6 +156,9 @@ class Config:
             "RAGKB_LLM_MODEL": ("model", self.llm),
             "RAGKB_LLM_URL": ("base_url", self.llm),
             "RAGKB_LLM_API_KEY": ("api_key", self.llm),
+            "RAGKB_AUTH_MODE": ("mode", self.auth),
+            "RAGKB_AUTH_HEADER": ("header", self.auth),
+            "RAGKB_AUTH_ADMIN_GROUP": ("admin_group", self.auth),
         }
         for env, (attr, target) in mapping.items():
             val = os.environ.get(env)

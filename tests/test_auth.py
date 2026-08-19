@@ -43,6 +43,113 @@ def test_anonymous_name_is_defined():
     assert ANONYMOUS == "anonymous"
 
 
+# --------------------------------------------------- разбор заголовков
+
+from starlette.datastructures import Headers
+
+from ragkb.auth import current_user, optional_user, require_admin, user_from_headers
+from ragkb.config import AuthConfig
+
+
+def _headers(**pairs) -> Headers:
+    return Headers(raw=[(k.lower().replace("_", "-").encode(), v.encode())
+                        for k, v in pairs.items()])
+
+
+def test_user_from_headers_reads_configured_header():
+    headers = Headers(raw=[
+        (b"x-forwarded-preferred-username", b"ivanov"),
+        (b"x-forwarded-email", b"ivanov@example.com"),
+        (b"x-forwarded-groups", b"ragkb-admins,hr"),
+    ])
+    user = user_from_headers(headers, AuthConfig())
+    assert user is not None
+    assert user.name == "ivanov"
+    assert user.email == "ivanov@example.com"
+    assert user.in_group("ragkb-admins")
+
+
+def test_user_from_headers_without_header_returns_none():
+    assert user_from_headers(Headers(raw=[]), AuthConfig()) is None
+
+
+def test_user_from_headers_ignores_blank_name():
+    headers = Headers(raw=[(b"x-forwarded-preferred-username", b"   ")])
+    assert user_from_headers(headers, AuthConfig()) is None
+
+
+def test_user_from_headers_respects_custom_header_name():
+    cfg = AuthConfig(header="X-My-User")
+    headers = Headers(raw=[(b"x-my-user", b"petrov")])
+    user = user_from_headers(headers, cfg)
+    assert user is not None and user.name == "petrov"
+
+
+# ------------------------------------------------------------ зависимости
+
+class _FakeRequest:
+    """Минимальная замена Request: зависимостям нужны только headers и app.state."""
+
+    class _State:
+        def __init__(self, auth): self.auth = auth
+
+    class _App:
+        def __init__(self, auth): self.state = _FakeRequest._State(auth)
+
+    def __init__(self, cfg: AuthConfig, headers: Headers | None = None):
+        self.headers = headers if headers is not None else Headers(raw=[])
+        self.app = _FakeRequest._App(cfg)
+
+
+def test_current_user_raises_401_without_header():
+    from fastapi import HTTPException
+    try:
+        current_user(_FakeRequest(AuthConfig()))
+    except HTTPException as exc:
+        assert exc.status_code == 401
+    else:
+        raise AssertionError("ожидался 401")
+
+
+def test_current_user_returns_anonymous_when_disabled():
+    user = current_user(_FakeRequest(AuthConfig(mode="disabled")))
+    assert user.name == ANONYMOUS
+
+
+def test_optional_user_returns_none_instead_of_raising():
+    assert optional_user(_FakeRequest(AuthConfig())) is None
+
+
+def test_require_admin_raises_403_without_group():
+    from fastapi import HTTPException
+    headers = Headers(raw=[(b"x-forwarded-preferred-username", b"ivanov"),
+                           (b"x-forwarded-groups", b"hr")])
+    try:
+        require_admin(_FakeRequest(AuthConfig(), headers))
+    except HTTPException as exc:
+        assert exc.status_code == 403
+    else:
+        raise AssertionError("ожидался 403")
+
+
+def test_require_admin_passes_with_group():
+    headers = Headers(raw=[(b"x-forwarded-preferred-username", b"ivanov"),
+                           (b"x-forwarded-groups", b"ragkb-admins")])
+    user = require_admin(_FakeRequest(AuthConfig(), headers))
+    assert user.name == "ivanov"
+
+
+def test_auth_config_defaults_to_proxy_mode():
+    assert AuthConfig().mode == "proxy"
+
+
+def test_config_exposes_auth_section():
+    from ragkb.config import Config
+    cfg = Config.from_dict({"auth": {"mode": "disabled", "admin_group": "боссы"}})
+    assert cfg.auth.mode == "disabled"
+    assert cfg.auth.admin_group == "боссы"
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

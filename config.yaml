@@ -56,3 +56,12 @@ llm:
   temperature: 0.1
   max_tokens: 1024
   timeout: 180
+
+auth:
+  # proxy — логин приходит заголовком от oauth2-proxy (боевой режим)
+  # disabled — аутентификации нет, всё работает от имени anonymous
+  mode: proxy
+  header: X-Forwarded-Preferred-Username
+  email_header: X-Forwarded-Email
+  groups_header: X-Forwarded-Groups
+  admin_group: ragkb-admins
