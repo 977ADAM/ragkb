@@ -22,7 +22,7 @@ from typing import Any, Iterator
 
 # Версия схемы, которую понимает этот код. Хранится в PRAGMA user_version —
 # отдельная таблица миграций не нужна, хватает номера и лестницы обновлений.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -51,6 +51,13 @@ CREATE TABLE IF NOT EXISTS cleanup_state (
 );
 INSERT OR IGNORE INTO cleanup_state (id, last_run)
 VALUES (1, '1970-01-01T00:00:00+00:00');
+"""
+
+# v2: индекс по updated_at — уборка (задача 3) фильтрует по этому полю
+# без фильтра по владельцу, поэтому составной idx_conv_user(user, updated_at)
+# ей не помогает и запрос уходит в полное сканирование таблицы.
+_SCHEMA_V2 = """
+CREATE INDEX IF NOT EXISTS idx_conv_updated ON conversations(updated_at);
 """
 
 
@@ -82,7 +89,13 @@ def connect(path: str | Path) -> Iterator[sqlite3.Connection]:
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
-    """Создаёт схему и проставляет версию. Безопасно вызывать повторно."""
+    """Создаёт схему и проставляет версию. Безопасно вызывать повторно.
+
+    Лестница миграций: каждая ступень поднимает user_version до своего
+    номера, а не сразу до SCHEMA_VERSION. Так база, застрявшая на
+    промежуточной версии, докатывается по ступеням, и версию всегда
+    проставляет последняя фактически применённая ступень.
+    """
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version > SCHEMA_VERSION:
         raise RuntimeError(
@@ -93,8 +106,11 @@ def init_schema(conn: sqlite3.Connection) -> None:
         )
     if version < 1:
         conn.executescript(_SCHEMA_V1)
-        # PRAGMA не принимает параметры подстановки; SCHEMA_VERSION — константа.
-        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        # PRAGMA не принимает параметры подстановки; используем литерал ступени.
+        conn.execute("PRAGMA user_version = 1")
+    if version < 2:
+        conn.executescript(_SCHEMA_V2)
+        conn.execute("PRAGMA user_version = 2")
 
 
 # Заголовок диалога — обрезанный первый вопрос. Без обращения к модели:

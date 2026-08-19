@@ -355,7 +355,22 @@ def test_cleanup_is_limited_by_batch():
     assert len(store.list_conversations("ivanov")) == 3
 
 
-def test_concurrent_cleanup_runs_once():
+def test_concurrent_cleanup_claims_marker_once():
+    """Различает атомарный гейт от наивного «прочитал — сравнил — записал».
+
+    Простое сравнение сумм удалённого тут не различающее: DELETE идемпотентен
+    по предикату, и кто бы ни выполнил его вторым, подходящих строк уже не
+    останется, а сумма всё равно сойдётся к числу изначально просроченных.
+    SQLite к тому же сериализует писателей на уровне файла независимо от
+    того, как устроен гейт в Python, поэтому гонка по времени не проявляется.
+
+    Решающая проверка — сколько диалогов осталось после ОБОИХ потоков, при
+    batch меньше числа просроченных:
+      - атомарный гейт: гейт проходит ровно один вызов и удаляет партию
+        в 2 из 4 — остаётся 2;
+      - наивный гейт: оба потока видят просроченную отметку и оба проходят
+        гейт, каждый удаляет свою партию по 2 — не остаётся ничего.
+    """
     store = HistoryStore(_fresh_db(), retention_days=30)
     stale = (utcnow() - timedelta(days=60)).isoformat()
     for _ in range(4):
@@ -367,7 +382,7 @@ def test_concurrent_cleanup_runs_once():
     lock = threading.Lock()
 
     def run():
-        removed = store.cleanup()
+        removed = store.cleanup(batch=2)
         with lock:
             results.append(removed)
 
@@ -376,8 +391,10 @@ def test_concurrent_cleanup_runs_once():
         t.start()
     for t in threads:
         t.join()
-    # Отметка обновляется атомарно: уборку выполняет ровно один из двух.
-    assert sorted(results) == [0, 4], results
+    # Гейт прошёл ровно один поток: партия — 2 из 4, а не все 4.
+    assert len(store.list_conversations("ivanov")) == 2
+    # Суммарно удалено ровно столько, сколько удалил победитель гонки.
+    assert sum(results) == 2
 
 
 if __name__ == "__main__":
