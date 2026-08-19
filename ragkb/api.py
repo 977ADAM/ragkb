@@ -150,6 +150,7 @@ UI_HTML = """<!DOCTYPE html>
 <div class="wrap">
   <h1>База знаний</h1>
   <div class="sub" id="status">загрузка…</div>
+  <div class="sub"><a href="/oauth2/sign_out" id="signout">выйти</a></div>
   <form id="f">
     <input type="text" id="q" placeholder="Задайте вопрос по документам…" autocomplete="off" autofocus>
     <button type="submit" id="btn">Спросить</button>
