@@ -36,6 +36,12 @@ services:
     volumes:
       - ./data/docs:/app/data/docs:ro    # документы монтируются только на чтение
       - rag_index:/app/data/index
+      # База диалогов хранит персональные данные (журнал вопросов
+      # сотрудников) и требует резервного копирования — в отличие от
+      # rag_index, который в любой момент пересобирается командой
+      # `ragkb index`. WAL заводит рядом файлы -wal/-shm, поэтому монтируем
+      # каталог целиком, а не отдельный файл базы.
+      - rag_history:/app/data/history
     environment:
       RAGKB_EMBEDDING_BACKEND: ollama
       RAGKB_EMBEDDING_MODEL: bge-m3
@@ -43,6 +49,9 @@ services:
       RAGKB_LLM_BACKEND: ollama
       RAGKB_LLM_MODEL: qwen2.5:7b-instruct
       RAGKB_LLM_URL: http://ollama:11434
+      # Без этого база истории попала бы в записываемый слой контейнера
+      # и молча терялась бы при каждом пересоздании сервиса.
+      RAGKB_HISTORY_PATH: /app/data/history/history.sqlite3
       # Chroma во встроенном режиме: база лежит в томе rag_index,
       # отдельный сервис не нужен. Чтобы вынести её в свой контейнер —
       # раскомментируйте сервис chroma ниже и эту переменную.
@@ -154,5 +163,6 @@ services:
 volumes:
   ollama_models:
   rag_index:
+  rag_history:
   # chroma_data:
   keycloak_db:

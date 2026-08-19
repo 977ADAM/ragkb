@@ -11,6 +11,7 @@ SQLite из стандартной библиотеки: новых зависи
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import uuid
@@ -71,6 +72,18 @@ def connect(path: str | Path) -> Iterator[sqlite3.Connection]:
     """Соединение на одну операцию, с обязательными настройками SQLite."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Файл создаём заранее и с правами 0o600 ДО того, как sqlite3.connect
+    # его откроет: база хранит журнал вопросов сотрудников, читать его
+    # любому пользователю хоста (права по умолчанию 0o644) нельзя.
+    # os.chmod на несуществующем файле упал бы, поэтому создаём его сами
+    # через os.open с нужным режимом (учитывает umask, как и обычное
+    # создание файла) — и только если файла ещё нет: на каждое соединение
+    # выставлять права незачем.
+    if not path.exists():
+        try:
+            os.close(os.open(str(path), os.O_CREAT | os.O_EXCL, 0o600))
+        except FileExistsError:
+            pass  # соединение другого потока уже создало файл — гонка безвредна
     conn = sqlite3.connect(str(path), timeout=5)
     try:
         # Внешние ключи в SQLite выключены по умолчанию, а внутри транзакции
@@ -224,17 +237,27 @@ class HistoryStore:
             ).fetchone()
         return row is not None
 
-    def list_conversations(self, user: str, limit: int = 50) -> list[Conversation]:
+    def list_conversations(
+        self, user: str, limit: int = 50, offset: int = 0
+    ) -> list[Conversation]:
         with connect(self.path) as conn:
             rows = conn.execute(
                 "SELECT id, title, created_at, updated_at FROM conversations"
-                " WHERE user = ? ORDER BY updated_at DESC LIMIT ?",
-                (user, limit),
+                " WHERE user = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+                (user, limit, offset),
             ).fetchall()
         return [
             Conversation(r["id"], r["title"], r["created_at"], r["updated_at"])
             for r in rows
         ]
+
+    def count_conversations(self, user: str) -> int:
+        """Общее число диалогов пользователя — для пагинации на клиенте."""
+        with connect(self.path) as conn:
+            row = conn.execute(
+                "SELECT count(*) FROM conversations WHERE user = ?", (user,)
+            ).fetchone()
+        return row[0]
 
     def get_messages(self, conversation_id: str, user: str) -> list[Message] | None:
         """Сообщения диалога. None — диалога нет или он чужой."""
@@ -267,19 +290,38 @@ class HistoryStore:
 
         Незавершённая пара (вопрос без ответа) отбрасывается: подавать её
         в переформулировку нечем.
+
+        Поднимает только хвост диалога, а не всю историю: пар нужно
+        `window`, значит с запасом на незавершённую пару в конце хватает
+        `window * 2 + 1` последних сообщений — `ORDER BY id DESC LIMIT ?`
+        с разворотом обратно в хронологический порядок. На диалоге в
+        сотни сообщений это отличие на каждый /ask по длинному диалогу.
+        `sources_json` для склейки пар не нужен вовсе, поэтому не читаем
+        и не парсим его тут (в отличие от get_messages).
         """
-        messages = self.get_messages(conversation_id, user)
-        if not messages:
+        if window <= 0:
             return []
+        with connect(self.path) as conn:
+            owner = conn.execute(
+                "SELECT 1 FROM conversations WHERE id = ? AND user = ?",
+                (conversation_id, user),
+            ).fetchone()
+            if owner is None:
+                return []
+            rows = conn.execute(
+                "SELECT role, text FROM messages WHERE conversation_id = ?"
+                " ORDER BY id DESC LIMIT ?",
+                (conversation_id, window * 2 + 1),
+            ).fetchall()
         turns: list[tuple[str, str]] = []
         pending: str | None = None
-        for message in messages:
-            if message.role == "user":
-                pending = message.text
+        for row in reversed(rows):
+            if row["role"] == "user":
+                pending = row["text"]
             elif pending is not None:
-                turns.append((pending, message.text))
+                turns.append((pending, row["text"]))
                 pending = None
-        return turns[-window:] if window > 0 else []
+        return turns[-window:]
 
     # ------------------------------------------------------------ удаление
 
@@ -310,7 +352,11 @@ class HistoryStore:
 
         Удаление идёт порциями: после долгого простоя просроченного может
         накопиться много, а уборка выполняется внутри запроса пользователя.
-        Остаток уберётся на следующем срабатывании.
+        Если за одну порцию удалено ровно `batch` записей, значит просроченное
+        кончилось не всё — отметка немедленно возвращается в прошлое, чтобы
+        следующий же запрос продолжил уборку, не дожидаясь суток. Остаток,
+        который не уместился в порцию, убирается на следующем запросе, а не
+        через сутки.
         """
         now = now or utcnow()
         due_before = (now - timedelta(days=self.CLEANUP_INTERVAL_DAYS)).isoformat()
@@ -330,4 +376,12 @@ class HistoryStore:
                 " SELECT id FROM conversations WHERE updated_at < ? LIMIT ?)",
                 (expired_before, batch),
             )
+            if removed.rowcount == batch:
+                # Порция выбрана целиком — просроченных, скорее всего, ещё
+                # много. Суточный гейт не должен ждать: откатываем отметку,
+                # чтобы следующий запрос сразу же продолжил уборку.
+                conn.execute(
+                    "UPDATE cleanup_state SET last_run = ? WHERE id = 1",
+                    ("1970-01-01T00:00:00+00:00",),
+                )
         return removed.rowcount

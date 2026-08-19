@@ -123,7 +123,7 @@ def test_utcnow_is_timezone_aware():
 # ------------------------------------------------------------- хранилище
 
 from ragkb.config import HistoryConfig
-from ragkb.history import Conversation, HistoryStore, Message, make_title
+from ragkb.history import HistoryStore, make_title
 
 
 def _store() -> HistoryStore:
@@ -142,6 +142,39 @@ def test_config_exposes_history_section():
     cfg = Config.from_dict({"history": {"retention_days": 7, "window": 5}})
     assert cfg.history.retention_days == 7
     assert cfg.history.window == 5
+
+
+def test_condense_uses_configured_window_not_hardcoded_three():
+    """history.window должен реально доходить до _condense.
+
+    Строим RAGPipeline в обход __init__ (он поднимает индекс, эмбеддер и
+    LLM — тут нужен только self.cfg и self.llm): _condense использует
+    только их. При хардкоде history[-3:] этот тест провалился бы, потому
+    что в промпт попали бы все три пары, включая самую старую.
+    """
+    from ragkb.config import Config
+    from ragkb.pipeline import RAGPipeline
+
+    cfg = Config()
+    cfg.history.window = 1
+
+    captured: dict[str, str] = {}
+
+    class FakeLLM:
+        def generate(self, system: str, prompt: str) -> str:
+            captured["prompt"] = prompt
+            return "переформулировано"
+
+    pipeline = object.__new__(RAGPipeline)
+    pipeline.cfg = cfg
+    pipeline.llm = FakeLLM()
+
+    history = [("вопрос1", "ответ1"), ("вопрос2", "ответ2"), ("вопрос3", "ответ3")]
+    pipeline._condense("новый вопрос", history)
+
+    assert "вопрос1" not in captured["prompt"]
+    assert "вопрос2" not in captured["prompt"]
+    assert "вопрос3" in captured["prompt"]
 
 
 def test_make_title_truncates_long_question():
@@ -358,18 +391,34 @@ def test_cleanup_is_limited_by_batch():
 def test_concurrent_cleanup_claims_marker_once():
     """Различает атомарный гейт от наивного «прочитал — сравнил — записал».
 
-    Простое сравнение сумм удалённого тут не различающее: DELETE идемпотентен
-    по предикату, и кто бы ни выполнил его вторым, подходящих строк уже не
-    останется, а сумма всё равно сойдётся к числу изначально просроченных.
-    SQLite к тому же сериализует писателей на уровне файла независимо от
-    того, как устроен гейт в Python, поэтому гонка по времени не проявляется.
+    ВАЖНО про эту версию теста: раньше тут сравнивались итоговые суммы
+    удалённого и то, сколько диалогов осталось после двух конкурентных
+    cleanup(). После задачи 4 (доубор остатка: если удалена ровно целая
+    партия, отметка сама переоткрывает гейт) это сравнение перестало
+    что-либо различать — я проверил это explicitly, подставив заведомо
+    наивную (нерасширенную WHERE) реализацию гейта: при любом batch
+    результат («сколько осталось», «сумма удалённого по потокам») у
+    наивной и атомарной реализаций совпадает один в один, потому что
+    DELETE идемпотентен по предикату, а finding 4 намеренно допускает
+    второй проход, когда первый выбрал партию целиком, — то же самое
+    внешне делает и баг с гонкой. Иными словами, сравнением итогов
+    отличить гейт с багом от гейта без бага в этой версии кода уже
+    нельзя ни при каком batch.
 
-    Решающая проверка — сколько диалогов осталось после ОБОИХ потоков, при
-    batch меньше числа просроченных:
-      - атомарный гейт: гейт проходит ровно один вызов и удаляет партию
-        в 2 из 4 — остаётся 2;
-      - наивный гейт: оба потока видят просроченную отметку и оба проходят
-        гейт, каждый удаляет свою партию по 2 — не остаётся ничего.
+    Поэтому здесь проверяется не итог, а факт: сколько раз реально
+    выполнился DELETE FROM conversations — через подмену sqlite3.connect
+    на фабрику соединений, считающую такие вызовы. batch заведомо больше
+    числа просроченных (не зацепляет доборку остатка задачи 4: у неё
+    removed == batch не наступает, потому что удалить получается меньше
+    целой партии):
+      - атомарный гейт: claim (UPDATE ... WHERE last_run < ?) успевает
+        ровно у одного потока — только он и выполняет DELETE, второй
+        получает отказ гейта и возвращается, не долетев до DELETE;
+      - наивный гейт (SELECT, потом безусловная запись): оба потока
+        успевают прочитать просроченную отметку до того, как её обновит
+        другой, и оба выполняют DELETE — раз ни на что не влияет
+        (данные уже мог забрать первый), но статистика вызовов ловит
+        именно это: DELETE выполнился бы дважды, а не один раз.
     """
     store = HistoryStore(_fresh_db(), retention_days=30)
     stale = (utcnow() - timedelta(days=60)).isoformat()
@@ -378,23 +427,60 @@ def test_concurrent_cleanup_claims_marker_once():
         with connect(store.path) as conn:
             conn.execute("UPDATE conversations SET updated_at = ? WHERE id = ?",
                          (stale, cid))
-    results: list[int] = []
+
+    delete_calls: list[int] = []
     lock = threading.Lock()
 
-    def run():
-        removed = store.cleanup(batch=2)
-        with lock:
-            results.append(removed)
+    class _CountingConnection(sqlite3.Connection):
+        def execute(self, sql, *args, **kwargs):
+            if isinstance(sql, str) and sql.strip().startswith("DELETE FROM conversations"):
+                with lock:
+                    delete_calls.append(1)
+            return super().execute(sql, *args, **kwargs)
 
-    threads = [threading.Thread(target=run) for _ in range(2)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    # Гейт прошёл ровно один поток: партия — 2 из 4, а не все 4.
-    assert len(store.list_conversations("ivanov")) == 2
-    # Суммарно удалено ровно столько, сколько удалил победитель гонки.
-    assert sum(results) == 2
+    original_connect = sqlite3.connect
+
+    def counting_connect(*args, **kwargs):
+        kwargs.setdefault("factory", _CountingConnection)
+        return original_connect(*args, **kwargs)
+
+    def run():
+        store.cleanup(batch=10)
+
+    sqlite3.connect = counting_connect
+    try:
+        threads = [threading.Thread(target=run) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    finally:
+        sqlite3.connect = original_connect
+
+    # DELETE выполнился ровно у победителя гонки за гейт — не у обоих потоков.
+    assert len(delete_calls) == 1, delete_calls
+    assert len(store.list_conversations("ivanov")) == 0
+
+
+def test_cleanup_drains_remainder_without_waiting_a_day():
+    """Если удалена ровно целая партия, отметка сразу возвращается в прошлое.
+
+    При пяти просроченных и batch=2 два вызова подряд должны удалить
+    по 2 (а не 2 и 0, как было бы при суточном гейте, не различающем
+    «партия кончилась» от «просроченного не осталось»). Третий вызов
+    добирает оставшийся один диалог.
+    """
+    store = HistoryStore(_fresh_db(), retention_days=30)
+    stale = (utcnow() - timedelta(days=60)).isoformat()
+    for _ in range(5):
+        cid = store.create_conversation("ivanov", "Старый")
+        with connect(store.path) as conn:
+            conn.execute("UPDATE conversations SET updated_at = ? WHERE id = ?",
+                         (stale, cid))
+    assert store.cleanup(batch=2) == 2
+    assert store.cleanup(batch=2) == 2
+    assert store.cleanup(batch=2) == 1
+    assert store.list_conversations("ivanov") == []
 
 
 # --------------------------------------------------------- /ask и диалоги
@@ -464,13 +550,80 @@ def test_failed_pipeline_leaves_no_empty_conversation():
     assert store.list_conversations("anonymous") == []
 
 
+def _working_ask_client(tmp: Path):
+    """Клиент с настоящим (маленьким) индексом — /ask должен ответить 200.
+
+    В отличие от _app_client, тут пайплайн реально отвечает: нужен, чтобы
+    проверить поведение после получения ответа — что запись в историю
+    не роняет уже посчитанный ответ.
+    """
+    from fastapi.testclient import TestClient
+
+    from ragkb.api import create_app
+    from ragkb.config import Config
+    from ragkb.pipeline import build_index
+
+    docs = tmp / "docs"
+    docs.mkdir()
+    (docs / "policy.md").write_text(
+        "# Политика\n\n## Отпуск\n\nЕжегодный отпуск составляет 28"
+        " календарных дней [1].\n",
+        encoding="utf-8",
+    )
+    cfg = Config(docs_dir=str(docs), index_dir=str(tmp / "index"))
+    cfg.store.backend = "numpy"
+    cfg.auth.mode = "disabled"
+    cfg.history.enabled = True
+    cfg.history.path = str(tmp / "history.sqlite3")
+    build_index(cfg)
+    return TestClient(create_app(cfg), raise_server_exceptions=False)
+
+
+def test_ask_response_warns_when_append_returns_false():
+    """append() вернул False (диалог исчез между owns() и записью) —
+    ответ пользователя не должен теряться, но предупреждение обязано быть."""
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-ask-warn-"))
+    client = _working_ask_client(tmp)
+    original = HistoryStore.append
+    HistoryStore.append = lambda self, *a, **k: False
+    try:
+        resp = client.post("/ask", json={"question": "сколько дней отпуска?"})
+    finally:
+        HistoryStore.append = original
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["conversation_id"]
+    assert any("не сохранён" in w for w in body["warnings"])
+
+
+def test_ask_response_warns_when_append_raises():
+    """append() бросил исключение (истёк таймаут блокировки SQLite) —
+    дорого посчитанный ответ всё равно должен дойти до клиента."""
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-ask-warn-"))
+    client = _working_ask_client(tmp)
+
+    def _boom(self, *a, **k):
+        raise sqlite3.OperationalError("database is locked")
+
+    original = HistoryStore.append
+    HistoryStore.append = _boom
+    try:
+        resp = client.post("/ask", json={"question": "сколько дней отпуска?"})
+    finally:
+        HistoryStore.append = original
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "28" in body["answer"]
+    assert any("не сохранён" in w for w in body["warnings"])
+
+
 # ------------------------------------------------- эндпоинты /conversations
 
 def test_conversations_list_is_empty_at_start():
     tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
     resp = _app_client(tmp).get("/conversations")
     assert resp.status_code == 200
-    assert resp.json() == {"conversations": []}
+    assert resp.json() == {"conversations": [], "total": 0}
 
 
 def test_conversations_list_shows_own_only():
@@ -481,6 +634,40 @@ def test_conversations_list_shows_own_only():
     store.create_conversation("petrov", "Чужой")
     titles = [c["title"] for c in client.get("/conversations").json()["conversations"]]
     assert titles == ["Мой"]
+
+
+def test_conversations_list_reports_total_beyond_default_limit():
+    """У пользователя с 60 диалогами 51-й и далее должны быть достижимы."""
+    store = HistoryStore(_fresh_db())
+    for i in range(60):
+        store.create_conversation("ivanov", f"Диалог {i}")
+    assert store.count_conversations("ivanov") == 60
+    assert len(store.list_conversations("ivanov")) == 50  # значение по умолчанию
+    rest = store.list_conversations("ivanov", limit=50, offset=50)
+    assert len(rest) == 10
+
+
+def test_conversations_endpoint_exposes_limit_offset_and_total():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    client = _app_client(tmp)
+    store = HistoryStore(tmp / "history.sqlite3")
+    for i in range(60):
+        store.create_conversation("anonymous", f"Диалог {i}")
+    body = client.get("/conversations").json()
+    assert body["total"] == 60
+    assert len(body["conversations"]) == 50
+
+    page2 = client.get("/conversations", params={"limit": 50, "offset": 50}).json()
+    assert page2["total"] == 60
+    assert len(page2["conversations"]) == 10
+
+
+def test_conversations_endpoint_rejects_limit_out_of_range():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    client = _app_client(tmp)
+    assert client.get("/conversations", params={"limit": 501}).status_code == 422
+    assert client.get("/conversations", params={"limit": 0}).status_code == 422
+    assert client.get("/conversations", params={"offset": -1}).status_code == 422
 
 
 def test_conversation_messages_are_returned():
@@ -515,7 +702,7 @@ def test_delete_own_conversation():
     store = HistoryStore(tmp / "history.sqlite3")
     cid = store.create_conversation("anonymous", "Отпуск")
     assert client.delete(f"/conversations/{cid}").status_code == 200
-    assert client.get("/conversations").json() == {"conversations": []}
+    assert client.get("/conversations").json() == {"conversations": [], "total": 0}
 
 
 def test_delete_foreign_conversation_gives_404():

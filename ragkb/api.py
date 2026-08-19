@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -66,10 +66,6 @@ def create_app(cfg: Config) -> FastAPI:
         else None
     )
 
-    def history() -> HistoryStore | None:
-        """Хранилище диалогов. None — история выключена настройкой."""
-        return history_store
-
     def known_sources() -> set[str] | None:
         """Пути документов, которые сейчас есть в индексе.
 
@@ -113,7 +109,7 @@ def create_app(cfg: Config) -> FastAPI:
 
     @app.post("/ask")
     def ask(req: AskRequest, user: User = Depends(current_user)) -> dict[str, Any]:
-        store = history()
+        store = history_store
         conversation_id = req.conversation_id
         turns: list[tuple[str, str]] | None = [tuple(h) for h in req.history] or None
 
@@ -132,6 +128,8 @@ def create_app(cfg: Config) -> FastAPI:
             req.question, top_k=req.top_k, history=turns, expand=req.expand
         )
 
+        data = answer.to_dict()
+
         if store is not None:
             # Диалог заводим только после успешного ответа пайплайна: иначе
             # при ошибке генерации (нет индекса, недоступна LLM и т.п.) в базе
@@ -142,13 +140,30 @@ def create_app(cfg: Config) -> FastAPI:
                 conversation_id = store.create_conversation(
                     user.name, make_title(req.question)
                 )
-            store.append(conversation_id, user.name, "user", req.question)
-            store.append(
-                conversation_id, user.name, "assistant",
-                answer.text, answer.used_sources,
-            )
+            # Ответ уже получен и стоил дорого (обращение к модели) —
+            # отдать его пользователю важнее, чем сохранить в историю.
+            # Поэтому запись не должна ронять запрос: ни отказ (False —
+            # диалог исчез между owns() и записью, например его убрала
+            # cleanup() соседнего запроса), ни исключение (истёк таймаут
+            # блокировки SQLite) не должны стоить пользователю 500-й ошибки
+            # после того, как ответ уже посчитан.
+            try:
+                saved_question = store.append(
+                    conversation_id, user.name, "user", req.question
+                )
+                saved_answer = store.append(
+                    conversation_id, user.name, "assistant",
+                    answer.text, answer.used_sources,
+                )
+                if not (saved_question and saved_answer):
+                    data["warnings"].append(
+                        "Ответ не сохранён в историю диалога"
+                    )
+            except Exception:
+                data["warnings"].append(
+                    "Ответ не сохранён в историю диалога"
+                )
 
-        data = answer.to_dict()
         data["conversation_id"] = conversation_id
         return data
 
@@ -168,16 +183,24 @@ def create_app(cfg: Config) -> FastAPI:
         return {"query": req.query, "results": [h.to_dict() for h in hits]}
 
     def require_history() -> HistoryStore:
-        store = history()
+        store = history_store
         if store is None:
             raise HTTPException(status_code=404, detail="История диалогов выключена")
         return store
 
     @app.get("/conversations")
-    def list_conversations(user: User = Depends(current_user)) -> dict[str, Any]:
+    def list_conversations(
+        user: User = Depends(current_user),
+        limit: int = Query(50, ge=1, le=500),
+        offset: int = Query(0, ge=0),
+    ) -> dict[str, Any]:
         store = require_history()
         return {
-            "conversations": [c.to_dict() for c in store.list_conversations(user.name)]
+            "conversations": [
+                c.to_dict()
+                for c in store.list_conversations(user.name, limit=limit, offset=offset)
+            ],
+            "total": store.count_conversations(user.name),
         }
 
     @app.get("/conversations/{conversation_id}")
