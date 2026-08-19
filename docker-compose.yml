@@ -27,8 +27,6 @@ services:
     build: .
     depends_on:
       - ollama
-    ports:
-      - "8000:8000"
     volumes:
       - ./data/docs:/app/data/docs:ro    # документы монтируются только на чтение
       - rag_index:/app/data/index
@@ -55,7 +53,67 @@ services:
   #   ports:
   #     - "8001:8000"
 
+  mariadb:
+    image: mariadb:11.8
+    environment:
+      MARIADB_DATABASE: keycloak
+      MARIADB_USER: keycloak
+      MARIADB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+    volumes:
+      - keycloak_db:/var/lib/mysql
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    depends_on:
+      - mariadb
+    command: start --optimized
+    environment:
+      KC_DB: mariadb
+      KC_DB_URL: jdbc:mariadb://mariadb:3306/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME}
+      KC_HTTPS_CERTIFICATE_FILE: /certs/tls.crt
+      KC_HTTPS_CERTIFICATE_KEY_FILE: /certs/tls.key
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+    volumes:
+      - ./certs:/certs:ro
+
+  proxy:
+    # Версия закреплена: CVE-2026-40575 (обход аутентификации подделкой
+    # X-Forwarded-Uri) затрагивает 7.5.0–7.15.1.
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.2
+    depends_on:
+      - keycloak
+      - rag
+    ports:
+      - "443:4180"
+    volumes:
+      - ./certs:/certs:ro
+    command:
+      - --provider=keycloak-oidc
+      - --oidc-issuer-url=${KEYCLOAK_ISSUER_URL}
+      - --client-id=ragkb
+      - --client-secret=${OAUTH2_CLIENT_SECRET}
+      - --cookie-secret=${OAUTH2_COOKIE_SECRET}
+      - --cookie-secure=true
+      - --email-domain=*
+      - --http-address=
+      - --https-address=0.0.0.0:4180
+      - --tls-cert-file=/certs/tls.crt
+      - --tls-key-file=/certs/tls.key
+      - --upstream=http://rag:8000
+      - --redirect-url=${OAUTH2_REDIRECT_URL}
+      - --reverse-proxy=true
+      - --trusted-proxy-ip=${TRUSTED_PROXY_IP}
+      - --allowed-group=/ragkb-users
+      - --pass-user-headers=true
+      - --skip-auth-strip-headers=true
+
 volumes:
   ollama_models:
   rag_index:
   # chroma_data:
+  keycloak_db:
