@@ -16,7 +16,7 @@ import sqlite3
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -274,3 +274,44 @@ class HistoryStore:
                 (conversation_id, user),
             )
         return cur.rowcount > 0
+
+    # -------------------------------------------------------------- уборка
+
+    # Не чаще раза в сутки: уборка идёт внутри пользовательского запроса.
+    CLEANUP_INTERVAL_DAYS = 1
+
+    def cleanup(self, now: datetime | None = None, batch: int = 500) -> int:
+        """Удаляет просроченные диалоги. Возвращает число удалённых.
+
+        Планировщика нет: при расчётной нагрузке в сотню запросов в день
+        проверка в начале запроса срабатывает регулярно, а кода на порядок
+        меньше, чем у фоновой задачи с её жизненным циклом и падениями.
+
+        Отметка обновляется атомарно. Наивная последовательность «прочитал,
+        сравнил, записал» в многопоточном обработчике дала бы гонку: два
+        запроса после суток простоя оба увидели бы просроченную отметку
+        и оба запустили бы удаление.
+
+        Удаление идёт порциями: после долгого простоя просроченного может
+        накопиться много, а уборка выполняется внутри запроса пользователя.
+        Остаток уберётся на следующем срабатывании.
+        """
+        now = now or utcnow()
+        due_before = (now - timedelta(days=self.CLEANUP_INTERVAL_DAYS)).isoformat()
+        expired_before = (now - timedelta(days=self.retention_days)).isoformat()
+        with connect(self.path) as conn:
+            claimed = conn.execute(
+                "UPDATE cleanup_state SET last_run = ?"
+                " WHERE id = 1 AND last_run < ?",
+                (now.isoformat(), due_before),
+            )
+            if claimed.rowcount == 0:
+                return 0
+            # DELETE ... LIMIT собран не во всех сборках SQLite,
+            # поэтому ограничиваем через подзапрос.
+            removed = conn.execute(
+                "DELETE FROM conversations WHERE id IN ("
+                " SELECT id FROM conversations WHERE updated_at < ? LIMIT ?)",
+                (expired_before, batch),
+            )
+        return removed.rowcount

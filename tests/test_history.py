@@ -280,6 +280,106 @@ def test_list_puts_recent_first():
     assert [c.id for c in store.list_conversations("ivanov")] == [new, old]
 
 
+# --------------------------------------------------------------- уборка
+
+import threading
+from datetime import timedelta
+
+
+def test_cleanup_removes_expired():
+    store = HistoryStore(_fresh_db(), retention_days=30)
+    old = store.create_conversation("ivanov", "Старый")
+    with connect(store.path) as conn:
+        conn.execute("UPDATE conversations SET updated_at = ? WHERE id = ?",
+                     ((utcnow() - timedelta(days=60)).isoformat(), old))
+    assert store.cleanup() == 1
+    assert store.list_conversations("ivanov") == []
+
+
+def test_cleanup_keeps_fresh():
+    store = HistoryStore(_fresh_db(), retention_days=30)
+    store.create_conversation("ivanov", "Свежий")
+    assert store.cleanup() == 0
+    assert len(store.list_conversations("ivanov")) == 1
+
+
+def test_cleanup_removes_messages_of_expired():
+    store = HistoryStore(_fresh_db(), retention_days=30)
+    old = store.create_conversation("ivanov", "Старый")
+    store.append(old, "ivanov", "user", "в1")
+    with connect(store.path) as conn:
+        conn.execute("UPDATE conversations SET updated_at = ? WHERE id = ?",
+                     ((utcnow() - timedelta(days=60)).isoformat(), old))
+    store.cleanup()
+    with connect(store.path) as conn:
+        assert conn.execute("SELECT count(*) FROM messages").fetchone()[0] == 0
+
+
+def test_cleanup_does_not_repeat_within_a_day():
+    store = HistoryStore(_fresh_db(), retention_days=30)
+    for _ in range(2):
+        cid = store.create_conversation("ivanov", "Старый")
+        with connect(store.path) as conn:
+            conn.execute("UPDATE conversations SET updated_at = ? WHERE id = ?",
+                         ((utcnow() - timedelta(days=60)).isoformat(), cid))
+    assert store.cleanup() == 2
+    # Второй вызов подряд не должен ничего делать: сутки не прошли.
+    cid = store.create_conversation("ivanov", "Ещё старый")
+    with connect(store.path) as conn:
+        conn.execute("UPDATE conversations SET updated_at = ? WHERE id = ?",
+                     ((utcnow() - timedelta(days=60)).isoformat(), cid))
+    assert store.cleanup() == 0
+    assert len(store.list_conversations("ivanov")) == 1
+
+
+def test_cleanup_runs_again_after_a_day():
+    store = HistoryStore(_fresh_db(), retention_days=30)
+    assert store.cleanup() == 0
+    cid = store.create_conversation("ivanov", "Старый")
+    with connect(store.path) as conn:
+        conn.execute("UPDATE conversations SET updated_at = ? WHERE id = ?",
+                     ((utcnow() - timedelta(days=60)).isoformat(), cid))
+    # Сутки спустя отметка снова просрочена.
+    assert store.cleanup(now=utcnow() + timedelta(days=2)) == 1
+
+
+def test_cleanup_is_limited_by_batch():
+    store = HistoryStore(_fresh_db(), retention_days=30)
+    stale = (utcnow() - timedelta(days=60)).isoformat()
+    for _ in range(5):
+        cid = store.create_conversation("ivanov", "Старый")
+        with connect(store.path) as conn:
+            conn.execute("UPDATE conversations SET updated_at = ? WHERE id = ?",
+                         (stale, cid))
+    assert store.cleanup(batch=2) == 2
+    assert len(store.list_conversations("ivanov")) == 3
+
+
+def test_concurrent_cleanup_runs_once():
+    store = HistoryStore(_fresh_db(), retention_days=30)
+    stale = (utcnow() - timedelta(days=60)).isoformat()
+    for _ in range(4):
+        cid = store.create_conversation("ivanov", "Старый")
+        with connect(store.path) as conn:
+            conn.execute("UPDATE conversations SET updated_at = ? WHERE id = ?",
+                         (stale, cid))
+    results: list[int] = []
+    lock = threading.Lock()
+
+    def run():
+        removed = store.cleanup()
+        with lock:
+            results.append(removed)
+
+    threads = [threading.Thread(target=run) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    # Отметка обновляется атомарно: уборку выполняет ровно один из двух.
+    assert sorted(results) == [0, 4], results
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
