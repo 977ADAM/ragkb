@@ -222,6 +222,12 @@ def test_reindex_unauthenticated_gives_401():
     assert _client().post("/reindex").status_code == 401
 
 
+def test_require_admin_passes_anonymous_when_disabled():
+    # Единственная ветка, где административная проверка молча пропускается.
+    user = require_admin(_FakeRequest(AuthConfig(mode="disabled")))
+    assert user.name == ANONYMOUS
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

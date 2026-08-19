@@ -25,7 +25,11 @@ class SearchRequest(BaseModel):
 
 
 def create_app(cfg: Config) -> FastAPI:
-    app = FastAPI(title="RAG База знаний", version="1.0")
+    # /docs, /redoc, /openapi.json отключены: FastAPI отдаёт их без проверки
+    # аутентификации (зависимости current_user там не участвуют). Снаружи
+    # закрыты прокси, но любой сосед по сети compose иначе прочитал бы полную
+    # схему API без единого заголовка.
+    app = FastAPI(title="RAG База знаний", version="1.0", docs_url=None, redoc_url=None, openapi_url=None)
 
     # Зависимости идентификации читают настройки отсюда.
     app.state.auth = cfg.auth

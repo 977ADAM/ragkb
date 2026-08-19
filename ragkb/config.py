@@ -158,6 +158,8 @@ class Config:
             "RAGKB_LLM_API_KEY": ("api_key", self.llm),
             "RAGKB_AUTH_MODE": ("mode", self.auth),
             "RAGKB_AUTH_HEADER": ("header", self.auth),
+            "RAGKB_AUTH_GROUPS_HEADER": ("groups_header", self.auth),
+            "RAGKB_AUTH_EMAIL_HEADER": ("email_header", self.auth),
             "RAGKB_AUTH_ADMIN_GROUP": ("admin_group", self.auth),
         }
         for env, (attr, target) in mapping.items():
