@@ -70,6 +70,34 @@ def create_app(cfg: Config) -> FastAPI:
         """Хранилище диалогов. None — история выключена настройкой."""
         return history_store
 
+    def known_sources() -> set[str] | None:
+        """Пути документов, которые сейчас есть в индексе.
+
+        None — состав узнать не удалось (индекс не построен или недоступен).
+        Тогда пометку не ставим вовсе: «источник неизвестен» честнее,
+        чем «источника нет».
+        """
+        try:
+            documents = pipeline().store.manifest.get("documents", [])
+        except HTTPException:
+            return None
+        return {d.get("source", "") for d in documents}
+
+    def mark_availability(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Помечает источники, которых больше нет в базе знаний.
+
+        Диалог хранит ссылку на документ, а не его текст. Документ могли
+        удалить из корпуса — тогда интерфейс должен сказать об этом, а не
+        показать пустоту или ошибку.
+        """
+        sources = known_sources()
+        if sources is None:
+            return messages
+        for message in messages:
+            for source in message.get("sources", []):
+                source["available"] = source.get("source") in sources
+        return messages
+
     @app.get("/health")
     def health(user: User | None = Depends(optional_user)) -> dict[str, Any]:
         # Без аутентификации отдаём только статус: HEALTHCHECK должен работать,
@@ -138,6 +166,42 @@ def create_app(cfg: Config) -> FastAPI:
     def search(req: SearchRequest, user: User = Depends(current_user)) -> dict[str, Any]:
         hits = pipeline().search(req.query, top_k=req.top_k)
         return {"query": req.query, "results": [h.to_dict() for h in hits]}
+
+    def require_history() -> HistoryStore:
+        store = history()
+        if store is None:
+            raise HTTPException(status_code=404, detail="История диалогов выключена")
+        return store
+
+    @app.get("/conversations")
+    def list_conversations(user: User = Depends(current_user)) -> dict[str, Any]:
+        store = require_history()
+        return {
+            "conversations": [c.to_dict() for c in store.list_conversations(user.name)]
+        }
+
+    @app.get("/conversations/{conversation_id}")
+    def get_conversation(
+        conversation_id: str, user: User = Depends(current_user)
+    ) -> dict[str, Any]:
+        store = require_history()
+        messages = store.get_messages(conversation_id, user.name)
+        if messages is None:
+            # Чужой и несуществующий неотличимы по ответу.
+            raise HTTPException(status_code=404, detail="Диалог не найден")
+        return {
+            "id": conversation_id,
+            "messages": mark_availability([m.to_dict() for m in messages]),
+        }
+
+    @app.delete("/conversations/{conversation_id}")
+    def delete_conversation(
+        conversation_id: str, user: User = Depends(current_user)
+    ) -> dict[str, Any]:
+        store = require_history()
+        if not store.delete_conversation(conversation_id, user.name):
+            raise HTTPException(status_code=404, detail="Диалог не найден")
+        return {"deleted": True}
 
     @app.post("/reindex")
     def reindex(user: User = Depends(require_admin)) -> dict[str, Any]:

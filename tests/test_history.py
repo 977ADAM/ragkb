@@ -464,6 +464,86 @@ def test_failed_pipeline_leaves_no_empty_conversation():
     assert store.list_conversations("anonymous") == []
 
 
+# ------------------------------------------------- эндпоинты /conversations
+
+def test_conversations_list_is_empty_at_start():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    resp = _app_client(tmp).get("/conversations")
+    assert resp.status_code == 200
+    assert resp.json() == {"conversations": []}
+
+
+def test_conversations_list_shows_own_only():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    client = _app_client(tmp)
+    store = HistoryStore(tmp / "history.sqlite3")
+    store.create_conversation("anonymous", "Мой")
+    store.create_conversation("petrov", "Чужой")
+    titles = [c["title"] for c in client.get("/conversations").json()["conversations"]]
+    assert titles == ["Мой"]
+
+
+def test_conversation_messages_are_returned():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    client = _app_client(tmp)
+    store = HistoryStore(tmp / "history.sqlite3")
+    cid = store.create_conversation("anonymous", "Отпуск")
+    store.append(cid, "anonymous", "user", "Сколько дней?")
+    store.append(cid, "anonymous", "assistant", "28 дней [1].",
+                 [{"n": 1, "citation": "Регламент", "source": "data/docs/нет.md"}])
+    body = client.get(f"/conversations/{cid}").json()
+    assert body["id"] == cid
+    assert [m["role"] for m in body["messages"]] == ["user", "assistant"]
+
+
+def test_foreign_conversation_gives_404():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    client = _app_client(tmp)
+    store = HistoryStore(tmp / "history.sqlite3")
+    foreign = store.create_conversation("petrov", "Чужой")
+    assert client.get(f"/conversations/{foreign}").status_code == 404
+
+
+def test_unknown_conversation_gives_404():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    assert _app_client(tmp).get("/conversations/нет-такого").status_code == 404
+
+
+def test_delete_own_conversation():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    client = _app_client(tmp)
+    store = HistoryStore(tmp / "history.sqlite3")
+    cid = store.create_conversation("anonymous", "Отпуск")
+    assert client.delete(f"/conversations/{cid}").status_code == 200
+    assert client.get("/conversations").json() == {"conversations": []}
+
+
+def test_delete_foreign_conversation_gives_404():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    client = _app_client(tmp)
+    store = HistoryStore(tmp / "history.sqlite3")
+    foreign = store.create_conversation("petrov", "Чужой")
+    assert client.delete(f"/conversations/{foreign}").status_code == 404
+    assert len(store.list_conversations("petrov")) == 1
+
+
+def test_conversations_disabled_history_gives_404():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    assert _app_client(tmp, enabled=False).get("/conversations").status_code == 404
+
+
+def test_missing_source_is_not_marked_available_without_index():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    client = _app_client(tmp)
+    store = HistoryStore(tmp / "history.sqlite3")
+    cid = store.create_conversation("anonymous", "Отпуск")
+    store.append(cid, "anonymous", "assistant", "ответ [1].",
+                 [{"n": 1, "citation": "Регламент", "source": "data/docs/нет.md"}])
+    sources = client.get(f"/conversations/{cid}").json()["messages"][0]["sources"]
+    # Индекса нет — состав неизвестен, поэтому пометку не ставим совсем.
+    assert "available" not in sources[0]
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
