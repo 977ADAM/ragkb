@@ -99,16 +99,21 @@ def create_app(cfg: Config) -> FastAPI:
                 turns = store.recent_turns(
                     conversation_id, user.name, cfg.history.window
                 ) or turns
-            else:
-                conversation_id = store.create_conversation(
-                    user.name, make_title(req.question)
-                )
 
         answer = pipeline().ask(
             req.question, top_k=req.top_k, history=turns, expand=req.expand
         )
 
         if store is not None:
+            # Диалог заводим только после успешного ответа пайплайна: иначе
+            # при ошибке генерации (нет индекса, недоступна LLM и т.п.) в базе
+            # оставался бы диалог без единого сообщения — клиент к тому же
+            # не получил бы conversation_id, ведь исключение обрывает выдачу
+            # JSON, и продолжить или удалить такой диалог было бы нечем.
+            if not conversation_id:
+                conversation_id = store.create_conversation(
+                    user.name, make_title(req.question)
+                )
             store.append(conversation_id, user.name, "user", req.question)
             store.append(
                 conversation_id, user.name, "assistant",

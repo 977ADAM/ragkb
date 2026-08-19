@@ -455,6 +455,15 @@ def test_history_disabled_ignores_conversation_id():
     assert resp.status_code == 503, resp.status_code
 
 
+def test_failed_pipeline_leaves_no_empty_conversation():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    client = _app_client(tmp)
+    # Индекса нет, поэтому пайплайн ответит 503.
+    assert client.post("/ask", json={"question": "тест"}).status_code == 503
+    store = HistoryStore(tmp / "history.sqlite3")
+    assert store.list_conversations("anonymous") == []
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
