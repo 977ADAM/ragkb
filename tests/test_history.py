@@ -120,6 +120,166 @@ def test_utcnow_is_timezone_aware():
     assert utcnow().tzinfo is not None
 
 
+# ------------------------------------------------------------- хранилище
+
+from ragkb.config import HistoryConfig
+from ragkb.history import Conversation, HistoryStore, Message, make_title
+
+
+def _store() -> HistoryStore:
+    return HistoryStore(_fresh_db())
+
+
+def test_history_config_defaults():
+    cfg = HistoryConfig()
+    assert cfg.enabled is True
+    assert cfg.retention_days == 90
+    assert cfg.window == 3
+
+
+def test_config_exposes_history_section():
+    from ragkb.config import Config
+    cfg = Config.from_dict({"history": {"retention_days": 7, "window": 5}})
+    assert cfg.history.retention_days == 7
+    assert cfg.history.window == 5
+
+
+def test_make_title_truncates_long_question():
+    title = make_title("а" * 200)
+    assert len(title) <= 60
+
+
+def test_make_title_keeps_short_question():
+    assert make_title("Сколько дней отпуска?") == "Сколько дней отпуска?"
+
+
+def test_make_title_collapses_whitespace():
+    assert make_title("  Сколько   дней\nотпуска? ") == "Сколько дней отпуска?"
+
+
+def test_create_and_list_conversation():
+    store = _store()
+    cid = store.create_conversation("ivanov", "Отпуск")
+    items = store.list_conversations("ivanov")
+    assert len(items) == 1
+    assert items[0].id == cid
+    assert items[0].title == "Отпуск"
+
+
+def test_conversations_of_other_user_are_invisible():
+    store = _store()
+    store.create_conversation("ivanov", "Отпуск")
+    assert store.list_conversations("petrov") == []
+
+
+def test_owns_is_false_for_other_user():
+    store = _store()
+    cid = store.create_conversation("ivanov", "Отпуск")
+    assert store.owns(cid, "ivanov")
+    assert not store.owns(cid, "petrov")
+
+
+def test_append_and_read_messages():
+    store = _store()
+    cid = store.create_conversation("ivanov", "Отпуск")
+    store.append(cid, "ivanov", "user", "Сколько дней?")
+    store.append(cid, "ivanov", "assistant", "28 календарных дней [1].",
+                 [{"n": 1, "citation": "Регламент", "source": "data/docs/o.md"}])
+    messages = store.get_messages(cid, "ivanov")
+    assert [m.role for m in messages] == ["user", "assistant"]
+    assert messages[1].sources[0]["source"] == "data/docs/o.md"
+
+
+def test_append_to_other_conversation_is_refused():
+    store = _store()
+    cid = store.create_conversation("ivanov", "Отпуск")
+    assert store.append(cid, "petrov", "user", "чужое") is False
+    assert store.get_messages(cid, "ivanov") == []
+
+
+def test_get_messages_of_other_user_returns_none():
+    store = _store()
+    cid = store.create_conversation("ivanov", "Отпуск")
+    store.append(cid, "ivanov", "user", "Сколько дней?")
+    assert store.get_messages(cid, "petrov") is None
+
+
+def test_get_messages_of_unknown_conversation_returns_none():
+    assert _store().get_messages("нет-такого", "ivanov") is None
+
+
+def test_recent_turns_pairs_question_and_answer():
+    store = _store()
+    cid = store.create_conversation("ivanov", "Отпуск")
+    store.append(cid, "ivanov", "user", "в1")
+    store.append(cid, "ivanov", "assistant", "о1")
+    store.append(cid, "ivanov", "user", "в2")
+    store.append(cid, "ivanov", "assistant", "о2")
+    assert store.recent_turns(cid, "ivanov", window=3) == [("в1", "о1"), ("в2", "о2")]
+
+
+def test_recent_turns_respects_window():
+    store = _store()
+    cid = store.create_conversation("ivanov", "Отпуск")
+    for i in range(5):
+        store.append(cid, "ivanov", "user", f"в{i}")
+        store.append(cid, "ivanov", "assistant", f"о{i}")
+    turns = store.recent_turns(cid, "ivanov", window=2)
+    assert turns == [("в3", "о3"), ("в4", "о4")]
+
+
+def test_recent_turns_drops_unanswered_question():
+    store = _store()
+    cid = store.create_conversation("ivanov", "Отпуск")
+    store.append(cid, "ivanov", "user", "в1")
+    store.append(cid, "ivanov", "assistant", "о1")
+    store.append(cid, "ivanov", "user", "без ответа")
+    assert store.recent_turns(cid, "ivanov", window=3) == [("в1", "о1")]
+
+
+def test_recent_turns_for_other_user_is_empty():
+    store = _store()
+    cid = store.create_conversation("ivanov", "Отпуск")
+    store.append(cid, "ivanov", "user", "в1")
+    store.append(cid, "ivanov", "assistant", "о1")
+    assert store.recent_turns(cid, "petrov", window=3) == []
+
+
+def test_delete_removes_conversation_and_messages():
+    store = _store()
+    cid = store.create_conversation("ivanov", "Отпуск")
+    store.append(cid, "ivanov", "user", "в1")
+    assert store.delete_conversation(cid, "ivanov") is True
+    assert store.list_conversations("ivanov") == []
+    assert store.get_messages(cid, "ivanov") is None
+
+
+def test_delete_of_other_user_is_refused():
+    store = _store()
+    cid = store.create_conversation("ivanov", "Отпуск")
+    assert store.delete_conversation(cid, "petrov") is False
+    assert len(store.list_conversations("ivanov")) == 1
+
+
+def test_appending_touches_updated_at():
+    store = _store()
+    cid = store.create_conversation("ivanov", "Отпуск")
+    before = store.list_conversations("ivanov")[0].updated_at
+    store.append(cid, "ivanov", "user", "в1")
+    after = store.list_conversations("ivanov")[0].updated_at
+    assert after >= before
+
+
+def test_list_puts_recent_first():
+    store = _store()
+    old = store.create_conversation("ivanov", "Старый")
+    new = store.create_conversation("ivanov", "Новый")
+    with connect(store.path) as conn:
+        conn.execute("UPDATE conversations SET updated_at = ? WHERE id = ?",
+                     ("2020-01-01T00:00:00+00:00", old))
+    assert [c.id for c in store.list_conversations("ivanov")] == [new, old]
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

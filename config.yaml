@@ -65,3 +65,11 @@ auth:
   email_header: X-Forwarded-Email
   groups_header: X-Forwarded-Groups
   admin_group: ragkb-admins
+
+history:
+  # Хранение переписки. Сервис начинает хранить персональные данные:
+  # журнал вопросов сотрудника есть сведения о нём.
+  enabled: true
+  path: data/history.sqlite3
+  retention_days: 90     # после этого срока диалоги удаляются
+  window: 3              # сколько последних ходов уходит в переформулировку

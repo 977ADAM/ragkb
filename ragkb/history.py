@@ -10,11 +10,15 @@ SQLite из стандартной библиотеки: новых зависи
 """
 from __future__ import annotations
 
+import json
+import re
 import sqlite3
+import uuid
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 # Версия схемы, которую понимает этот код. Хранится в PRAGMA user_version —
 # отдельная таблица миграций не нужна, хватает номера и лестницы обновлений.
@@ -91,3 +95,182 @@ def init_schema(conn: sqlite3.Connection) -> None:
         conn.executescript(_SCHEMA_V1)
         # PRAGMA не принимает параметры подстановки; SCHEMA_VERSION — константа.
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+# Заголовок диалога — обрезанный первый вопрос. Без обращения к модели:
+# так он детерминирован и не зависит от доступности LLM.
+TITLE_LIMIT = 60
+
+
+def make_title(question: str) -> str:
+    title = re.sub(r"\s+", " ", question).strip()
+    return title[:TITLE_LIMIT] if len(title) > TITLE_LIMIT else title
+
+
+@dataclass(frozen=True)
+class Conversation:
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass(frozen=True)
+class Message:
+    role: str
+    text: str
+    created_at: str
+    sources: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "role": self.role,
+            "text": self.text,
+            "created_at": self.created_at,
+            "sources": self.sources,
+        }
+
+
+class HistoryStore:
+    """Диалоги, привязанные к владельцу.
+
+    Владелец — непрозрачная строка, та же, что даёт шов идентификации.
+    Хранилище про способ аутентификации ничего не знает.
+
+    Во всех запросах стоит условие по владельцу: фильтрация живёт в SQL,
+    а не в интерфейсе, поэтому чужой идентификатор, подставленный руками,
+    ничего не возвращает.
+    """
+
+    def __init__(self, path: str | Path, retention_days: int = 90):
+        self.path = Path(path)
+        self.retention_days = retention_days
+        with connect(self.path) as conn:
+            init_schema(conn)
+
+    # ------------------------------------------------------------- запись
+
+    def create_conversation(self, user: str, title: str) -> str:
+        conversation_id = str(uuid.uuid4())
+        now = utcnow().isoformat()
+        with connect(self.path) as conn:
+            conn.execute(
+                "INSERT INTO conversations (id, user, title, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (conversation_id, user, title, now, now),
+            )
+        return conversation_id
+
+    def append(
+        self,
+        conversation_id: str,
+        user: str,
+        role: str,
+        text: str,
+        sources: list[dict[str, Any]] | None = None,
+    ) -> bool:
+        """Дописывает сообщение. False — диалога нет или он чужой."""
+        now = utcnow().isoformat()
+        with connect(self.path) as conn:
+            owner = conn.execute(
+                "SELECT 1 FROM conversations WHERE id = ? AND user = ?",
+                (conversation_id, user),
+            ).fetchone()
+            if owner is None:
+                return False
+            conn.execute(
+                "INSERT INTO messages (conversation_id, role, text, sources_json,"
+                " created_at) VALUES (?, ?, ?, ?, ?)",
+                (conversation_id, role, text,
+                 json.dumps(sources or [], ensure_ascii=False), now),
+            )
+            conn.execute(
+                "UPDATE conversations SET updated_at = ? WHERE id = ?",
+                (now, conversation_id),
+            )
+        return True
+
+    # ------------------------------------------------------------- чтение
+
+    def owns(self, conversation_id: str, user: str) -> bool:
+        with connect(self.path) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM conversations WHERE id = ? AND user = ?",
+                (conversation_id, user),
+            ).fetchone()
+        return row is not None
+
+    def list_conversations(self, user: str, limit: int = 50) -> list[Conversation]:
+        with connect(self.path) as conn:
+            rows = conn.execute(
+                "SELECT id, title, created_at, updated_at FROM conversations"
+                " WHERE user = ? ORDER BY updated_at DESC LIMIT ?",
+                (user, limit),
+            ).fetchall()
+        return [
+            Conversation(r["id"], r["title"], r["created_at"], r["updated_at"])
+            for r in rows
+        ]
+
+    def get_messages(self, conversation_id: str, user: str) -> list[Message] | None:
+        """Сообщения диалога. None — диалога нет или он чужой."""
+        with connect(self.path) as conn:
+            owner = conn.execute(
+                "SELECT 1 FROM conversations WHERE id = ? AND user = ?",
+                (conversation_id, user),
+            ).fetchone()
+            if owner is None:
+                return None
+            rows = conn.execute(
+                "SELECT role, text, sources_json, created_at FROM messages"
+                " WHERE conversation_id = ? ORDER BY id",
+                (conversation_id,),
+            ).fetchall()
+        return [
+            Message(
+                role=r["role"],
+                text=r["text"],
+                created_at=r["created_at"],
+                sources=json.loads(r["sources_json"]),
+            )
+            for r in rows
+        ]
+
+    def recent_turns(
+        self, conversation_id: str, user: str, window: int
+    ) -> list[tuple[str, str]]:
+        """Последние законченные пары «вопрос — ответ» для _condense.
+
+        Незавершённая пара (вопрос без ответа) отбрасывается: подавать её
+        в переформулировку нечем.
+        """
+        messages = self.get_messages(conversation_id, user)
+        if not messages:
+            return []
+        turns: list[tuple[str, str]] = []
+        pending: str | None = None
+        for message in messages:
+            if message.role == "user":
+                pending = message.text
+            elif pending is not None:
+                turns.append((pending, message.text))
+                pending = None
+        return turns[-window:] if window > 0 else []
+
+    # ------------------------------------------------------------ удаление
+
+    def delete_conversation(self, conversation_id: str, user: str) -> bool:
+        with connect(self.path) as conn:
+            cur = conn.execute(
+                "DELETE FROM conversations WHERE id = ? AND user = ?",
+                (conversation_id, user),
+            )
+        return cur.rowcount > 0

@@ -98,6 +98,19 @@ class AuthConfig:
 
 
 @dataclass
+class HistoryConfig:
+    # Хранение переписки пользователей. Выключается только через config.yaml —
+    # см. комментарий о переменных окружения ниже.
+    enabled: bool = True
+    path: str = "data/history.sqlite3"
+    # Срок хранения диалогов. Сервис хранит персональные данные: журнал
+    # вопросов сотрудника есть сведения о нём.
+    retention_days: int = 90
+    # Сколько последних ходов уходит в _condense при переформулировке вопроса.
+    window: int = 3
+
+
+@dataclass
 class Config:
     # Где лежат исходные документы и где хранится индекс.
     docs_dir: str = "data/docs"
@@ -109,6 +122,7 @@ class Config:
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
+    history: HistoryConfig = field(default_factory=HistoryConfig)
 
     @classmethod
     def load(cls, path: str | os.PathLike | None = None) -> "Config":
@@ -132,6 +146,7 @@ class Config:
             "retrieval": RetrievalConfig,
             "llm": LLMConfig,
             "auth": AuthConfig,
+            "history": HistoryConfig,
         }
         kwargs: dict[str, Any] = {}
         for key, value in (data or {}).items():
@@ -161,6 +176,10 @@ class Config:
             "RAGKB_AUTH_GROUPS_HEADER": ("groups_header", self.auth),
             "RAGKB_AUTH_EMAIL_HEADER": ("email_header", self.auth),
             "RAGKB_AUTH_ADMIN_GROUP": ("admin_group", self.auth),
+            # Только путь: _apply_env присваивает значение строкой, поэтому
+            # булево enabled и числовые retention_days/window сюда добавлять
+            # нельзя — "false" истинна, а число станет строкой.
+            "RAGKB_HISTORY_PATH": ("path", self.history),
         }
         for env, (attr, target) in mapping.items():
             val = os.environ.get(env)
