@@ -71,12 +71,12 @@ chroma, HNSW ef=400       2.9 мс/запрос,  recall@10 100%
 ## Быстрый старт
 
 ```bash
-pip install -r requirements.txt
+uv sync                            # окружение из uv.lock
 
 cp ваши_документы/* data/docs/
-python -m ragkb.cli index          # построить индекс
-python -m ragkb.cli ask "За сколько дней подавать заявление на отпуск?"
-python -m ragkb.cli serve          # веб-интерфейс на http://127.0.0.1:8000
+uv run ragkb index                 # построить индекс
+uv run ragkb ask "За сколько дней подавать заявление на отпуск?"
+uv run ragkb serve                 # веб-интерфейс на http://127.0.0.1:8000
 ```
 
 Из коробки работает без единой нейросети: эмбеддинги TF-IDF, ответ собирается
@@ -88,11 +88,11 @@ python -m ragkb.cli serve          # веб-интерфейс на http://127.0
 ```bash
 # 1. Локальные модели
 ollama pull bge-m3                 # эмбеддинги, хорошо работает с русским
-ollama pull qwen2.5:7b-instruct    # генерация
+ollama pull qwen2.5:14b-instruct    # генерация
 
 # 2. В config.yaml
 #    embedding.backend: ollama   embedding.model: bge-m3
-#    llm.backend: ollama         llm.model: qwen2.5:7b-instruct
+#    llm.backend: ollama         llm.model: qwen2.5:14b-instruct
 
 python -m ragkb.cli index --rebuild   # смена эмбеддера требует переиндексации
 ```
@@ -106,7 +106,7 @@ python -m ragkb.cli index --rebuild   # смена эмбеддера требу
 `query: ` / `passage: ` (задаются в `embedding.query_prefix` / `doc_prefix`).
 `nomic-embed-text` — легче и быстрее, на русском слабее.
 
-**LLM.** `qwen2.5:7b-instruct` — разумный минимум для русского RAG на одной
+**LLM.** `qwen2.5:14b-instruct` — разумный минимум для русского RAG на одной
 видеокарте 12–16 ГБ. Для 24 ГБ+ имеет смысл `qwen2.5:14b/32b`. Температура 0.1:
 задача — пересказать контекст, а не сочинять.
 

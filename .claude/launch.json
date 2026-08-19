@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ragkb",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["-m", "ragkb.cli", "serve", "--host", "127.0.0.1", "--port", "8000"],
+      "port": 8000
+    }
+  ]
+}

@@ -50,8 +50,8 @@ retrieval:
 llm:
   # extractive — без нейросети, собирает ответ из фрагментов
   # ollama — локальная модель; openai — любой OpenAI-совместимый endpoint
-  backend: extractive
-  model: qwen2.5:7b-instruct
+  backend: ollama
+  model: qwen2.5:14b-instruct
   base_url: http://localhost:11434
   temperature: 0.1
   max_tokens: 1024
