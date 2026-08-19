@@ -67,7 +67,10 @@ services:
     image: quay.io/keycloak/keycloak:26.4
     depends_on:
       - mariadb
-    command: start --optimized
+    # Не --optimized: этот режим требует отдельного этапа `kc.sh build`,
+    # без которого KC_DB молча игнорируется и используется ранее собранная
+    # (не MariaDB) конфигурация. Стоковый `start` читает настройки в рантайме.
+    command: start
     environment:
       KC_DB: mariadb
       KC_DB_URL: jdbc:mariadb://mariadb:3306/keycloak
@@ -78,8 +81,19 @@ services:
       KC_HTTPS_CERTIFICATE_KEY_FILE: /certs/tls.key
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+    # Публикуется наружу: браузеру нужен прямой доступ к authorization
+    # endpoint Keycloak (proxy проксирует только rag, не keycloak).
+    ports:
+      - "8443:8443"
     volumes:
       - ./certs:/certs:ro
+    # Алиас делает KEYCLOAK_HOSTNAME резолвящимся в контейнер keycloak и
+    # внутри сети compose — иначе proxy не сможет обратиться по тому же
+    # имени, что указано в KEYCLOAK_ISSUER_URL, при discovery и обмене токена.
+    networks:
+      default:
+        aliases:
+          - ${KEYCLOAK_HOSTNAME}
 
   proxy:
     # Версия закреплена: CVE-2026-40575 (обход аутентификации подделкой
