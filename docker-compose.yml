@@ -1,11 +1,17 @@
-# Полностью локальный контур: Ollama + RAG-сервис. Наружу ничего не уходит.
+# Локальный контур с идентификацией: Ollama + RAG-сервис за oauth2-proxy,
+# Keycloak (realm с группами ragkb-users / ragkb-admins) на MariaDB.
+# Наружу публикуются только proxy (443) и keycloak (8443, нужен браузеру для
+# authorization endpoint); rag и mariadb доступны только внутри сети compose.
 #
+#   cp .env.example .env               # заполнить пароли и секреты
+#   # положить сертификаты в ./certs: tls.crt, tls.key, ca.crt
+#   # настроить realm Keycloak (клиент ragkb, группы ragkb-users/ragkb-admins) — отдельная задача
 #   docker compose up -d
 #   docker compose exec ollama ollama pull bge-m3
 #   docker compose exec ollama ollama pull qwen2.5:7b-instruct
 #   docker compose exec rag ragkb index
 #
-# Затем открыть http://localhost:8000
+# Затем открыть https://kb.example.local (через proxy, требует входа Keycloak)
 
 services:
   ollama:
@@ -27,8 +33,6 @@ services:
     build: .
     depends_on:
       - ollama
-    ports:
-      - "8000:8000"
     volumes:
       - ./data/docs:/app/data/docs:ro    # документы монтируются только на чтение
       - rag_index:/app/data/index
@@ -55,7 +59,100 @@ services:
   #   ports:
   #     - "8001:8000"
 
+  mariadb:
+    image: mariadb:11.8
+    environment:
+      MARIADB_DATABASE: keycloak
+      MARIADB_USER: keycloak
+      MARIADB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+    volumes:
+      - keycloak_db:/var/lib/mysql
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    depends_on:
+      - mariadb
+    # Не --optimized: этот режим требует отдельного этапа `kc.sh build`,
+    # без которого KC_DB молча игнорируется и используется ранее собранная
+    # (не MariaDB) конфигурация. Стоковый `start` читает настройки в рантайме.
+    command: start
+    environment:
+      KC_DB: mariadb
+      KC_DB_URL: jdbc:mariadb://mariadb:3306/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      # Полный URL со схемой и портом: при hostname v2 в Keycloak значение без
+      # порта подразумевает стандартные 443/80, а не 8443, и issuer в токене
+      # расходится с KEYCLOAK_ISSUER_URL — discovery прокси падает при старте.
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME_URL}
+      KC_HTTPS_CERTIFICATE_FILE: /certs/tls.crt
+      KC_HTTPS_CERTIFICATE_KEY_FILE: /certs/tls.key
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+    # Публикуется наружу: браузеру нужен прямой доступ к authorization
+    # endpoint Keycloak (proxy проксирует только rag, не keycloak).
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./certs:/certs:ro
+    # Алиас делает KEYCLOAK_HOSTNAME резолвящимся в контейнер keycloak и
+    # внутри сети compose — иначе proxy не сможет обратиться по тому же
+    # имени, что указано в KEYCLOAK_ISSUER_URL, при discovery и обмене токена.
+    networks:
+      default:
+        aliases:
+          - ${KEYCLOAK_HOSTNAME}
+
+  proxy:
+    # Версия закреплена: CVE-2026-40575 (обход аутентификации подделкой
+    # X-Forwarded-Uri) затрагивает 7.5.0–7.15.1.
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.2
+    depends_on:
+      - keycloak
+      - rag
+    ports:
+      - "443:4180"
+    volumes:
+      - ./certs:/certs:ro
+    command:
+      - --provider=keycloak-oidc
+      - --oidc-issuer-url=${KEYCLOAK_ISSUER_URL}
+      - --client-id=ragkb
+      - --client-secret=${OAUTH2_CLIENT_SECRET}
+      - --cookie-secret=${OAUTH2_COOKIE_SECRET}
+      - --cookie-secure=true
+      - --email-domain=*
+      - --http-address=
+      - --https-address=0.0.0.0:4180
+      - --tls-cert-file=/certs/tls.crt
+      - --tls-key-file=/certs/tls.key
+      - --upstream=http://rag:8000
+      - --redirect-url=${OAUTH2_REDIRECT_URL}
+      # false: proxy опубликован на 443 напрямую, перед ним ничего нет.
+      # true доверял бы клиентским X-Forwarded-For/X-Real-IP — это первая
+      # половина условия срабатывания CVE-2026-40575 (см. --skip-auth-strip-headers
+      # ниже про вторую половину и docs/superpowers/specs/2026-08-19-identity-and-history-design.md).
+      - --reverse-proxy=false
+      # --trusted-proxy-ip и --trusted-ip здесь намеренно не заданы:
+      # --trusted-ip — это список сетей, которым разрешён ОБХОД аутентификации,
+      # подставлять его сюда нельзя. Защита от CVE-2026-40575 держится на
+      # закреплённой версии не ниже 7.15.2; условие срабатывания уязвимости
+      # (--reverse-proxy вместе с правилами --skip-auth-routes/--skip-auth-regex)
+      # в этой конфигурации отсутствует по построению — правил пропуска нет.
+      # provider-ca-file: сертификат Keycloak на discovery-адресе самоподписан
+      # или выпущен внутренним УЦ, системному доверию неизвестен.
+      - --provider-ca-file=/certs/ca.crt
+      # Без ведущей косой: соответствует mapper Group Membership с выключенной
+      # галкой "Full group path" в клиенте Keycloak (см. план настройки). Если
+      # галку включить, claim придёт путями вида /ragkb-users — тогда и здесь,
+      # и в config.yaml → auth.admin_group имя нужно поменять на путь.
+      - --allowed-group=ragkb-users
+      - --pass-user-headers=true
+      - --skip-auth-strip-headers=true
+
 volumes:
   ollama_models:
   rag_index:
   # chroma_data:
+  keycloak_db:
