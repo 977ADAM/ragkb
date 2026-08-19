@@ -150,6 +150,52 @@ def test_config_exposes_auth_section():
     assert cfg.auth.admin_group == "боссы"
 
 
+# ------------------------------------------------------- эндпоинты чтения
+
+def _client(mode: str = "proxy"):
+    """Приложение поверх заведомо отсутствующего индекса.
+
+    index_dir указывает в несуществующий каталог намеренно: у Config значение
+    по умолчанию — «data/index», а он в репозитории есть, и тогда часть проверок
+    пошла бы не по той ветке. Обработчиков это не касается — зависимости
+    идентификации отрабатывают раньше, до обращения к пайплайну.
+    """
+    import tempfile
+
+    from fastapi.testclient import TestClient
+
+    from ragkb.api import create_app
+    from ragkb.config import Config
+
+    cfg = Config()
+    cfg.index_dir = str(Path(tempfile.gettempdir()) / "ragkb-нет-такого-индекса")
+    cfg.auth.mode = mode
+    return TestClient(create_app(cfg), raise_server_exceptions=False)
+
+
+def test_ask_requires_authentication():
+    resp = _client().post("/ask", json={"question": "тест"})
+    assert resp.status_code == 401, resp.status_code
+
+
+def test_search_requires_authentication():
+    resp = _client().post("/search", json={"query": "тест"})
+    assert resp.status_code == 401, resp.status_code
+
+
+def test_ask_stream_requires_authentication():
+    resp = _client().post("/ask/stream", json={"question": "тест"})
+    assert resp.status_code == 401, resp.status_code
+
+
+def test_index_page_requires_authentication():
+    assert _client().get("/").status_code == 401
+
+
+def test_index_page_open_when_auth_disabled():
+    assert _client("disabled").get("/").status_code == 200
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

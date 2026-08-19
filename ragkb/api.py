@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from .auth import User, current_user, optional_user, require_admin
 from .config import Config
 from .pipeline import RAGPipeline, build_index
 
@@ -25,6 +26,16 @@ class SearchRequest(BaseModel):
 
 def create_app(cfg: Config) -> FastAPI:
     app = FastAPI(title="RAG База знаний", version="1.0")
+
+    # Зависимости идентификации читают настройки отсюда.
+    app.state.auth = cfg.auth
+    if cfg.auth.mode == "disabled":
+        print(
+            "ВНИМАНИЕ: аутентификация выключена (auth.mode: disabled). "
+            "Все запросы выполняются от имени «anonymous». "
+            "В общем контуре так работать нельзя."
+        )
+
     state: dict[str, Any] = {"pipeline": None, "error": None}
 
     def pipeline() -> RAGPipeline:
@@ -45,7 +56,7 @@ def create_app(cfg: Config) -> FastAPI:
             return {"status": "no_index", "detail": exc.detail}
 
     @app.post("/ask")
-    def ask(req: AskRequest) -> dict[str, Any]:
+    def ask(req: AskRequest, user: User = Depends(current_user)) -> dict[str, Any]:
         answer = pipeline().ask(
             req.question,
             top_k=req.top_k,
@@ -55,7 +66,7 @@ def create_app(cfg: Config) -> FastAPI:
         return answer.to_dict()
 
     @app.post("/ask/stream")
-    def ask_stream(req: AskRequest) -> StreamingResponse:
+    def ask_stream(req: AskRequest, user: User = Depends(current_user)) -> StreamingResponse:
         rag = pipeline()
 
         def generate():
@@ -65,7 +76,7 @@ def create_app(cfg: Config) -> FastAPI:
         return StreamingResponse(generate(), media_type="text/plain; charset=utf-8")
 
     @app.post("/search")
-    def search(req: SearchRequest) -> dict[str, Any]:
+    def search(req: SearchRequest, user: User = Depends(current_user)) -> dict[str, Any]:
         hits = pipeline().search(req.query, top_k=req.top_k)
         return {"query": req.query, "results": [h.to_dict() for h in hits]}
 
@@ -81,7 +92,7 @@ def create_app(cfg: Config) -> FastAPI:
         }
 
     @app.get("/", response_class=HTMLResponse)
-    def index_page() -> str:
+    def index_page(user: User = Depends(current_user)) -> str:
         return UI_HTML
 
     return app
