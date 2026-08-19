@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from .auth import User, current_user, optional_user, require_admin
 from .config import Config
+from .history import HistoryStore, make_title
 from .pipeline import RAGPipeline, build_index
 
 
@@ -16,7 +17,11 @@ class AskRequest(BaseModel):
     question: str = Field(..., min_length=2)
     top_k: int | None = None
     expand: bool = False
+    # Историю в теле запроса присылают программные клиенты. Веб-интерфейс
+    # передаёт conversation_id, а историю подгружает сервер — иначе работа
+    # с разных устройств невозможна.
     history: list[tuple[str, str]] = Field(default_factory=list)
+    conversation_id: str | None = None
 
 
 class SearchRequest(BaseModel):
@@ -52,6 +57,19 @@ def create_app(cfg: Config) -> FastAPI:
                 raise HTTPException(status_code=503, detail=str(exc))
         return state["pipeline"]
 
+    # Хранилище строится сразу, а не лениво: спека требует, чтобы несовместимая
+    # версия схемы валила сервис при старте с внятным сообщением. При ленивом
+    # создании она вылезла бы 500-й ошибкой на первом запросе пользователя.
+    history_store: HistoryStore | None = (
+        HistoryStore(cfg.history.path, retention_days=cfg.history.retention_days)
+        if cfg.history.enabled
+        else None
+    )
+
+    def history() -> HistoryStore | None:
+        """Хранилище диалогов. None — история выключена настройкой."""
+        return history_store
+
     @app.get("/health")
     def health(user: User | None = Depends(optional_user)) -> dict[str, Any]:
         # Без аутентификации отдаём только статус: HEALTHCHECK должен работать,
@@ -67,13 +85,39 @@ def create_app(cfg: Config) -> FastAPI:
 
     @app.post("/ask")
     def ask(req: AskRequest, user: User = Depends(current_user)) -> dict[str, Any]:
+        store = history()
+        conversation_id = req.conversation_id
+        turns: list[tuple[str, str]] | None = [tuple(h) for h in req.history] or None
+
+        if store is not None:
+            store.cleanup()
+            if conversation_id:
+                if not store.owns(conversation_id, user.name):
+                    # Чужой или несуществующий — один и тот же ответ:
+                    # по коду ответа нельзя узнать, что диалог существует.
+                    raise HTTPException(status_code=404, detail="Диалог не найден")
+                turns = store.recent_turns(
+                    conversation_id, user.name, cfg.history.window
+                ) or turns
+            else:
+                conversation_id = store.create_conversation(
+                    user.name, make_title(req.question)
+                )
+
         answer = pipeline().ask(
-            req.question,
-            top_k=req.top_k,
-            history=[tuple(h) for h in req.history] or None,
-            expand=req.expand,
+            req.question, top_k=req.top_k, history=turns, expand=req.expand
         )
-        return answer.to_dict()
+
+        if store is not None:
+            store.append(conversation_id, user.name, "user", req.question)
+            store.append(
+                conversation_id, user.name, "assistant",
+                answer.text, answer.used_sources,
+            )
+
+        data = answer.to_dict()
+        data["conversation_id"] = conversation_id
+        return data
 
     @app.post("/ask/stream")
     def ask_stream(req: AskRequest, user: User = Depends(current_user)) -> StreamingResponse:

@@ -397,6 +397,64 @@ def test_concurrent_cleanup_claims_marker_once():
     assert sum(results) == 2
 
 
+# --------------------------------------------------------- /ask и диалоги
+
+def _app_client(tmp: Path, enabled: bool = True):
+    """Приложение с историей, но без индекса.
+
+    Пайплайн не поднимется, поэтому проверяем только то, что происходит
+    до обращения к нему: разбор запроса, владение диалогом, ведение истории
+    проверяются отдельно на HistoryStore.
+    """
+    from fastapi.testclient import TestClient
+
+    from ragkb.api import create_app
+    from ragkb.config import Config
+
+    cfg = Config()
+    cfg.index_dir = str(tmp / "нет-индекса")
+    cfg.auth.mode = "disabled"
+    cfg.history.enabled = enabled
+    cfg.history.path = str(tmp / "history.sqlite3")
+    return TestClient(create_app(cfg), raise_server_exceptions=False)
+
+
+def test_ask_with_foreign_conversation_gives_404():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    client = _app_client(tmp)
+    store = HistoryStore(tmp / "history.sqlite3")
+    foreign = store.create_conversation("petrov", "Чужой")
+    resp = client.post("/ask", json={"question": "тест", "conversation_id": foreign})
+    assert resp.status_code == 404, resp.status_code
+
+
+def test_ask_with_unknown_conversation_gives_404():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    resp = _app_client(tmp).post(
+        "/ask", json={"question": "тест", "conversation_id": "нет-такого"})
+    assert resp.status_code == 404, resp.status_code
+
+
+def test_ask_request_accepts_conversation_id_field():
+    from ragkb.api import AskRequest
+    req = AskRequest(question="тест", conversation_id="c1")
+    assert req.conversation_id == "c1"
+
+
+def test_ask_request_conversation_id_defaults_to_none():
+    from ragkb.api import AskRequest
+    assert AskRequest(question="тест").conversation_id is None
+
+
+def test_history_disabled_ignores_conversation_id():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    client = _app_client(tmp, enabled=False)
+    # При выключенной истории проверять владение нечем — до 404 дело
+    # не доходит, запрос уходит в пайплайн и падает на отсутствии индекса.
+    resp = client.post("/ask", json={"question": "тест", "conversation_id": "любой"})
+    assert resp.status_code == 503, resp.status_code
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
