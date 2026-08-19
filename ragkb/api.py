@@ -3,12 +3,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .auth import User, current_user, optional_user, require_admin
 from .config import Config
+from .history import HistoryStore, make_title
 from .pipeline import RAGPipeline, build_index
 
 
@@ -16,7 +17,11 @@ class AskRequest(BaseModel):
     question: str = Field(..., min_length=2)
     top_k: int | None = None
     expand: bool = False
+    # Историю в теле запроса присылают программные клиенты. Веб-интерфейс
+    # передаёт conversation_id, а историю подгружает сервер — иначе работа
+    # с разных устройств невозможна.
     history: list[tuple[str, str]] = Field(default_factory=list)
+    conversation_id: str | None = None
 
 
 class SearchRequest(BaseModel):
@@ -52,6 +57,43 @@ def create_app(cfg: Config) -> FastAPI:
                 raise HTTPException(status_code=503, detail=str(exc))
         return state["pipeline"]
 
+    # Хранилище строится сразу, а не лениво: спека требует, чтобы несовместимая
+    # версия схемы валила сервис при старте с внятным сообщением. При ленивом
+    # создании она вылезла бы 500-й ошибкой на первом запросе пользователя.
+    history_store: HistoryStore | None = (
+        HistoryStore(cfg.history.path, retention_days=cfg.history.retention_days)
+        if cfg.history.enabled
+        else None
+    )
+
+    def known_sources() -> set[str] | None:
+        """Пути документов, которые сейчас есть в индексе.
+
+        None — состав узнать не удалось (индекс не построен или недоступен).
+        Тогда пометку не ставим вовсе: «источник неизвестен» честнее,
+        чем «источника нет».
+        """
+        try:
+            documents = pipeline().store.manifest.get("documents", [])
+        except HTTPException:
+            return None
+        return {d.get("source", "") for d in documents}
+
+    def mark_availability(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Помечает источники, которых больше нет в базе знаний.
+
+        Диалог хранит ссылку на документ, а не его текст. Документ могли
+        удалить из корпуса — тогда интерфейс должен сказать об этом, а не
+        показать пустоту или ошибку.
+        """
+        sources = known_sources()
+        if sources is None:
+            return messages
+        for message in messages:
+            for source in message.get("sources", []):
+                source["available"] = source.get("source") in sources
+        return messages
+
     @app.get("/health")
     def health(user: User | None = Depends(optional_user)) -> dict[str, Any]:
         # Без аутентификации отдаём только статус: HEALTHCHECK должен работать,
@@ -67,13 +109,63 @@ def create_app(cfg: Config) -> FastAPI:
 
     @app.post("/ask")
     def ask(req: AskRequest, user: User = Depends(current_user)) -> dict[str, Any]:
+        store = history_store
+        conversation_id = req.conversation_id
+        turns: list[tuple[str, str]] | None = [tuple(h) for h in req.history] or None
+
+        if store is not None:
+            store.cleanup()
+            if conversation_id:
+                if not store.owns(conversation_id, user.name):
+                    # Чужой или несуществующий — один и тот же ответ:
+                    # по коду ответа нельзя узнать, что диалог существует.
+                    raise HTTPException(status_code=404, detail="Диалог не найден")
+                turns = store.recent_turns(
+                    conversation_id, user.name, cfg.history.window
+                ) or turns
+
         answer = pipeline().ask(
-            req.question,
-            top_k=req.top_k,
-            history=[tuple(h) for h in req.history] or None,
-            expand=req.expand,
+            req.question, top_k=req.top_k, history=turns, expand=req.expand
         )
-        return answer.to_dict()
+
+        data = answer.to_dict()
+
+        if store is not None:
+            # Диалог заводим только после успешного ответа пайплайна: иначе
+            # при ошибке генерации (нет индекса, недоступна LLM и т.п.) в базе
+            # оставался бы диалог без единого сообщения — клиент к тому же
+            # не получил бы conversation_id, ведь исключение обрывает выдачу
+            # JSON, и продолжить или удалить такой диалог было бы нечем.
+            if not conversation_id:
+                conversation_id = store.create_conversation(
+                    user.name, make_title(req.question)
+                )
+            # Ответ уже получен и стоил дорого (обращение к модели) —
+            # отдать его пользователю важнее, чем сохранить в историю.
+            # Поэтому запись не должна ронять запрос: ни отказ (False —
+            # диалог исчез между owns() и записью, например его убрала
+            # cleanup() соседнего запроса), ни исключение (истёк таймаут
+            # блокировки SQLite) не должны стоить пользователю 500-й ошибки
+            # после того, как ответ уже посчитан.
+            try:
+                saved_question = store.append(
+                    conversation_id, user.name, "user", req.question
+                )
+                saved_answer = store.append(
+                    conversation_id, user.name, "assistant",
+                    answer.text, answer.used_sources,
+                )
+                if not (saved_question and saved_answer):
+                    data["warnings"].append(
+                        "Ответ не сохранён в историю диалога"
+                    )
+            except Exception:
+                data["warnings"].append(
+                    "Ответ не сохранён в историю диалога"
+                )
+
+        data["conversation_id"] = conversation_id
+        return data
 
     @app.post("/ask/stream")
     def ask_stream(req: AskRequest, user: User = Depends(current_user)) -> StreamingResponse:
@@ -89,6 +181,50 @@ def create_app(cfg: Config) -> FastAPI:
     def search(req: SearchRequest, user: User = Depends(current_user)) -> dict[str, Any]:
         hits = pipeline().search(req.query, top_k=req.top_k)
         return {"query": req.query, "results": [h.to_dict() for h in hits]}
+
+    def require_history() -> HistoryStore:
+        store = history_store
+        if store is None:
+            raise HTTPException(status_code=404, detail="История диалогов выключена")
+        return store
+
+    @app.get("/conversations")
+    def list_conversations(
+        user: User = Depends(current_user),
+        limit: int = Query(50, ge=1, le=500),
+        offset: int = Query(0, ge=0),
+    ) -> dict[str, Any]:
+        store = require_history()
+        return {
+            "conversations": [
+                c.to_dict()
+                for c in store.list_conversations(user.name, limit=limit, offset=offset)
+            ],
+            "total": store.count_conversations(user.name),
+        }
+
+    @app.get("/conversations/{conversation_id}")
+    def get_conversation(
+        conversation_id: str, user: User = Depends(current_user)
+    ) -> dict[str, Any]:
+        store = require_history()
+        messages = store.get_messages(conversation_id, user.name)
+        if messages is None:
+            # Чужой и несуществующий неотличимы по ответу.
+            raise HTTPException(status_code=404, detail="Диалог не найден")
+        return {
+            "id": conversation_id,
+            "messages": mark_availability([m.to_dict() for m in messages]),
+        }
+
+    @app.delete("/conversations/{conversation_id}")
+    def delete_conversation(
+        conversation_id: str, user: User = Depends(current_user)
+    ) -> dict[str, Any]:
+        store = require_history()
+        if not store.delete_conversation(conversation_id, user.name):
+            raise HTTPException(status_code=404, detail="Диалог не найден")
+        return {"deleted": True}
 
     @app.post("/reindex")
     def reindex(user: User = Depends(require_admin)) -> dict[str, Any]:

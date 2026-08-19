@@ -327,7 +327,9 @@ class RAGPipeline:
     # ------------------------------------------------------------ служебное
 
     def _condense(self, question: str, history: list[tuple[str, str]]) -> str | None:
-        formatted = "\n".join(f"Пользователь: {q}\nАссистент: {a}" for q, a in history[-3:])
+        window = self.cfg.history.window
+        recent = history[-window:] if window > 0 else []
+        formatted = "\n".join(f"Пользователь: {q}\nАссистент: {a}" for q, a in recent)
         try:
             return self.llm.generate(
                 "Ты переформулируешь вопросы.",

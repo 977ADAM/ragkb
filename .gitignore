@@ -5,6 +5,12 @@ ragkb.egg-info
 # Артефакты сборки индекса — пересоздаются командой ragkb index
 data/index/
 
+# Переписка пользователей — не должна попадать в репозиторий.
+# data/history/ — подкаталог для тома с базой диалогов в Docker
+# (RAGKB_HISTORY_PATH=/app/data/history/history.sqlite3, см. docker-compose.yml).
+data/*.sqlite3*
+data/history/
+
 __pycache__/
 *.pyc
 
