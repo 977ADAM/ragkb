@@ -1,42 +1,89 @@
-# sv
+# Веб-интерфейс базы знаний
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+Минимальный чат к FastAPI-бэкенду `ragkb`. Браузер к бэкенду не ходит:
+все запросы идут в собственные роуты `/api/*` этого приложения (BFF),
+и только сервер SvelteKit знает адрес бэкенда и заголовки идентификации.
 
-## Creating a project
+## Запуск
 
-If you're seeing this, you've probably already done this step. Congrats!
+Бэкенд:
 
-```sh
-# create a new project
-npx sv create my-app
+```
+.venv/bin/python -m ragkb.cli serve --host 127.0.0.1 --port 8000
 ```
 
-To recreate this project with the same configuration:
+Фронт:
 
-```sh
-# recreate this project
-bun x sv@0.17.0 create --template minimal --types jsdoc --install bun web
+```
+bun install
+cp .env.example .env
+bun run dev
 ```
 
-## Developing
+## Переменные окружения
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+| Переменная | Смысл |
+|---|---|
+| `RAGKB_API_URL` | Адрес бэкенда, по умолчанию `http://127.0.0.1:8000` |
+| `RAGKB_DEV_USER` | Логин для локального запуска без oauth2-proxy |
+| `RAGKB_DEV_GROUPS` | Группы для того же случая, например `ragkb-admins` |
 
-```sh
-npm run dev
+В общем контуре `RAGKB_DEV_*` не задаются: личность приходит заголовками
+`X-Forwarded-*` от oauth2-proxy и пробрасывается в бэкенд как есть.
 
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+## Что внутри
+
+| Файл | Роль |
+|---|---|
+| `src/lib/server/backend.js` | Единственное место, где известен адрес бэкенда |
+| `src/routes/api/ask/+server.js` | Прокси `POST /ask/stream`, отдаёт NDJSON потоком |
+| `src/routes/api/bootstrap/+server.js` | Стартовые сведения одним запросом |
+| `src/routes/api/events/+server.js` | Приём телеметрии пачкой |
+| `src/lib/events.svelte.js` | Очередь событий: копит и отправляет пачкой |
+| `src/routes/api/conversations/**` | Список диалогов страницами, чтение переписки, переименование, удаление |
+| `src/routes/+layout.svelte` | Панель диалогов, шапка, тема — общая рамка |
+| `src/lib/chat.svelte.js` | Состояние чата и все запросы к BFF |
+| `src/lib/Chat.svelte` | Лента переписки и поле ввода |
+
+## Страницы
+
+| Адрес | Что показывает |
+|---|---|
+| `/new` | чистый чат; как только сервер заведёт диалог, адрес меняется на `/chat/{id}` без нового шага в истории |
+| `/chat/{id}` | выбранный диалог; ссылку можно сохранить и открыть с другого устройства — переписка живёт на сервере |
+| `/` и `/chat` | перебрасывают на `/new` |
+
+При запуске страница делает один запрос к `/api/bootstrap`: оттуда приходят
+пользователь, организация, модели, список диалогов, признаки возможностей
+и состояние индекса. Идентификатор сессии генерирует браузер
+(`crypto.randomUUID()`) — сервер возвращает его эхом и пишет в журнал,
+поэтому старт конкретной вкладки виден в логах.
+
+Телеметрия копится в очереди и уходит пачкой — по 20 событий или раз
+в 5 секунд, плюс принудительно, когда вкладку прячут. Идентификатор сессии
+тот же, что у стартового запроса, поэтому старт и последующие действия
+связываются в журнале. Ошибки отправки проглатываются: телеметрия не повод
+показывать пользователю ошибку.
+
+Диалоги живут на сервере и принадлежат пользователю. Список приходит
+страницами по 50 — из `/organizations/{id}/chat_conversations`, если
+организация настроена, иначе из общей `/conversations`; куда идти, решает
+BFF, браузер шлёт только идентификатор из стартового ответа. Кнопка
+«Показать ещё» догружает следующую страницу. Возврат во вкладку обновляет
+список с `consistency=eventual` — там отставание в несколько секунд дешевле
+похода в базу, а после своего вопроса список перечитывается строго.
+Переписка подгружается при выборе, удаление необратимо. Новый диалог заводит сам бэкенд по первому вопросу —
+он же придумывает заголовок, поэтому список обновляется после ответа.
+
+Если история выключена на бэкенде (`history.enabled: false`), `/conversations`
+отвечает 404 и панель не показывается вовсе.
+
+Чего ещё нет из [спеки чата](../docs/superpowers/specs/2026-08-20-chat-ui-design.md):
+отмены генерации и переименования диалогов.
+
+## Проверки
+
 ```
-
-## Building
-
-To create a production version of your app:
-
-```sh
-npm run build
+bun run check
+bun run build
 ```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
