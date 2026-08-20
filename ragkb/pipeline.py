@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -235,6 +235,19 @@ class RAGPipeline:
             embedder.load_state(state)
         return embedder
 
+    def _llm_for(self, model: str | None) -> LLM:
+        """Объект LLM под конкретный запрос.
+
+        Построение дёшево — это обёртка над настройками, сама модель грузится
+        в Ollama при первом обращении. Поэтому держать пул объектов незачем.
+
+        Имя модели сюда приходит уже проверенным по списку разрешённых:
+        проверка живёт в слое HTTP, ближе к источнику недоверенных данных.
+        """
+        if not model or model == self.cfg.llm.model:
+            return self.llm
+        return build_llm(replace(self.cfg.llm, model=model))
+
     # --------------------------------------------------------------- поиск
 
     def search(self, question: str, top_k: int | None = None, expand: bool = False) -> list[Hit]:
@@ -276,13 +289,15 @@ class RAGPipeline:
         top_k: int | None = None,
         history: list[tuple[str, str]] | None = None,
         expand: bool = False,
+        model: str | None = None,
     ) -> Answer:
         started = time.time()
         warnings: list[str] = []
+        llm = self._llm_for(model)
 
         search_query = question
         if history:
-            search_query = self._condense(question, history) or question
+            search_query = self._condense(question, history, llm) or question
 
         hits = self.search(search_query, top_k=top_k, expand=expand)
         if not hits:
@@ -291,14 +306,14 @@ class RAGPipeline:
                 text="В базе знаний нет информации по этому вопросу.",
                 hits=[],
                 elapsed=time.time() - started,
-                llm_backend=self.llm.name,
+                llm_backend=llm.name,
                 warnings=["Поиск не вернул ни одного релевантного фрагмента"],
             )
 
         context = format_context(hits)
         prompt = ANSWER_TEMPLATE.format(context=context, question=question)
         try:
-            text = self.llm.generate(SYSTEM_PROMPT, prompt)
+            text = llm.generate(SYSTEM_PROMPT, prompt)
         except LLMError as exc:
             warnings.append(f"{exc} — ответ собран экстрактивно")
             from .llm import ExtractiveLLM
@@ -315,7 +330,7 @@ class RAGPipeline:
             hits=hits,
             used_sources=used,
             elapsed=time.time() - started,
-            llm_backend=self.llm.name,
+            llm_backend=llm.name,
             warnings=warnings,
         )
 
@@ -325,6 +340,7 @@ class RAGPipeline:
         *,
         top_k: int | None = None,
         history: list[tuple[str, str]] | None = None,
+        model: str | None = None,
     ) -> tuple[list[Hit], Iterator[str]]:
         """Готовит поток ответа и отдаёт найденные фрагменты сразу.
 
@@ -335,9 +351,10 @@ class RAGPipeline:
 
         Пустой список фрагментов означает, что поиск ничего не дал.
         """
+        llm = self._llm_for(model)
         search_query = question
         if history:
-            search_query = self._condense(question, history) or question
+            search_query = self._condense(question, history, llm) or question
 
         hits = self.search(search_query, top_k=top_k)
         if not hits:
@@ -347,16 +364,17 @@ class RAGPipeline:
             return [], nothing_found()
 
         prompt = ANSWER_TEMPLATE.format(context=format_context(hits), question=question)
-        return hits, self.llm.stream(SYSTEM_PROMPT, prompt)
+        return hits, llm.stream(SYSTEM_PROMPT, prompt)
 
     # ------------------------------------------------------------ служебное
 
-    def _condense(self, question: str, history: list[tuple[str, str]]) -> str | None:
+    def _condense(self, question: str, history: list[tuple[str, str]],
+                  llm: LLM | None = None) -> str | None:
         window = self.cfg.history.window
         recent = history[-window:] if window > 0 else []
         formatted = "\n".join(f"Пользователь: {q}\nАссистент: {a}" for q, a in recent)
         try:
-            return self.llm.generate(
+            return (llm or self.llm).generate(
                 "Ты переформулируешь вопросы.",
                 CONDENSE_PROMPT.format(history=formatted, question=question),
             ).strip()

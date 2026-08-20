@@ -67,6 +67,11 @@ UI_HTML = """<!DOCTYPE html>
           color:#fff; cursor:pointer; }
   #send:disabled { opacity:.5; cursor:default; }
 
+  #controls { display:flex; gap:16px; padding:8px 20px 0; font-size:13px;
+              color:var(--muted); }
+  #controls select { background:var(--bg); color:var(--fg);
+              border:1px solid var(--line); border-radius:6px; padding:3px 6px; }
+
   @media (max-width:760px) {
     body { flex-direction:column; height:auto; min-height:100vh; }
     aside { width:auto; border-right:0; border-bottom:1px solid var(--line); max-height:38vh; }
@@ -83,6 +88,16 @@ UI_HTML = """<!DOCTYPE html>
 <main>
   <div id="status">загрузка…</div>
   <div id="thread"></div>
+  <div id="controls">
+    <label id="model-box">Модель <select id="model"></select></label>
+    <span id="search-mode" style="display:none">Моделей нет — ответы собираются из найденных фрагментов</span>
+    <label>Фрагментов <select id="topk">
+      <option value="" selected>по умолчанию</option>
+      <option value="2">2</option>
+      <option value="3">3</option>
+      <option value="5">5</option>
+    </select></label>
+  </div>
   <form id="f">
     <input type="text" id="q" placeholder="Задайте вопрос по документам…"
            autocomplete="off" autofocus>
@@ -97,6 +112,62 @@ const sendEl = document.getElementById('send');
 
 let currentId = null;   // единственное состояние на клиенте
 let streaming = false;  // идёт поток ответа — переключать/удалять диалоги нельзя
+
+const modelEl = document.getElementById('model');
+const topkEl = document.getElementById('topk');
+
+// Выбор помнит браузер: сервер намеренно без состояния везде, кроме истории.
+function restoreChoice() {
+  const m = localStorage.getItem('ragkb.model');
+  const k = localStorage.getItem('ragkb.topk');
+  if (m) {
+    // Вариант по умолчанию уже выбран (loadModels отметил m.default) —
+    // запоминаем его на случай, если сохранённая модель промахнётся.
+    const fallback = modelEl.selectedIndex;
+    modelEl.value = m;
+    // Сохранённая модель могла пропасть из конфигурации — тогда value
+    // промахивается, selectedIndex становится -1, и поле выглядит пустым.
+    // Оставляем вариант по умолчанию и чистим протухшую запись.
+    if (modelEl.selectedIndex < 0) {
+      modelEl.selectedIndex = fallback;
+      localStorage.removeItem('ragkb.model');
+    }
+  }
+  if (k) {
+    const fallback = topkEl.selectedIndex;
+    topkEl.value = k;
+    if (topkEl.selectedIndex < 0) {
+      topkEl.selectedIndex = fallback;
+      localStorage.removeItem('ragkb.topk');
+    }
+  }
+}
+modelEl.addEventListener('change', () => localStorage.setItem('ragkb.model', modelEl.value));
+topkEl.addEventListener('change', () => localStorage.setItem('ragkb.topk', topkEl.value));
+
+async function loadModels() {
+  try {
+    const r = await fetch('/models');
+    if (!r.ok) return;
+    const items = (await r.json()).models || [];
+    // Моделей нет вовсе — сервис отвечает найденными фрагментами.
+    // Прятать выбор честнее, чем показывать пустой список.
+    if (!items.length) {
+      document.getElementById('model-box').style.display = 'none';
+      document.getElementById('search-mode').style.display = '';
+      return;
+    }
+    modelEl.innerHTML = '';
+    items.forEach(m => {
+      const o = document.createElement('option');
+      o.value = m.id;
+      o.textContent = m.id;
+      if (m.is_default) o.selected = true;
+      modelEl.appendChild(o);
+    });
+    restoreChoice();
+  } catch (_) { /* список моделей не критичен: без него работает выбор по умолчанию */ }
+}
 
 function esc(s) {
   return String(s).replace(/[&<>"]/g, c =>
@@ -157,6 +228,10 @@ function addMessage(role, text, sources) {
   return el;
 }
 
+function renderModelMeta(model) {
+  return model ? `<div class="meta">${esc(model)}</div>` : '';
+}
+
 function warn(container, text) {
   container.insertAdjacentHTML('beforeend', `<div class="warn">⚠ ${esc(text)}</div>`);
 }
@@ -172,7 +247,10 @@ async function openConv(id) {
   const data = await r.json();
   currentId = data.id;
   threadEl.innerHTML = '';
-  (data.messages || []).forEach(m => addMessage(m.role, m.text, m.sources));
+  (data.messages || []).forEach(m => {
+    const el = addMessage(m.role, m.text, m.sources);
+    if (m.role === 'assistant' && m.model) el.insertAdjacentHTML('beforeend', renderModelMeta(m.model));
+  });
   await loadList();
 }
 
@@ -219,7 +297,14 @@ document.getElementById('f').addEventListener('submit', async e => {
     const resp = await fetch('/ask/stream', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({question, conversation_id: currentId})
+      body: JSON.stringify({
+        question,
+        conversation_id: currentId,
+        model: modelEl.value || null,
+        // Пустое значение — «по умолчанию»: top_k вовсе не кладём в запрос,
+        // тогда работает retrieval.top_k из конфигурации сервера.
+        top_k: topkEl.value ? parseInt(topkEl.value, 10) : null
+      })
     });
     if (!resp.ok) {
       if (resp.status === 404) {
@@ -262,10 +347,15 @@ document.getElementById('f').addEventListener('submit', async e => {
         } else if (ev.type === 'done') {
           finished = true;
           currentId = ev.conversation_id || currentId;
+          if (!text.trim()) {
+            box.insertAdjacentHTML('beforeend',
+              '<div class="warn">⚠ Модель вернула пустой ответ</div>');
+          }
           box.insertAdjacentHTML('beforeend', renderSources(ev.sources));
           (ev.warnings || []).forEach(w => warn(box, w));
-          box.insertAdjacentHTML('beforeend',
-            `<div class="meta">${esc(ev.elapsed_sec)} с</div>`);
+          const label = ev.model ? `${esc(ev.model)} · ${esc(ev.elapsed_sec)} с`
+                                 : `${esc(ev.elapsed_sec)} с`;
+          box.insertAdjacentHTML('beforeend', `<div class="meta">${label}</div>`);
           await loadList();
         }
       }
@@ -287,6 +377,7 @@ document.getElementById('f').addEventListener('submit', async e => {
 });
 
 (async () => {
+  await loadModels();
   const items = await loadList();
   if (items.length) await openConv(items[0].id); else await startNew();
 })();

@@ -14,19 +14,39 @@ from .auth import User, current_user, optional_user, require_admin
 from .config import Config
 from .history import HistoryStore, make_title
 from .llm import ExtractiveLLM
+from .models import available_models, resolve_model
 from .pipeline import ANSWER_TEMPLATE, SYSTEM_PROMPT, RAGPipeline, build_index, format_context
 from .ui import UI_HTML
 
 
 class AskRequest(BaseModel):
     question: str = Field(..., min_length=2)
-    top_k: int | None = None
+    # Границы: ноль фрагментов бессмысленен, а больше двадцати не поместится
+    # в разумный промпт. Число фрагментов — самый сильный рычаг скорости
+    # на машине без ускорителя.
+    top_k: int | None = Field(None, ge=1, le=20)
     expand: bool = False
     # Историю в теле запроса присылают программные клиенты. Веб-интерфейс
     # передаёт conversation_id, а историю подгружает сервер — иначе работа
     # с разных устройств невозможна.
     history: list[tuple[str, str]] = Field(default_factory=list)
     conversation_id: str | None = None
+    # Пустое значение означает «модель по умолчанию из настроек».
+    model: str | None = None
+
+
+class ModelInfo(BaseModel):
+    """Модель, доступная для выбора."""
+
+    id: str
+    display_name: str | None = None
+    context_window: int | None = None
+    supports_tools: bool = False
+    is_default: bool = False
+
+
+class ModelsResponse(BaseModel):
+    models: list[ModelInfo]
 
 
 class SearchRequest(BaseModel):
@@ -53,9 +73,21 @@ def create_app(cfg: Config) -> FastAPI:
     app.state.auth = cfg.auth
     if cfg.auth.mode == "disabled":
         print(
-            "ВНИМАНИЕ: аутентификация выключена (auth.mode: disabled). "
-            "Все запросы выполняются от имени «anonymous». "
-            "В общем контуре так работать нельзя."
+            "ВНИМАНИЕ: аутентификация выключена (auth.mode: disabled). \
+            Все запросы выполняются от имени «anonymous». \
+            В общем контуре так работать нельзя."
+        )
+    if cfg.llm.available and cfg.llm.model not in {
+        e.get("name", "") for e in cfg.llm.available
+    }:
+        # Не отказ: опечатка администратора в llm.model не должна превращать
+        # каждый запрос без явной model в 400-ю ошибку (resolve_model честно
+        # вернёт cfg.model). Но /models тогда не пометит default, браузер
+        # возьмёт первый пункт списка, а пустой запрос уйдёт на cfg.model —
+        # предупреждаем об этом расхождении при старте.
+        print(
+            f"ВНИМАНИЕ: llm.model «{cfg.llm.model}» отсутствует в llm.available. \
+            Список моделей в интерфейсе разойдётся с моделью по умолчанию."
         )
 
     state: dict[str, Any] = {"pipeline": None, "error": None}
@@ -120,8 +152,29 @@ def create_app(cfg: Config) -> FastAPI:
             }
         return {"status": "ok"} if user is None else {"status": "ok", **stats}
 
+
+    @app.get(
+        "/models",
+        response_model=ModelsResponse,
+        dependencies=[Depends(current_user)],
+    )
+    def list_models() -> ModelsResponse:
+        # probe=True добирает размер контекста и поддержку инструментов из Ollama.
+        # Отказ Ollama список не роняет: недостающие поля останутся пустыми.
+        return ModelsResponse(
+            models=[ModelInfo(**item) for item in available_models(cfg.llm)]
+        )
+
+
+
+
     @app.post("/ask")
     def ask(req: AskRequest, user: User = Depends(current_user)) -> dict[str, Any]:
+        try:
+            model = resolve_model(cfg.llm, req.model)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
         store = history_store
         conversation_id = req.conversation_id
         turns: list[tuple[str, str]] | None = [(q, a) for q, a in req.history] or None
@@ -138,10 +191,11 @@ def create_app(cfg: Config) -> FastAPI:
                 ) or turns
 
         answer = pipeline().ask(
-            req.question, top_k=req.top_k, history=turns, expand=req.expand
+            req.question, top_k=req.top_k, history=turns, expand=req.expand, model=model
         )
 
         data = answer.to_dict()
+        data["model"] = model
 
         if store is not None:
             # Диалог заводим только после успешного ответа пайплайна: иначе
@@ -166,7 +220,7 @@ def create_app(cfg: Config) -> FastAPI:
                 )
                 saved_answer = store.append(
                     conversation_id, user.name, "assistant",
-                    answer.text, answer.used_sources,
+                    answer.text, answer.used_sources, model=model,
                 )
                 if not (saved_question and saved_answer):
                     data["warnings"].append(
@@ -182,6 +236,11 @@ def create_app(cfg: Config) -> FastAPI:
 
     @app.post("/ask/stream")
     def ask_stream(req: AskRequest, user: User = Depends(current_user)) -> StreamingResponse:
+        try:
+            model = resolve_model(cfg.llm, req.model)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
         store = history_store
         conversation_id = req.conversation_id
         turns: list[tuple[str, str]] | None = [(q, a) for q, a in req.history] or None
@@ -200,7 +259,9 @@ def create_app(cfg: Config) -> FastAPI:
         # пока статус ответа не отправлен, об отказе ещё можно сообщить кодом.
         started = time.time()
         rag = pipeline()
-        hits, tokens = rag.stream_answer(req.question, top_k=req.top_k, history=turns)
+        hits, tokens = rag.stream_answer(
+            req.question, top_k=req.top_k, history=turns, model=model
+        )
 
         def generate() -> Iterator[str]:
             nonlocal conversation_id
@@ -261,7 +322,8 @@ def create_app(cfg: Config) -> FastAPI:
                             conversation_id, user.name, "user", req.question
                         )
                         saved_answer = store.append(
-                            conversation_id, user.name, "assistant", text, sources
+                            conversation_id, user.name, "assistant", text, sources,
+                            model=model,
                         )
                         if not (saved_question and saved_answer):
                             warnings.append("Ответ не сохранён в историю диалога")
@@ -275,6 +337,7 @@ def create_app(cfg: Config) -> FastAPI:
                         "sources": sources,
                         "warnings": warnings,
                         "elapsed_sec": round(time.time() - started, 2),
+                        "model": model,
                     },
                     ensure_ascii=False,
                 ) + "\n"

@@ -25,7 +25,7 @@ from typing import Any
 
 # Версия схемы, которую понимает этот код. Хранится в PRAGMA user_version —
 # отдельная таблица миграций не нужна, хватает номера и лестницы обновлений.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -61,6 +61,12 @@ VALUES (1, '1970-01-01T00:00:00+00:00');
 # ей не помогает и запрос уходит в полное сканирование таблицы.
 _SCHEMA_V2 = """
 CREATE INDEX IF NOT EXISTS idx_conv_updated ON conversations(updated_at);
+"""
+
+# Ступень 3: чем получен ответ. Пустая строка — сообщение записано до появления
+# выбора модели, интерфейс тогда ничего не показывает.
+_SCHEMA_V3 = """
+ALTER TABLE messages ADD COLUMN model TEXT NOT NULL DEFAULT '';
 """
 
 
@@ -125,6 +131,9 @@ def init_schema(conn: sqlite3.Connection) -> None:
     if version < 2:
         conn.executescript(_SCHEMA_V2)
         conn.execute("PRAGMA user_version = 2")
+    if version < 3:
+        conn.executescript(_SCHEMA_V3)
+        conn.execute("PRAGMA user_version = 3")
 
 
 # Заголовок диалога — обрезанный первый вопрос. Без обращения к модели:
@@ -159,6 +168,7 @@ class Message:
     text: str
     created_at: str
     sources: list[dict[str, Any]] = field(default_factory=list)
+    model: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -166,6 +176,7 @@ class Message:
             "text": self.text,
             "created_at": self.created_at,
             "sources": self.sources,
+            "model": self.model,
         }
 
 
@@ -206,6 +217,7 @@ class HistoryStore:
         role: str,
         text: str,
         sources: list[dict[str, Any]] | None = None,
+        model: str = "",
     ) -> bool:
         """Дописывает сообщение. False — диалога нет или он чужой."""
         now = utcnow().isoformat()
@@ -218,9 +230,9 @@ class HistoryStore:
                 return False
             conn.execute(
                 "INSERT INTO messages (conversation_id, role, text, sources_json,"
-                " created_at) VALUES (?, ?, ?, ?, ?)",
+                " created_at, model) VALUES (?, ?, ?, ?, ?, ?)",
                 (conversation_id, role, text,
-                 json.dumps(sources or [], ensure_ascii=False), now),
+                 json.dumps(sources or [], ensure_ascii=False), now, model),
             )
             conn.execute(
                 "UPDATE conversations SET updated_at = ? WHERE id = ?",
@@ -270,7 +282,7 @@ class HistoryStore:
             if owner is None:
                 return None
             rows = conn.execute(
-                "SELECT role, text, sources_json, created_at FROM messages"
+                "SELECT role, text, sources_json, created_at, model FROM messages"
                 " WHERE conversation_id = ? ORDER BY id",
                 (conversation_id,),
             ).fetchall()
@@ -280,6 +292,7 @@ class HistoryStore:
                 text=r["text"],
                 created_at=r["created_at"],
                 sources=json.loads(r["sources_json"]),
+                model=r["model"],
             )
             for r in rows
         ]
