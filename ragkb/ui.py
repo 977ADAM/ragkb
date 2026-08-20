@@ -67,6 +67,11 @@ UI_HTML = """<!DOCTYPE html>
           color:#fff; cursor:pointer; }
   #send:disabled { opacity:.5; cursor:default; }
 
+  #controls { display:flex; gap:16px; padding:8px 20px 0; font-size:13px;
+              color:var(--muted); }
+  #controls select { background:var(--bg); color:var(--fg);
+              border:1px solid var(--line); border-radius:6px; padding:3px 6px; }
+
   @media (max-width:760px) {
     body { flex-direction:column; height:auto; min-height:100vh; }
     aside { width:auto; border-right:0; border-bottom:1px solid var(--line); max-height:38vh; }
@@ -83,6 +88,14 @@ UI_HTML = """<!DOCTYPE html>
 <main>
   <div id="status">загрузка…</div>
   <div id="thread"></div>
+  <div id="controls">
+    <label>Модель <select id="model"></select></label>
+    <label>Фрагментов <select id="topk">
+      <option value="2">2</option>
+      <option value="3">3</option>
+      <option value="5" selected>5</option>
+    </select></label>
+  </div>
   <form id="f">
     <input type="text" id="q" placeholder="Задайте вопрос по документам…"
            autocomplete="off" autofocus>
@@ -97,6 +110,36 @@ const sendEl = document.getElementById('send');
 
 let currentId = null;   // единственное состояние на клиенте
 let streaming = false;  // идёт поток ответа — переключать/удалять диалоги нельзя
+
+const modelEl = document.getElementById('model');
+const topkEl = document.getElementById('topk');
+
+// Выбор помнит браузер: сервер намеренно без состояния везде, кроме истории.
+function restoreChoice() {
+  const m = localStorage.getItem('ragkb.model');
+  const k = localStorage.getItem('ragkb.topk');
+  if (m) modelEl.value = m;
+  if (k) topkEl.value = k;
+}
+modelEl.addEventListener('change', () => localStorage.setItem('ragkb.model', modelEl.value));
+topkEl.addEventListener('change', () => localStorage.setItem('ragkb.topk', topkEl.value));
+
+async function loadModels() {
+  try {
+    const r = await fetch('/models');
+    if (!r.ok) return;
+    const items = (await r.json()).models || [];
+    modelEl.innerHTML = '';
+    items.forEach(m => {
+      const o = document.createElement('option');
+      o.value = m.name;
+      o.textContent = m.title;
+      if (m.default) o.selected = true;
+      modelEl.appendChild(o);
+    });
+    restoreChoice();
+  } catch (_) { /* список моделей не критичен: без него работает выбор по умолчанию */ }
+}
 
 function esc(s) {
   return String(s).replace(/[&<>"]/g, c =>
@@ -157,6 +200,10 @@ function addMessage(role, text, sources) {
   return el;
 }
 
+function renderModelMeta(model) {
+  return model ? `<div class="meta">${esc(model)}</div>` : '';
+}
+
 function warn(container, text) {
   container.insertAdjacentHTML('beforeend', `<div class="warn">⚠ ${esc(text)}</div>`);
 }
@@ -172,7 +219,10 @@ async function openConv(id) {
   const data = await r.json();
   currentId = data.id;
   threadEl.innerHTML = '';
-  (data.messages || []).forEach(m => addMessage(m.role, m.text, m.sources));
+  (data.messages || []).forEach(m => {
+    const el = addMessage(m.role, m.text, m.sources);
+    if (m.role === 'assistant' && m.model) el.insertAdjacentHTML('beforeend', renderModelMeta(m.model));
+  });
   await loadList();
 }
 
@@ -219,7 +269,12 @@ document.getElementById('f').addEventListener('submit', async e => {
     const resp = await fetch('/ask/stream', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({question, conversation_id: currentId})
+      body: JSON.stringify({
+        question,
+        conversation_id: currentId,
+        model: modelEl.value || null,
+        top_k: parseInt(topkEl.value, 10)
+      })
     });
     if (!resp.ok) {
       if (resp.status === 404) {
@@ -262,10 +317,15 @@ document.getElementById('f').addEventListener('submit', async e => {
         } else if (ev.type === 'done') {
           finished = true;
           currentId = ev.conversation_id || currentId;
+          if (!text.trim()) {
+            box.insertAdjacentHTML('beforeend',
+              '<div class="warn">⚠ Модель вернула пустой ответ</div>');
+          }
           box.insertAdjacentHTML('beforeend', renderSources(ev.sources));
           (ev.warnings || []).forEach(w => warn(box, w));
-          box.insertAdjacentHTML('beforeend',
-            `<div class="meta">${esc(ev.elapsed_sec)} с</div>`);
+          const label = ev.model ? `${esc(ev.model)} · ${esc(ev.elapsed_sec)} с`
+                                 : `${esc(ev.elapsed_sec)} с`;
+          box.insertAdjacentHTML('beforeend', `<div class="meta">${label}</div>`);
           await loadList();
         }
       }
@@ -287,6 +347,7 @@ document.getElementById('f').addEventListener('submit', async e => {
 });
 
 (async () => {
+  await loadModels();
   const items = await loadList();
   if (items.length) await openConv(items[0].id); else await startNew();
 })();
