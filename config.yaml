@@ -56,27 +56,6 @@ llm:
   temperature: 0.1
   max_tokens: 1024
   timeout: 180
-  # Модели, которые разрешено выбирать в интерфейсе. Пустой список —
-  # переключения нет, работает только model выше.
-  available:
-    - name: qwen2.5:7b-instruct
-      title: Быстрая
-    - name: qwen2.5:14b-instruct
-      title: Точная
-
-auth:
-  # proxy — логин приходит заголовком от oauth2-proxy (боевой режим)
-  # disabled — аутентификации нет, всё работает от имени anonymous
-  mode: proxy
-  header: X-Forwarded-Preferred-Username
-  email_header: X-Forwarded-Email
-  groups_header: X-Forwarded-Groups
-  admin_group: ragkb-admins
-
-history:
-  # Хранение переписки. Сервис начинает хранить персональные данные:
-  # журнал вопросов сотрудника есть сведения о нём.
-  enabled: true
-  path: data/history.sqlite3
-  retention_days: 90     # после этого срока диалоги удаляются
-  window: 3              # сколько последних ходов уходит в переформулировку
+  # Список моделей приходит из самой Ollama — что установлено, то и предлагается.
+  # Здесь можно сузить выбор до подмножества; пустой список означает «всё».
+  available: []

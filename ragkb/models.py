@@ -15,34 +15,33 @@ from typing import Any
 from .config import LLMConfig
 
 
-def probe_ollama(base_url: str, names: list[str]) -> dict[str, dict[str, Any]]:
-    """Спрашивает у Ollama, что она знает о моделях.
+def installed_models(base_url: str) -> list[dict[str, Any]]:
+    """Что Ollama держит установленным прямо сейчас.
 
-    Возвращает по имени модели словарь с полем context_window и признаком
-    supports_tools. Отсутствие модели в ответе означает, что она не установлена.
-
-    Никогда не поднимает исключений: список моделей не должен становиться
-    недоступным из-за того, что недоступна Ollama. При отказе возвращается
-    пустой словарь, и поля остаются незаполненными.
+    Возвращает список словарей с id, context_window и supports_tools.
+    Никогда не поднимает исключений: недоступность Ollama означает, что
+    генерирующих моделей нет, а не что сервис сломан.
     """
     try:
         import httpx
 
+        root = base_url.rstrip("/")
         with httpx.Client(timeout=2) as client:
-            tags = client.get(f"{base_url.rstrip('/')}/api/tags").json()
-            installed = {m.get("name", "") for m in tags.get("models", [])}
-
-            out: dict[str, dict[str, Any]] = {}
-            for name in names:
-                if name not in installed:
+            tags = client.get(f"{root}/api/tags").json()
+            out: list[dict[str, Any]] = []
+            for entry in tags.get("models", []):
+                model_id = entry.get("name", "")
+                if not model_id:
                     continue
-                info: dict[str, Any] = {"supports_tools": False, "context_window": None}
+                info: dict[str, Any] = {
+                    "id": model_id,
+                    "context_window": None,
+                    "supports_tools": False,
+                }
                 try:
-                    shown = client.post(
-                        f"{base_url.rstrip('/')}/api/show", json={"model": name}
-                    ).json()
+                    shown = client.post(f"{root}/api/show", json={"model": model_id}).json()
                 except Exception:
-                    out[name] = info
+                    out.append(info)
                     continue
                 info["supports_tools"] = "tools" in (shown.get("capabilities") or [])
                 # Ключ размера контекста несёт префикс архитектуры:
@@ -51,56 +50,88 @@ def probe_ollama(base_url: str, names: list[str]) -> dict[str, dict[str, Any]]:
                     if key.endswith(".context_length") and isinstance(value, int):
                         info["context_window"] = value
                         break
-                out[name] = info
+                out.append(info)
             return out
     except Exception:
-        return {}
+        return []
 
 
-def available_models(cfg: LLMConfig, probe: bool = False) -> list[dict[str, Any]]:
-    """Нормализованный список моделей для интерфейса.
+def available_models(
+    cfg: LLMConfig, installed: list[dict[str, Any]] | None = None
+) -> list[dict[str, Any]]:
+    """Модели, которые можно выбрать прямо сейчас.
 
-    Пустой available означает, что переключения нет: отдаём одну текущую.
+    Источник истины — сама Ollama: что установлено, то и предлагаем.
+    Список в конфигурации ничего не задаёт, а только сужает: пустой
+    означает «всё установленное», заполненный — подмножество.
 
-    При probe=True недостающие поля добираются из Ollama. Это не обязательно
-    и не влияет на работоспособность: без неё модель просто описана скупее.
+    Пустой результат означает, что генерирующих моделей нет и сервис
+    работает в режиме поиска — отвечает найденными фрагментами.
+
+    Для бэкендов, кроме ollama, перечислить установленное неоткуда:
+    отдаём одну модель из настроек.
+
+    Параметр installed — точка подмены для тестов: он избавляет их
+    от зависимости от запущенной Ollama.
     """
-    entries = cfg.available or [{"name": cfg.model}]
-    out: list[dict[str, Any]] = []
-    for entry in entries:
-        model_id = entry.get("name", "")
-        if not model_id:
-            continue
-        out.append({
-            "id": model_id,
-            "display_name": entry.get("title") or model_id,
+    if cfg.backend.lower() != "ollama":
+        return [{
+            "id": cfg.model,
+            "display_name": cfg.model,
             "context_window": None,
             "supports_tools": False,
-            "is_default": model_id == cfg.model,
+            "is_default": True,
+        }]
+
+    allowed = {entry.get("name", "") for entry in cfg.available if entry.get("name")}
+    titles = {entry.get("name", ""): entry.get("title") for entry in cfg.available}
+
+    out: list[dict[str, Any]] = []
+    source = installed if installed is not None else installed_models(cfg.base_url)
+    for item in source:
+        if allowed and item["id"] not in allowed:
+            continue
+        out.append({
+            "id": item["id"],
+            "display_name": titles.get(item["id"]) or item["id"],
+            "context_window": item["context_window"],
+            "supports_tools": item["supports_tools"],
+            "is_default": item["id"] == cfg.model,
         })
 
-    if probe and cfg.backend.lower() == "ollama":
-        known = probe_ollama(cfg.base_url, [item["id"] for item in out])
-        for item in out:
-            extra = known.get(item["id"])
-            if extra:
-                item["context_window"] = extra["context_window"]
-                item["supports_tools"] = extra["supports_tools"]
-
+    # Модель из настроек может быть не установлена — тогда по умолчанию
+    # выбирается первая доступная, иначе интерфейс не подсветит ничего.
+    if out and not any(item["is_default"] for item in out):
+        out[0]["is_default"] = True
     return out
 
 
-def resolve_model(cfg: LLMConfig, requested: str | None) -> str:
-    """Проверяет запрошенное имя. Пустое означает «по умолчанию».
+def resolve_model(
+    cfg: LLMConfig, requested: str | None,
+    installed: list[dict[str, Any]] | None = None
+) -> str:
+    """Проверяет запрошенное имя по тому, что установлено прямо сейчас.
 
-    Поднимает ValueError, если имя не разрешено — вызывающий код превращает
-    это в отказ 400.
+    Пустое означает «по умолчанию»: берётся модель из настроек, а если
+    её нет среди установленных — первая доступная. Когда моделей нет
+    вовсе, возвращается модель из настроек: пайплайн не достучится до неё
+    и соберёт ответ экстрактивно, то есть сервис перейдёт в режим поиска.
+
+    Поднимает ValueError на имя, которого нет среди установленных —
+    вызывающий превращает это в отказ 400. Скачать неизвестную модель
+    таким образом нельзя: её просто нет в списке.
     """
+    items = available_models(cfg, installed)
     if not requested:
+        for item in items:
+            if item["is_default"]:
+                return str(item["id"])
         return cfg.model
-    allowed = {item["id"] for item in available_models(cfg)}
+
+    allowed = {item["id"] for item in items}
     if requested not in allowed:
+        available = ", ".join(sorted(allowed)) if allowed else "ни одной"
         raise ValueError(
-            f"Модель «{requested}» не разрешена. Доступны: {', '.join(sorted(allowed))}"
+            f"Модель «{requested}» недоступна. Установлены: {available}"
         )
     return requested

@@ -89,7 +89,8 @@ UI_HTML = """<!DOCTYPE html>
   <div id="status">загрузка…</div>
   <div id="thread"></div>
   <div id="controls">
-    <label>Модель <select id="model"></select></label>
+    <label id="model-box">Модель <select id="model"></select></label>
+    <span id="search-mode" style="display:none">Моделей нет — ответы собираются из найденных фрагментов</span>
     <label>Фрагментов <select id="topk">
       <option value="" selected>по умолчанию</option>
       <option value="2">2</option>
@@ -149,11 +150,18 @@ async function loadModels() {
     const r = await fetch('/models');
     if (!r.ok) return;
     const items = (await r.json()).models || [];
+    // Моделей нет вовсе — сервис отвечает найденными фрагментами.
+    // Прятать выбор честнее, чем показывать пустой список.
+    if (!items.length) {
+      document.getElementById('model-box').style.display = 'none';
+      document.getElementById('search-mode').style.display = '';
+      return;
+    }
     modelEl.innerHTML = '';
     items.forEach(m => {
       const o = document.createElement('option');
       o.value = m.id;
-      o.textContent = m.display_name || m.id;
+      o.textContent = m.id;
       if (m.is_default) o.selected = true;
       modelEl.appendChild(o);
     });

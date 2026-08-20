@@ -162,7 +162,7 @@ def create_app(cfg: Config) -> FastAPI:
         # probe=True добирает размер контекста и поддержку инструментов из Ollama.
         # Отказ Ollama список не роняет: недостающие поля останутся пустыми.
         return ModelsResponse(
-            models=[ModelInfo(**item) for item in available_models(cfg.llm, probe=True)]
+            models=[ModelInfo(**item) for item in available_models(cfg.llm)]
         )
 
 

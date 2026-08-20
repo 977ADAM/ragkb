@@ -9,84 +9,94 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ragkb.config import Config, LLMConfig
 from ragkb.models import available_models, resolve_model
 
+INSTALLED = [
+    {"id": "qwen2.5:7b-instruct", "context_window": 32768, "supports_tools": True},
+    {"id": "qwen2.5:14b-instruct", "context_window": 32768, "supports_tools": True},
+    {"id": "qwen3:4b", "context_window": 40960, "supports_tools": True},
+]
 
-def _cfg() -> LLMConfig:
-    return LLMConfig(
-        model="qwen2.5:7b-instruct",
-        available=[
-            {"name": "qwen2.5:7b-instruct", "title": "Быстрая"},
-            {"name": "qwen2.5:14b-instruct", "title": "Точная"},
-        ],
-    )
+
+def _cfg(available=None, model="qwen2.5:7b-instruct") -> LLMConfig:
+    """Бэкенд ollama: только для него список берётся из установленного."""
+    return LLMConfig(backend="ollama", model=model, available=available or [])
+
+
+def test_available_models_lists_everything_installed():
+    """Без фильтра предлагается всё, что установлено, — без хардкода."""
+    items = available_models(_cfg(), installed=INSTALLED)
+    assert [i["id"] for i in items] == [m["id"] for m in INSTALLED]
+
+
+def test_available_models_filter_narrows_the_list():
+    cfg = _cfg(available=[{"name": "qwen3:4b"}])
+    assert [i["id"] for i in available_models(cfg, installed=INSTALLED)] == ["qwen3:4b"]
 
 
 def test_available_models_marks_default():
-    items = available_models(_cfg())
-    assert [i["id"] for i in items] == ["qwen2.5:7b-instruct", "qwen2.5:14b-instruct"]
-    assert items[0]["is_default"] is True
-    assert items[1]["is_default"] is False
+    items = available_models(_cfg(model="qwen2.5:14b-instruct"), installed=INSTALLED)
+    assert [i["is_default"] for i in items] == [False, True, False]
 
 
-def test_available_models_without_list_returns_current():
-    items = available_models(LLMConfig(model="что-то:latest"))
-    assert len(items) == 1
-    assert items[0]["id"] == "что-то:latest"
+def test_default_falls_back_to_first_when_configured_model_absent():
+    """Модель из настроек не установлена — подсвечиваем первую доступную."""
+    items = available_models(_cfg(model="нет-такой"), installed=INSTALLED)
     assert items[0]["is_default"] is True
 
 
-def test_available_models_fills_missing_title():
-    items = available_models(LLMConfig(model="a", available=[{"name": "a"}]))
-    assert items[0]["display_name"] == "a"
+def test_available_models_carries_ollama_fields():
+    item = available_models(_cfg(), installed=INSTALLED)[0]
+    assert item["context_window"] == 32768
+    assert item["supports_tools"] is True
 
 
-def test_available_models_has_new_fields():
-    """Поля описания модели: без обращения к Ollama они пустые, но присутствуют."""
-    item = available_models(_cfg())[0]
-    assert item["context_window"] is None
-    assert item["supports_tools"] is False
+def test_display_name_defaults_to_id():
+    assert available_models(_cfg(), installed=INSTALLED)[0]["display_name"] == "qwen2.5:7b-instruct"
 
 
-def test_probe_does_not_raise_when_ollama_is_down():
-    """Список моделей не должен становиться недоступным из-за отказа Ollama."""
-    from ragkb.models import probe_ollama
-    assert probe_ollama("http://127.0.0.1:1", ["любая"]) == {}
+def test_display_name_taken_from_config_when_set():
+    cfg = _cfg(available=[{"name": "qwen3:4b", "title": "Рассуждающая"}])
+    assert available_models(cfg, installed=INSTALLED)[0]["display_name"] == "Рассуждающая"
 
 
-def test_available_models_survives_probe_without_ollama():
-    cfg = _cfg()
-    cfg.backend = "ollama"
-    cfg.base_url = "http://127.0.0.1:1"
-    items = available_models(cfg, probe=True)
-    assert [i["id"] for i in items] == ["qwen2.5:7b-instruct", "qwen2.5:14b-instruct"]
-    assert items[0]["context_window"] is None
+def test_no_models_installed_gives_empty_list():
+    """Пустой список означает режим поиска."""
+    assert available_models(_cfg(), installed=[]) == []
+
+
+def test_non_ollama_backend_reports_single_model():
+    cfg = LLMConfig(backend="extractive", model="что-то")
+    items = available_models(cfg)
+    assert [i["id"] for i in items] == ["что-то"]
+    assert items[0]["is_default"] is True
+
+
+def test_installed_models_never_raises_when_ollama_is_down():
+    """Список моделей не должен пропадать оттого, что недоступна Ollama."""
+    from ragkb.models import installed_models
+    assert installed_models("http://127.0.0.1:1") == []
 
 
 def test_resolve_model_returns_default_when_not_requested():
-    assert resolve_model(_cfg(), None) == "qwen2.5:7b-instruct"
-    assert resolve_model(_cfg(), "") == "qwen2.5:7b-instruct"
+    assert resolve_model(_cfg(), None, installed=INSTALLED) == "qwen2.5:7b-instruct"
+    assert resolve_model(_cfg(), "", installed=INSTALLED) == "qwen2.5:7b-instruct"
 
 
-def test_resolve_model_accepts_allowed():
-    assert resolve_model(_cfg(), "qwen2.5:14b-instruct") == "qwen2.5:14b-instruct"
+def test_resolve_model_accepts_installed():
+    assert resolve_model(_cfg(), "qwen3:4b", installed=INSTALLED) == "qwen3:4b"
 
 
-def test_resolve_model_rejects_unknown():
+def test_resolve_model_rejects_not_installed():
     try:
-        resolve_model(_cfg(), "злая:модель")
+        resolve_model(_cfg(), "злая:модель", installed=INSTALLED)
     except ValueError as exc:
         assert "злая:модель" in str(exc)
         return
-    raise AssertionError("ожидался отказ для модели вне списка")
+    raise AssertionError("ожидался отказ для неустановленной модели")
 
 
-def test_resolve_model_without_list_rejects_anything_but_current():
-    cfg = LLMConfig(model="только-эта")
-    assert resolve_model(cfg, "только-эта") == "только-эта"
-    try:
-        resolve_model(cfg, "другая")
-    except ValueError:
-        return
-    raise AssertionError("при пустом списке допустима только текущая модель")
+def test_resolve_model_without_models_returns_configured():
+    """Моделей нет — возвращаем настройку, пайплайн уйдёт в режим поиска."""
+    assert resolve_model(_cfg(), None, installed=[]) == "qwen2.5:7b-instruct"
 
 
 def test_config_reads_available_from_dict():
@@ -252,13 +262,18 @@ def _client(available=None):
     return TestClient(create_app(cfg), raise_server_exceptions=False), cfg
 
 
-ALLOWED = [{"name": "extractive-a", "title": "А"}, {"name": "extractive-b", "title": "Б"}]
+# Экстрактивный бэкенд отдаёт ровно одну модель из настроек —
+# это и делает тесты эндпоинтов независимыми от Ollama.
+ALLOWED = None
 
 
-def test_models_endpoint_lists_allowed():
-    client, _cfg = _client(ALLOWED)
+def test_models_endpoint_lists_current_model():
+    """На экстрактивном бэкенде перечислить установленное неоткуда —
+    отдаётся одна модель из настроек, и она же выбрана по умолчанию."""
+    client, cfg = _client()
     body = client.get("/models").json()
-    assert [m["id"] for m in body["models"]] == ["extractive-a", "extractive-b"]
+    assert [m["id"] for m in body["models"]] == [cfg.llm.model]
+    assert body["models"][0]["is_default"] is True
 
 
 def test_models_endpoint_requires_auth_when_enabled():
@@ -271,28 +286,28 @@ def test_models_endpoint_requires_auth_when_enabled():
 
 
 def test_ask_rejects_unknown_model():
-    client, _ = _client(ALLOWED)
+    client, _ = _client()
     resp = client.post("/ask", json={"question": "тест", "model": "злая:модель"})
     assert resp.status_code == 400, resp.status_code
 
 
 def test_stream_rejects_unknown_model_before_streaming():
-    client, _ = _client(ALLOWED)
+    client, _ = _client()
     resp = client.post("/ask/stream", json={"question": "тест", "model": "злая:модель"})
     assert resp.status_code == 400, resp.status_code
     assert "ndjson" not in resp.headers.get("content-type", "")
 
 
 def test_ask_accepts_allowed_model():
-    client, cfg = _client(ALLOWED)
-    cfg.llm.model = "extractive-a"
-    body = client.post("/ask", json={"question": "сколько дней отпуска?",
-                                     "model": "extractive-b"}).json()
-    assert body["model"] == "extractive-b"
+    client, cfg = _client()
+    body = client.post(
+        "/ask", json={"question": "сколько дней отпуска?", "model": cfg.llm.model}
+    ).json()
+    assert body["model"] == cfg.llm.model
 
 
 def test_stream_done_carries_model():
-    client, _ = _client(ALLOWED)
+    client, _ = _client()
     lines = client.post("/ask/stream", json={"question": "сколько дней отпуска?"}).text.splitlines()
     done = json.loads([line for line in lines if line.strip()][-1])
     assert done["type"] == "done"
@@ -308,11 +323,11 @@ def test_top_k_out_of_range_gives_422():
 def test_model_is_stored_with_message():
     from ragkb.history import HistoryStore
 
-    client, cfg = _client(ALLOWED)
+    client, cfg = _client()
     body = client.post("/ask", json={"question": "сколько дней отпуска?",
-                                     "model": "extractive-b"}).json()
+                                     "model": cfg.llm.model}).json()
     messages = HistoryStore(cfg.history.path).get_messages(body["conversation_id"], "anonymous")
-    assert messages[1].model == "extractive-b"
+    assert messages[1].model == cfg.llm.model
 
 
 def test_mini_yaml_handles_real_config_without_pyyaml():
