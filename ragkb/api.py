@@ -12,7 +12,8 @@ from pydantic import BaseModel, Field
 from .auth import User, current_user, optional_user, require_admin
 from .config import Config
 from .history import HistoryStore, make_title
-from .pipeline import RAGPipeline, build_index
+from .llm import ExtractiveLLM
+from .pipeline import ANSWER_TEMPLATE, SYSTEM_PROMPT, RAGPipeline, build_index, format_context
 from .ui import UI_HTML
 
 
@@ -195,55 +196,86 @@ def create_app(cfg: Config) -> FastAPI:
         def generate() -> Iterator[str]:
             nonlocal conversation_id
             collected: list[str] = []
+            warnings: list[str] = []
             try:
-                for piece in tokens:
-                    collected.append(piece)
+                try:
+                    for piece in tokens:
+                        collected.append(piece)
+                        yield json.dumps(
+                            {"type": "token", "text": piece}, ensure_ascii=False
+                        ) + "\n"
+                except Exception as exc:
+                    if collected:
+                        # Часть ответа уже ушла клиенту — подставлять
+                        # экстрактивный текст поверх нельзя, он задвоится.
+                        # Статус уже отправлен и равен 200 — сменить его
+                        # нельзя, поэтому об отказе сообщаем событием.
+                        yield json.dumps(
+                            {"type": "error", "detail": str(exc)}, ensure_ascii=False
+                        ) + "\n"
+                        return
+                    # Ни одного токена ещё не отдано — деградируем так же,
+                    # как /ask при LLMError: экстрактивный ответ по найденным
+                    # фрагментам вместо жёсткой ошибки.
+                    warnings.append(f"{exc} — ответ собран экстрактивно")
+                    prompt = ANSWER_TEMPLATE.format(
+                        context=format_context(hits), question=req.question
+                    )
+                    fallback_text = ExtractiveLLM(cfg.llm).generate(
+                        SYSTEM_PROMPT, prompt
+                    )
+                    collected.append(fallback_text)
                     yield json.dumps(
-                        {"type": "token", "text": piece}, ensure_ascii=False
+                        {"type": "token", "text": fallback_text}, ensure_ascii=False
                     ) + "\n"
+
+                text = "".join(collected)
+                # Считаем один раз: то же самое уходит и в историю, и в событие done.
+                sources = RAGPipeline._cited_sources(text, hits)
+
+                if not hits:
+                    warnings.append("Поиск не вернул ни одного релевантного фрагмента")
+                if not sources and "нет информации" not in text.lower():
+                    warnings.append(
+                        "Модель не проставила ссылки на источники — ответ стоит проверить"
+                    )
+
+                if store is not None:
+                    # Диалог заводим только после успешной генерации — как в /ask.
+                    if not conversation_id:
+                        conversation_id = store.create_conversation(
+                            user.name, make_title(req.question)
+                        )
+                    # Ответ уже отдан пользователю, отказ записи не должен его портить.
+                    try:
+                        saved_question = store.append(
+                            conversation_id, user.name, "user", req.question
+                        )
+                        saved_answer = store.append(
+                            conversation_id, user.name, "assistant", text, sources
+                        )
+                        if not (saved_question and saved_answer):
+                            warnings.append("Ответ не сохранён в историю диалога")
+                    except Exception:
+                        warnings.append("Ответ не сохранён в историю диалога")
+
+                yield json.dumps(
+                    {
+                        "type": "done",
+                        "conversation_id": conversation_id,
+                        "sources": sources,
+                        "warnings": warnings,
+                        "elapsed_sec": round(time.time() - started, 2),
+                    },
+                    ensure_ascii=False,
+                ) + "\n"
             except Exception as exc:
-                # Статус уже отправлен и равен 200 — сменить его нельзя,
-                # поэтому об отказе сообщаем событием. Молчаливый обрыв
-                # потока выглядел бы для пользователя зависшим ответом.
+                # Отказ где-то после цикла токенов (например, «database is
+                # locked» при записи истории) не должен обрывать поток без
+                # терминального события — клиент должен узнать об этом.
                 yield json.dumps(
                     {"type": "error", "detail": str(exc)}, ensure_ascii=False
                 ) + "\n"
-                return
-
-            text = "".join(collected)
-            # Считаем один раз: то же самое уходит и в историю, и в событие done.
-            sources = RAGPipeline._cited_sources(text, hits)
-            warnings: list[str] = []
-
-            if store is not None:
-                # Диалог заводим только после успешной генерации — как в /ask.
-                if not conversation_id:
-                    conversation_id = store.create_conversation(
-                        user.name, make_title(req.question)
-                    )
-                # Ответ уже отдан пользователю, отказ записи не должен его портить.
-                try:
-                    saved_question = store.append(
-                        conversation_id, user.name, "user", req.question
-                    )
-                    saved_answer = store.append(
-                        conversation_id, user.name, "assistant", text, sources
-                    )
-                    if not (saved_question and saved_answer):
-                        warnings.append("Ответ не сохранён в историю диалога")
-                except Exception:
-                    warnings.append("Ответ не сохранён в историю диалога")
-
-            yield json.dumps(
-                {
-                    "type": "done",
-                    "conversation_id": conversation_id,
-                    "sources": sources,
-                    "warnings": warnings,
-                    "elapsed_sec": round(time.time() - started, 2),
-                },
-                ensure_ascii=False,
-            ) + "\n"
 
         return StreamingResponse(
             generate(), media_type="application/x-ndjson; charset=utf-8"

@@ -96,6 +96,7 @@ const qEl = document.getElementById('q');
 const sendEl = document.getElementById('send');
 
 let currentId = null;   // единственное состояние на клиенте
+let streaming = false;  // идёт поток ответа — переключать/удалять диалоги нельзя
 
 function esc(s) {
   return String(s).replace(/[&<>"]/g, c =>
@@ -116,7 +117,7 @@ fetch('/health').then(r => r.json()).then(d => {
 
 async function loadList() {
   const r = await fetch('/conversations');
-  if (!r.ok) { listEl.innerHTML = ''; return []; }
+  if (!r.ok) { listEl.innerHTML = ''; warn(threadEl, 'Не удалось загрузить список диалогов'); return []; }
   const items = (await r.json()).conversations || [];
   listEl.innerHTML = '';
   items.forEach(c => {
@@ -139,12 +140,12 @@ function renderSources(sources) {
     // available отсутствует — состав индекса неизвестен, пометку не ставим.
     const gone = s.available === false
       ? ' <span class="gone">(источник больше не в базе)</span>' : '';
-    return `[${s.n}] ${esc(s.citation)}${gone}`;
+    return `[${esc(s.n)}] ${esc(s.citation)}${gone}`;
   });
   return `<div class="src">${rows.join('<br>')}</div>`;
 }
 
-function addMessage(role, text, sources, warnings, meta) {
+function addMessage(role, text, sources) {
   const el = document.createElement('div');
   el.className = 'msg ' + role;
   el.innerHTML = `<div class="who">${role === 'user' ? 'Вы' : 'Ассистент'}</div>` +
@@ -152,25 +153,31 @@ function addMessage(role, text, sources, warnings, meta) {
   el.querySelector('.body').textContent = text || '';
   threadEl.appendChild(el);
   if (sources) el.insertAdjacentHTML('beforeend', renderSources(sources));
-  (warnings || []).forEach(w =>
-    el.insertAdjacentHTML('beforeend', `<div class="warn">⚠ ${esc(w)}</div>`));
-  if (meta) el.insertAdjacentHTML('beforeend', `<div class="meta">${esc(meta)}</div>`);
   threadEl.scrollTop = threadEl.scrollHeight;
   return el;
 }
 
+function warn(container, text) {
+  container.insertAdjacentHTML('beforeend', `<div class="warn">⚠ ${esc(text)}</div>`);
+}
+
 async function openConv(id) {
+  if (streaming) return;
   const r = await fetch('/conversations/' + encodeURIComponent(id));
-  if (!r.ok) { await startNew(); return; }
+  if (!r.ok) {
+    threadEl.innerHTML = '';
+    warn(threadEl, 'Не удалось открыть диалог');
+    return;
+  }
   const data = await r.json();
   currentId = data.id;
   threadEl.innerHTML = '';
-  (data.messages || []).forEach(m =>
-    addMessage(m.role, m.text, m.sources, null, null));
+  (data.messages || []).forEach(m => addMessage(m.role, m.text, m.sources));
   await loadList();
 }
 
 async function startNew() {
+  if (streaming) return;
   currentId = null;
   threadEl.innerHTML = '<div class="empty">Задайте вопрос по документам</div>';
   await loadList();
@@ -178,9 +185,10 @@ async function startNew() {
 }
 
 async function removeConv(id, title) {
+  if (streaming) return;
   if (!confirm(`Удалить диалог «${title || 'Без названия'}»? Восстановить нельзя.`)) return;
   const r = await fetch('/conversations/' + encodeURIComponent(id), {method:'DELETE'});
-  if (!r.ok) return;
+  if (!r.ok) { warn(threadEl, 'Не удалось удалить диалог'); return; }
   if (id === currentId) {
     const rest = await loadList();
     if (rest.length) await openConv(rest[0].id); else await startNew();
@@ -193,16 +201,19 @@ document.getElementById('new').onclick = () => startNew();
 
 document.getElementById('f').addEventListener('submit', async e => {
   e.preventDefault();
+  if (streaming) return;
   const question = qEl.value.trim();
   if (!question) return;
   qEl.value = '';
   sendEl.disabled = true;
+  streaming = true;
 
   if (threadEl.querySelector('.empty')) threadEl.innerHTML = '';
-  addMessage('user', question, null, null, null);
-  const box = addMessage('assistant', '', null, null, null);
+  addMessage('user', question);
+  const box = addMessage('assistant', '');
   const bodyEl = box.querySelector('.body');
   bodyEl.textContent = '…';
+  let finished = false;   // выставляется по 'done' или 'error' от сервера
 
   try {
     const resp = await fetch('/ask/stream', {
@@ -211,7 +222,16 @@ document.getElementById('f').addEventListener('submit', async e => {
       body: JSON.stringify({question, conversation_id: currentId})
     });
     if (!resp.ok) {
-      bodyEl.textContent = 'Ошибка: ' + resp.status;
+      if (resp.status === 404) {
+        // Диалог убрали (другая вкладка, уборка по сроку хранения) —
+        // без сброса currentId все следующие вопросы будут падать так же.
+        currentId = null;
+        await loadList();
+        bodyEl.textContent = '';
+        warn(box, 'Диалог не найден, начат новый');
+      } else {
+        bodyEl.textContent = 'Ошибка: ' + resp.status;
+      }
       return;
     }
     const reader = resp.body.getReader();
@@ -235,24 +255,32 @@ document.getElementById('f').addEventListener('submit', async e => {
         } else if (ev.type === 'error') {
           // Статус уже 200 — об отказе сообщает событие, и его надо показать,
           // иначе обрыв выглядит зависшим ответом.
+          finished = true;
           bodyEl.textContent = text || '';
-          box.insertAdjacentHTML('beforeend',
-            `<div class="warn">⚠ Ошибка генерации: ${esc(ev.detail)}</div>`);
+          warn(box, 'Ошибка генерации: ' + ev.detail);
           return;
         } else if (ev.type === 'done') {
+          finished = true;
           currentId = ev.conversation_id || currentId;
           box.insertAdjacentHTML('beforeend', renderSources(ev.sources));
-          (ev.warnings || []).forEach(w =>
-            box.insertAdjacentHTML('beforeend', `<div class="warn">⚠ ${esc(w)}</div>`));
+          (ev.warnings || []).forEach(w => warn(box, w));
           box.insertAdjacentHTML('beforeend',
-            `<div class="meta">${ev.elapsed_sec} с</div>`);
+            `<div class="meta">${esc(ev.elapsed_sec)} с</div>`);
           await loadList();
         }
       }
     }
+    if (!finished) {
+      // Чтение закончилось (реже — соединение оборвалось), но ни 'done',
+      // ни 'error' от сервера не пришло: без этого текст выглядел бы
+      // законченным ответом без источников и без предупреждения.
+      bodyEl.textContent = text || '';
+      warn(box, 'Ответ оборван, соединение прервано');
+    }
   } catch (err) {
     bodyEl.textContent = 'Ошибка: ' + err.message;
   } finally {
+    streaming = false;
     sendEl.disabled = false;
     qEl.focus();
   }

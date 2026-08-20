@@ -172,6 +172,54 @@ def test_failed_stream_leaves_no_conversation():
     assert HistoryStore(cfg.history.path).list_conversations("anonymous") == []
 
 
+def test_stream_error_event_on_late_failure():
+    """Отказ после первого токена — последним событием должен быть error,
+    а не обрыв тела без терминального события."""
+    from unittest import mock
+
+    client, cfg = _indexed_client()
+    rag = RAGPipeline(cfg)
+    real_hits, _ = rag.stream_answer("сколько дней отпуска?")
+
+    def broken_tokens():
+        yield "Частичный ответ "
+        raise RuntimeError("database is locked")
+
+    with mock.patch.object(
+        RAGPipeline, "stream_answer", return_value=(real_hits, broken_tokens())
+    ):
+        events = _events(
+            client.post("/ask/stream", json={"question": "сколько дней отпуска?"})
+        )
+    assert events, "поток пуст"
+    assert events[-1]["type"] == "error", events[-1]
+    assert any(e["type"] == "token" for e in events)
+
+
+def test_stream_extractive_fallback_before_first_token():
+    """Отказ до первого токена — экстрактивный фолбэк вместо ошибки,
+    поток всё равно доходит до done с предупреждением."""
+    from unittest import mock
+
+    client, cfg = _indexed_client()
+    rag = RAGPipeline(cfg)
+    real_hits, _ = rag.stream_answer("сколько дней отпуска?")
+
+    def broken_tokens():
+        raise RuntimeError("LLM недоступна")
+        yield  # pragma: no cover — генератор должен упасть до первого next()
+
+    with mock.patch.object(
+        RAGPipeline, "stream_answer", return_value=(real_hits, broken_tokens())
+    ):
+        events = _events(
+            client.post("/ask/stream", json={"question": "сколько дней отпуска?"})
+        )
+    assert events[-1]["type"] == "done", events[-1]
+    assert any(e["type"] == "token" for e in events), "должен быть экстрактивный фолбэк"
+    assert any("экстрактивно" in w for w in events[-1]["warnings"]), events[-1]["warnings"]
+
+
 def test_stream_works_with_history_disabled():
     cfg = _workspace()
     build_index(cfg)
