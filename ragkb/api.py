@@ -59,9 +59,9 @@ def create_app(cfg: Config) -> FastAPI:
     app.state.auth = cfg.auth
     if cfg.auth.mode == "disabled":
         print(
-            "ВНИМАНИЕ: аутентификация выключена (auth.mode: disabled). "
-            "Все запросы выполняются от имени «anonymous». "
-            "В общем контуре так работать нельзя."
+            "ВНИМАНИЕ: аутентификация выключена (auth.mode: disabled). \
+            Все запросы выполняются от имени «anonymous». \
+            В общем контуре так работать нельзя."
         )
     if cfg.llm.available and cfg.llm.model not in {
         e.get("name", "") for e in cfg.llm.available
@@ -72,8 +72,8 @@ def create_app(cfg: Config) -> FastAPI:
         # возьмёт первый пункт списка, а пустой запрос уйдёт на cfg.model —
         # предупреждаем об этом расхождении при старте.
         print(
-            f"ВНИМАНИЕ: llm.model «{cfg.llm.model}» отсутствует в llm.available. "
-            "Список моделей в интерфейсе разойдётся с моделью по умолчанию."
+            f"ВНИМАНИЕ: llm.model «{cfg.llm.model}» отсутствует в llm.available. \
+            Список моделей в интерфейсе разойдётся с моделью по умолчанию."
         )
 
     state: dict[str, Any] = {"pipeline": None, "error": None}
