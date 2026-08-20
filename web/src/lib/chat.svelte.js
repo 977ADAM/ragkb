@@ -58,7 +58,7 @@ export async function start() {
 	const session = crypto.randomUUID();
 	initEvents(session);
 	try {
-		const response = await fetch(`/api/bootstrap?session=${session}`);
+		const response = await fetch(`/api/bootstrap/${session}/app_start`);
 		const body = await response.json();
 		if (!response.ok) {
 			chat.fatal = body.detail || 'Не удалось получить стартовые сведения';
