@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ragkb.history import SCHEMA_VERSION, connect, init_schema, utcnow
+from ragkb.history import SCHEMA_VERSION, TITLE_LIMIT, connect, init_schema, utcnow
 
 
 def _fresh_db() -> Path:
@@ -276,6 +276,30 @@ def test_recent_turns_for_other_user_is_empty():
     store.append(cid, "ivanov", "user", "в1")
     store.append(cid, "ivanov", "assistant", "о1")
     assert store.recent_turns(cid, "petrov", window=3) == []
+
+
+def test_rename_changes_title():
+    store = _store()
+    cid = store.create_conversation("ivanov", "Отпуск")
+    assert store.rename_conversation(cid, "ivanov", "Отпуск и перенос") is True
+    assert store.list_conversations("ivanov")[0].title == "Отпуск и перенос"
+
+
+def test_rename_of_other_user_is_refused():
+    store = _store()
+    cid = store.create_conversation("ivanov", "Отпуск")
+    assert store.rename_conversation(cid, "petrov", "Чужой заголовок") is False
+    assert store.list_conversations("ivanov")[0].title == "Отпуск"
+
+
+def test_rename_does_not_touch_updated_at():
+    # Переименование — не реплика в диалоге. Если бы оно двигало updated_at,
+    # диалог прыгал бы наверх списка от простого исправления опечатки.
+    store = _store()
+    cid = store.create_conversation("ivanov", "Отпуск")
+    before = store.list_conversations("ivanov")[0].updated_at
+    store.rename_conversation(cid, "ivanov", "Отпуск и перенос")
+    assert store.list_conversations("ivanov")[0].updated_at == before
 
 
 def test_delete_removes_conversation_and_messages():
@@ -703,6 +727,58 @@ def test_delete_own_conversation():
     cid = store.create_conversation("anonymous", "Отпуск")
     assert client.delete(f"/conversations/{cid}").status_code == 200
     assert client.get("/conversations").json() == {"conversations": [], "total": 0}
+
+
+def test_rename_own_conversation():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    client = _app_client(tmp)
+    store = HistoryStore(tmp / "history.sqlite3")
+    cid = store.create_conversation("anonymous", "Отпуск")
+    resp = client.patch(f"/conversations/{cid}", json={"title": "Отпуск и перенос"})
+    assert resp.status_code == 200, resp.status_code
+    assert resp.json() == {"id": cid, "title": "Отпуск и перенос"}
+    assert client.get("/conversations").json()["conversations"][0]["title"] == (
+        "Отпуск и перенос"
+    )
+
+
+def test_rename_foreign_conversation_gives_404():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    client = _app_client(tmp)
+    store = HistoryStore(tmp / "history.sqlite3")
+    foreign = store.create_conversation("petrov", "Чужой")
+    assert client.patch(f"/conversations/{foreign}",
+                        json={"title": "Мой"}).status_code == 404
+    assert store.list_conversations("petrov")[0].title == "Чужой"
+
+
+def test_rename_with_blank_title_is_refused():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    client = _app_client(tmp)
+    store = HistoryStore(tmp / "history.sqlite3")
+    cid = store.create_conversation("anonymous", "Отпуск")
+    # Пустой заголовок сделал бы диалог безымянным в списке — отказ, а не
+    # молчаливое сохранение пробелов.
+    assert client.patch(f"/conversations/{cid}", json={"title": "   "}).status_code == 422
+    assert store.list_conversations("anonymous")[0].title == "Отпуск"
+
+
+def test_rename_with_too_long_title_is_refused():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    client = _app_client(tmp)
+    store = HistoryStore(tmp / "history.sqlite3")
+    cid = store.create_conversation("anonymous", "Отпуск")
+    # Ограничение то же, что у заголовка, который придумывает сам сервис
+    # (TITLE_LIMIT): иначе список диалогов разъедется.
+    resp = client.patch(f"/conversations/{cid}", json={"title": "я" * (TITLE_LIMIT + 1)})
+    assert resp.status_code == 422, resp.status_code
+
+
+def test_rename_disabled_history_gives_404():
+    tmp = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    resp = _app_client(tmp, enabled=False).patch(
+        "/conversations/любой", json={"title": "Новый"})
+    assert resp.status_code == 404, resp.status_code
 
 
 def test_delete_foreign_conversation_gives_404():

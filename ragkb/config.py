@@ -103,6 +103,23 @@ class AuthConfig:
 
 
 @dataclass
+class OrganizationConfig:
+    """Кто владеет этой установкой сервиса.
+
+    Одна установка обслуживает одну организацию: разграничения базы знаний
+    внутри сервиса нет, разные организации разводятся разными развёртываниями.
+    Эти сведения нужны интерфейсу, чтобы подписать, чья это база.
+    """
+
+    # Пусто — организация не настроена; тогда /organizations отдаёт пустой
+    # список, а не организацию без имени.
+    name: str = ""
+    # Идентификатор для программных клиентов. Пуст — берётся имя.
+    id: str = ""
+    description: str = ""
+
+
+@dataclass
 class HistoryConfig:
     # Хранение переписки пользователей. Выключается только через config.yaml —
     # см. комментарий о переменных окружения ниже.
@@ -127,6 +144,7 @@ class Config:
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
+    organization: OrganizationConfig = field(default_factory=OrganizationConfig)
     history: HistoryConfig = field(default_factory=HistoryConfig)
 
     @classmethod
@@ -153,6 +171,7 @@ class Config:
             "llm": LLMConfig,
             "auth": AuthConfig,
             "history": HistoryConfig,
+            "organization": OrganizationConfig,
         }
         # Известные скалярные поля верхнего уровня (docs_dir, index_dir, ...).
         known_top_level = {f.name for f in fields(cls)}
@@ -193,6 +212,8 @@ class Config:
             # булево enabled и числовые retention_days/window сюда добавлять
             # нельзя — "false" истинна, а число станет строкой.
             "RAGKB_HISTORY_PATH": ("path", self.history),
+            "RAGKB_ORG_NAME": ("name", self.organization),
+            "RAGKB_ORG_ID": ("id", self.organization),
         }
         for env, (attr, target) in mapping.items():
             val = os.environ.get(env)
