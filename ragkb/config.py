@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -154,12 +154,19 @@ class Config:
             "auth": AuthConfig,
             "history": HistoryConfig,
         }
+        # Известные скалярные поля верхнего уровня (docs_dir, index_dir, ...).
+        known_top_level = {f.name for f in fields(cls)}
         kwargs: dict[str, Any] = {}
         for key, value in (data or {}).items():
             if key in sections:
                 kwargs[key] = sections[key](**value)
-            else:
+            elif key in known_top_level:
                 kwargs[key] = value
+            # Неизвестный корневой ключ молча игнорируем: это защита на случай,
+            # если _mini_yaml (фолбэк без pyyaml) не смог правильно разобрать
+            # часть файла — например, элементы YAML-последовательности,
+            # которые он не умеет разбирать и пропускает в корень. Новое поле
+            # конфигурации не должно ронять сервис при отсутствии pyyaml.
         return cls(**kwargs)
 
     def _apply_env(self) -> None:
@@ -215,6 +222,12 @@ def _mini_yaml(text: str) -> dict[str, Any]:
     for raw in text.splitlines():
         line = raw.split("#", 1)[0].rstrip()
         if not line.strip():
+            continue
+        stripped = line.strip()
+        if stripped.startswith("-"):
+            # Элемент YAML-последовательности (например, llm.available).
+            # Этот парсер последовательности не понимает — пропускаем строку,
+            # а не кладём её обрубок в корень словаря как отдельный ключ.
             continue
         indent = len(line) - len(line.lstrip())
         key, _, value = line.strip().partition(":")

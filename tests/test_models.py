@@ -121,9 +121,18 @@ def test_llm_for_keeps_backend_and_settings():
 
 
 def test_ask_records_used_model():
+    # Прежняя версия сравнивала answer.llm_backend с rag.llm.name — но первое
+    # присваивается из второго, а _llm_for(None) возвращает тот же rag.llm,
+    # так что тест не мог провалиться ни при какой поломке переключения
+    # модели. Проверяем именно переключение: просим другую модель и смотрим,
+    # что в ответе записано её имя. В сеть не ходит: при недоступной Ollama
+    # ask() ловит LLMError и собирает ответ экстрактивно, но llm_backend
+    # успевает получить имя запрошенной модели до этого отказа.
     rag = _pipeline()
-    answer = rag.ask("сколько дней отпуска?")
-    assert answer.llm_backend == rag.llm.name
+    rag.cfg.llm.backend = "ollama"
+    other_model = "другая-модель"
+    answer = rag.ask("сколько дней отпуска?", model=other_model)
+    assert other_model in answer.llm_backend
 
 
 def test_stream_answer_accepts_model():
@@ -282,6 +291,20 @@ def test_model_is_stored_with_message():
                                      "model": "extractive-b"}).json()
     messages = HistoryStore(cfg.history.path).get_messages(body["conversation_id"], "anonymous")
     assert messages[1].model == "extractive-b"
+
+
+def test_mini_yaml_handles_real_config_without_pyyaml():
+    # Реальный config.yaml содержит llm.available — последовательность YAML,
+    # которую _mini_yaml не умеет разбирать. Раньше её элементы («- name: ...»)
+    # утекали в корень словаря отдельными ключами, и Config.from_dict падал
+    # с TypeError на незнакомом аргументе. Проверяем, что фолбэк-парсер и
+    # сборка конфигурации теперь уживаются на настоящем файле.
+    from ragkb.config import _mini_yaml
+
+    text = (Path(__file__).resolve().parents[1] / "config.yaml").read_text(encoding="utf-8")
+    data = _mini_yaml(text)
+    cfg = Config.from_dict(data)  # не должно бросать TypeError
+    assert isinstance(cfg, Config)
 
 
 if __name__ == "__main__":

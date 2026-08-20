@@ -63,6 +63,18 @@ def create_app(cfg: Config) -> FastAPI:
             "Все запросы выполняются от имени «anonymous». "
             "В общем контуре так работать нельзя."
         )
+    if cfg.llm.available and cfg.llm.model not in {
+        e.get("name", "") for e in cfg.llm.available
+    }:
+        # Не отказ: опечатка администратора в llm.model не должна превращать
+        # каждый запрос без явной model в 400-ю ошибку (resolve_model честно
+        # вернёт cfg.model). Но /models тогда не пометит default, браузер
+        # возьмёт первый пункт списка, а пустой запрос уйдёт на cfg.model —
+        # предупреждаем об этом расхождении при старте.
+        print(
+            f"ВНИМАНИЕ: llm.model «{cfg.llm.model}» отсутствует в llm.available. "
+            "Список моделей в интерфейсе разойдётся с моделью по умолчанию."
+        )
 
     state: dict[str, Any] = {"pipeline": None, "error": None}
 

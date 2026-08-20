@@ -91,9 +91,10 @@ UI_HTML = """<!DOCTYPE html>
   <div id="controls">
     <label>Модель <select id="model"></select></label>
     <label>Фрагментов <select id="topk">
+      <option value="" selected>по умолчанию</option>
       <option value="2">2</option>
       <option value="3">3</option>
-      <option value="5" selected>5</option>
+      <option value="5">5</option>
     </select></label>
   </div>
   <form id="f">
@@ -118,8 +119,27 @@ const topkEl = document.getElementById('topk');
 function restoreChoice() {
   const m = localStorage.getItem('ragkb.model');
   const k = localStorage.getItem('ragkb.topk');
-  if (m) modelEl.value = m;
-  if (k) topkEl.value = k;
+  if (m) {
+    // Вариант по умолчанию уже выбран (loadModels отметил m.default) —
+    // запоминаем его на случай, если сохранённая модель промахнётся.
+    const fallback = modelEl.selectedIndex;
+    modelEl.value = m;
+    // Сохранённая модель могла пропасть из конфигурации — тогда value
+    // промахивается, selectedIndex становится -1, и поле выглядит пустым.
+    // Оставляем вариант по умолчанию и чистим протухшую запись.
+    if (modelEl.selectedIndex < 0) {
+      modelEl.selectedIndex = fallback;
+      localStorage.removeItem('ragkb.model');
+    }
+  }
+  if (k) {
+    const fallback = topkEl.selectedIndex;
+    topkEl.value = k;
+    if (topkEl.selectedIndex < 0) {
+      topkEl.selectedIndex = fallback;
+      localStorage.removeItem('ragkb.topk');
+    }
+  }
 }
 modelEl.addEventListener('change', () => localStorage.setItem('ragkb.model', modelEl.value));
 topkEl.addEventListener('change', () => localStorage.setItem('ragkb.topk', topkEl.value));
@@ -273,7 +293,9 @@ document.getElementById('f').addEventListener('submit', async e => {
         question,
         conversation_id: currentId,
         model: modelEl.value || null,
-        top_k: parseInt(topkEl.value, 10)
+        // Пустое значение — «по умолчанию»: top_k вовсе не кладём в запрос,
+        // тогда работает retrieval.top_k из конфигурации сервера.
+        top_k: topkEl.value ? parseInt(topkEl.value, 10) : null
       })
     });
     if (!resp.ok) {
