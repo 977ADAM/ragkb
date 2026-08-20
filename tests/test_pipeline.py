@@ -12,11 +12,10 @@ import numpy as np
 from ragkb.bm25 import BM25Index
 from ragkb.chunking import chunk_document
 from ragkb.config import ChunkConfig, Config, EmbeddingConfig
-from ragkb.embeddings import TfidfEmbedder, normalize_rows
+from ragkb.embeddings import TfidfEmbedder
 from ragkb.loaders import Block, Document, load
 from ragkb.retrieval import reciprocal_rank_fusion
 from ragkb.text import stem, tokenize
-
 
 # ----------------------------------------------------------------- нормализация
 

@@ -52,7 +52,7 @@ class Retriever:
         self.store = store
         self.embedder = embedder
         self.cfg = cfg
-        self._reranker = None
+        self._reranker: Any = None
 
     def search(self, query: str, top_k: int | None = None) -> list[Hit]:
         top_k = top_k or self.cfg.top_k
@@ -143,13 +143,13 @@ class Retriever:
         """
         if self._reranker is None:
             try:
-                from sentence_transformers import CrossEncoder  # type: ignore
+                from sentence_transformers import CrossEncoder
                 self._reranker = CrossEncoder(self.cfg.reranker_model)
             except ImportError:
                 return hits
         pairs = [(query, h.chunk.embed_text) for h in hits]
         scores = self._reranker.predict(pairs)
-        for hit, score in zip(hits, scores):
+        for hit, score in zip(hits, scores, strict=False):
             hit.rerank_score = float(score)
             hit.score = float(score)
         return sorted(hits, key=lambda h: h.rerank_score or 0.0, reverse=True)

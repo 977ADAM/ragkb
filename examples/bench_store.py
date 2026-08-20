@@ -72,7 +72,7 @@ def bench(n: int = 50_000, dim: int = 384, queries: int = 20, top_k: int = 10) -
 
     t0 = time.perf_counter()
     recalls = []
-    for q, truth in zip(probes, exact):
+    for q, truth in zip(probes, exact, strict=False):
         res = collection.query(query_embeddings=[q.tolist()], n_results=top_k)
         got = {int(i) for i in res["ids"][0]}
         recalls.append(len(got & truth) / top_k)

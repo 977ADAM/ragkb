@@ -125,20 +125,21 @@ class Config:
     history: HistoryConfig = field(default_factory=HistoryConfig)
 
     @classmethod
-    def load(cls, path: str | os.PathLike | None = None) -> "Config":
+    def load(cls, path: str | os.PathLike | None = None) -> Config:
         data: dict[str, Any] = {}
         if path and Path(path).exists():
             text = Path(path).read_text(encoding="utf-8")
-            if str(path).endswith((".yaml", ".yml")):
-                data = _load_yaml(text)
-            else:
-                data = json.loads(text)
+            data = (
+                _load_yaml(text)
+                if str(path).endswith((".yaml", ".yml"))
+                else json.loads(text)
+            )
         cfg = cls.from_dict(data)
         cfg._apply_env()
         return cfg
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Config":
+    def from_dict(cls, data: dict[str, Any]) -> Config:
         sections = {
             "chunking": ChunkConfig,
             "embedding": EmbeddingConfig,
@@ -192,7 +193,7 @@ class Config:
 
 def _load_yaml(text: str) -> dict[str, Any]:
     try:
-        import yaml  # type: ignore
+        import yaml
         return yaml.safe_load(text) or {}
     except ImportError:
         return _mini_yaml(text)

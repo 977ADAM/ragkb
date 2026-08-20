@@ -18,10 +18,10 @@ from ragkb.evaluation import evaluate, load_cases
 from ragkb.pipeline import RAGPipeline
 
 MODES = [
-    ("только BM25",        dict(use_bm25=True,  use_dense=False, use_mmr=False)),
-    ("только векторы",     dict(use_bm25=False, use_dense=True,  use_mmr=False)),
-    ("гибрид (RRF)",       dict(use_bm25=True,  use_dense=True,  use_mmr=False)),
-    ("гибрид + MMR",       dict(use_bm25=True,  use_dense=True,  use_mmr=True)),
+    ("только BM25",    {"use_bm25": True,  "use_dense": False, "use_mmr": False}),
+    ("только векторы", {"use_bm25": False, "use_dense": True,  "use_mmr": False}),
+    ("гибрид (RRF)",   {"use_bm25": True,  "use_dense": True,  "use_mmr": False}),
+    ("гибрид + MMR",   {"use_bm25": True,  "use_dense": True,  "use_mmr": True}),
 ]
 
 

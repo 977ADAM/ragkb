@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".md", ".markdown", ".txt", ".html", ".htm"}
 
@@ -134,13 +135,13 @@ def _pdf_paragraphs(page_text: str) -> list[str]:
 def _pdf_pages(path: Path) -> list[str]:
     """Извлекает текст постранично. pdfplumber точнее, pypdf — запасной вариант."""
     try:
-        import pdfplumber  # type: ignore
+        import pdfplumber
         with pdfplumber.open(str(path)) as pdf:
             return [(page.extract_text() or "") for page in pdf.pages]
     except ImportError:
         pass
     try:
-        from pypdf import PdfReader  # type: ignore
+        from pypdf import PdfReader
     except ImportError as exc:  # pragma: no cover
         raise UnsupportedFormat(
             "Для чтения PDF установите pypdf или pdfplumber"
@@ -158,7 +159,7 @@ def _fix_hyphenation(text: str) -> str:
 
 def _load_docx(path: Path) -> tuple[list[Block], dict[str, Any]]:
     try:
-        import docx  # type: ignore
+        import docx
     except ImportError as exc:  # pragma: no cover
         raise UnsupportedFormat("Для чтения DOCX установите python-docx") from exc
 
@@ -168,8 +169,9 @@ def _load_docx(path: Path) -> tuple[list[Block], dict[str, Any]]:
         text = para.text.strip()
         if not text:
             continue
-        style = (para.style.name or "").lower()
-        if style.startswith("heading") or style.startswith("заголовок"):
+        # У абзаца может не быть стиля вовсе — тогда это обычный текст.
+        style = ((para.style.name if para.style else None) or "").lower()
+        if style.startswith(("heading", "заголовок")):
             level = _int_or(style.split()[-1], 1)
             blocks.append(Block(text=text, kind="heading", level=level))
         else:
@@ -180,7 +182,7 @@ def _load_docx(path: Path) -> tuple[list[Block], dict[str, Any]]:
         header = [c.text.strip() for c in table.rows[0].cells] if table.rows else []
         for row in table.rows[1:]:
             cells = [c.text.strip() for c in row.cells]
-            pairs = [f"{h}: {v}" for h, v in zip(header, cells) if v]
+            pairs = [f"{h}: {v}" for h, v in zip(header, cells, strict=False) if v]
             if pairs:
                 blocks.append(
                     Block(text="; ".join(pairs), kind="table", meta={"table": t_idx})
@@ -236,7 +238,7 @@ def _load_markdown(path: Path) -> tuple[list[Block], dict[str, Any]]:
 def _load_html(path: Path) -> tuple[list[Block], dict[str, Any]]:
     raw = path.read_text(encoding="utf-8", errors="replace")
     try:
-        from bs4 import BeautifulSoup  # type: ignore
+        from bs4 import BeautifulSoup
     except ImportError:
         return _load_text_from_string(_strip_tags(raw)), {}
 

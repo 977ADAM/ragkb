@@ -8,7 +8,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ragkb.auth import ANONYMOUS, User, parse_groups
 
-
 # ------------------------------------------------------------- разбор групп
 
 def test_parse_groups_splits_comma_separated():
