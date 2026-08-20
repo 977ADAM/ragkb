@@ -197,6 +197,93 @@ def test_step_three_adds_column_to_v2_database():
         assert row["model"] == ""
 
 
+# ------------------------------------------------- эндпоинты
+
+import json
+
+
+def _client(available=None):
+    from fastapi.testclient import TestClient
+
+    from ragkb.api import create_app
+
+    workdir = Path(tempfile.mkdtemp(prefix="ragkb-api-"))
+    docs = workdir / "docs"
+    docs.mkdir()
+    (docs / "policy.md").write_text(SAMPLE_DOC, encoding="utf-8")
+    cfg = Config(docs_dir=str(docs), index_dir=str(workdir / "index"))
+    cfg.store.backend = "numpy"
+    cfg.auth.mode = "disabled"
+    cfg.history.path = str(workdir / "history.sqlite3")
+    if available is not None:
+        cfg.llm.available = available
+    build_index(cfg)
+    return TestClient(create_app(cfg), raise_server_exceptions=False), cfg
+
+
+ALLOWED = [{"name": "extractive-a", "title": "А"}, {"name": "extractive-b", "title": "Б"}]
+
+
+def test_models_endpoint_lists_allowed():
+    client, _cfg = _client(ALLOWED)
+    body = client.get("/models").json()
+    assert [m["name"] for m in body["models"]] == ["extractive-a", "extractive-b"]
+
+
+def test_models_endpoint_requires_auth_when_enabled():
+    from fastapi.testclient import TestClient
+
+    from ragkb.api import create_app
+    cfg = Config()
+    cfg.auth.mode = "proxy"
+    assert TestClient(create_app(cfg)).get("/models").status_code == 401
+
+
+def test_ask_rejects_unknown_model():
+    client, _ = _client(ALLOWED)
+    resp = client.post("/ask", json={"question": "тест", "model": "злая:модель"})
+    assert resp.status_code == 400, resp.status_code
+
+
+def test_stream_rejects_unknown_model_before_streaming():
+    client, _ = _client(ALLOWED)
+    resp = client.post("/ask/stream", json={"question": "тест", "model": "злая:модель"})
+    assert resp.status_code == 400, resp.status_code
+    assert "ndjson" not in resp.headers.get("content-type", "")
+
+
+def test_ask_accepts_allowed_model():
+    client, cfg = _client(ALLOWED)
+    cfg.llm.model = "extractive-a"
+    body = client.post("/ask", json={"question": "сколько дней отпуска?",
+                                     "model": "extractive-b"}).json()
+    assert body["model"] == "extractive-b"
+
+
+def test_stream_done_carries_model():
+    client, _ = _client(ALLOWED)
+    lines = client.post("/ask/stream", json={"question": "сколько дней отпуска?"}).text.splitlines()
+    done = json.loads([line for line in lines if line.strip()][-1])
+    assert done["type"] == "done"
+    assert done["model"]
+
+
+def test_top_k_out_of_range_gives_422():
+    client, _ = _client()
+    assert client.post("/ask", json={"question": "тест", "top_k": 0}).status_code == 422
+    assert client.post("/ask", json={"question": "тест", "top_k": 99}).status_code == 422
+
+
+def test_model_is_stored_with_message():
+    from ragkb.history import HistoryStore
+
+    client, cfg = _client(ALLOWED)
+    body = client.post("/ask", json={"question": "сколько дней отпуска?",
+                                     "model": "extractive-b"}).json()
+    messages = HistoryStore(cfg.history.path).get_messages(body["conversation_id"], "anonymous")
+    assert messages[1].model == "extractive-b"
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

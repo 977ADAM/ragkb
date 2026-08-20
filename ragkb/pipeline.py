@@ -351,9 +351,10 @@ class RAGPipeline:
 
         Пустой список фрагментов означает, что поиск ничего не дал.
         """
+        llm = self._llm_for(model)
         search_query = question
         if history:
-            search_query = self._condense(question, history, self._llm_for(model)) or question
+            search_query = self._condense(question, history, llm) or question
 
         hits = self.search(search_query, top_k=top_k)
         if not hits:
@@ -363,7 +364,7 @@ class RAGPipeline:
             return [], nothing_found()
 
         prompt = ANSWER_TEMPLATE.format(context=format_context(hits), question=question)
-        return hits, self._llm_for(model).stream(SYSTEM_PROMPT, prompt)
+        return hits, llm.stream(SYSTEM_PROMPT, prompt)
 
     # ------------------------------------------------------------ служебное
 
