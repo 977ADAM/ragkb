@@ -133,6 +133,70 @@ def test_stream_answer_accepts_model():
     assert "".join(stream)
 
 
+# ------------------------------------------------- хранение модели
+
+from ragkb.history import SCHEMA_VERSION, HistoryStore, connect, init_schema
+
+
+def _store() -> HistoryStore:
+    return HistoryStore(Path(tempfile.mkdtemp(prefix="ragkb-mstore-")) / "h.sqlite3")
+
+
+def test_schema_version_is_three():
+    assert SCHEMA_VERSION == 3
+
+
+def test_message_carries_model():
+    store = _store()
+    cid = store.create_conversation("ivanov", "тема")
+    store.append(cid, "ivanov", "assistant", "ответ", model="qwen2.5:7b-instruct")
+    messages = store.get_messages(cid, "ivanov")
+    assert messages[0].model == "qwen2.5:7b-instruct"
+    assert messages[0].to_dict()["model"] == "qwen2.5:7b-instruct"
+
+
+def test_model_defaults_to_empty():
+    store = _store()
+    cid = store.create_conversation("ivanov", "тема")
+    store.append(cid, "ivanov", "user", "вопрос")
+    assert store.get_messages(cid, "ivanov")[0].model == ""
+
+
+def test_step_three_adds_column_to_v2_database():
+    """База версии 2 должна получить столбец, не потеряв сообщений."""
+    path = Path(tempfile.mkdtemp(prefix="ragkb-v2-")) / "h.sqlite3"
+    with connect(path) as conn:
+        # Создаём схему без последней ступени, как она выглядела в версии 2.
+        conn.executescript(
+            "CREATE TABLE conversations (id TEXT PRIMARY KEY, user TEXT NOT NULL,"
+            " title TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,"
+            " updated_at TEXT NOT NULL);"
+            "CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,"
+            " role TEXT NOT NULL CHECK (role IN ('user','assistant')),"
+            " text TEXT NOT NULL, sources_json TEXT NOT NULL DEFAULT '[]',"
+            " created_at TEXT NOT NULL);"
+            "CREATE TABLE cleanup_state (id INTEGER PRIMARY KEY CHECK (id = 1),"
+            " last_run TEXT NOT NULL);"
+            "INSERT INTO cleanup_state (id, last_run) VALUES (1, '1970-01-01T00:00:00+00:00');"
+        )
+        conn.execute(
+            "INSERT INTO conversations VALUES ('c1','ivanov','тема','2026-01-01','2026-01-01')"
+        )
+        conn.execute(
+            "INSERT INTO messages (conversation_id, role, text, created_at)"
+            " VALUES ('c1','user','старое сообщение','2026-01-01')"
+        )
+        conn.execute("PRAGMA user_version = 2")
+
+    with connect(path) as conn:
+        init_schema(conn)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        row = conn.execute("SELECT text, model FROM messages").fetchone()
+        assert row["text"] == "старое сообщение"
+        assert row["model"] == ""
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
