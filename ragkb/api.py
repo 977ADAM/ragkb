@@ -149,8 +149,6 @@ def create_app(cfg: Config) -> FastAPI:
         dependencies=[Depends(current_user)],
     )
     def list_models() -> ModelsResponse:
-        # Список приходит из самой Ollama; её недоступность даёт пустой ответ,
-        # а не ошибку — это и есть признак режима поиска.
         return ModelsResponse(models=available_models(cfg.llm))
 
     @app.post("/ask")
