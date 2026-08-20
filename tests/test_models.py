@@ -24,38 +24,38 @@ def _cfg(available=None, model="qwen2.5:7b-instruct") -> LLMConfig:
 def test_available_models_lists_everything_installed():
     """Без фильтра предлагается всё, что установлено, — без хардкода."""
     items = available_models(_cfg(), installed=INSTALLED)
-    assert [i["id"] for i in items] == [m["id"] for m in INSTALLED]
+    assert [i.id for i in items] == [m["id"] for m in INSTALLED]
 
 
 def test_available_models_filter_narrows_the_list():
     cfg = _cfg(available=[{"name": "qwen3:4b"}])
-    assert [i["id"] for i in available_models(cfg, installed=INSTALLED)] == ["qwen3:4b"]
+    assert [i.id for i in available_models(cfg, installed=INSTALLED)] == ["qwen3:4b"]
 
 
 def test_available_models_marks_default():
     items = available_models(_cfg(model="qwen2.5:14b-instruct"), installed=INSTALLED)
-    assert [i["is_default"] for i in items] == [False, True, False]
+    assert [i.is_default for i in items] == [False, True, False]
 
 
 def test_default_falls_back_to_first_when_configured_model_absent():
     """Модель из настроек не установлена — подсвечиваем первую доступную."""
     items = available_models(_cfg(model="нет-такой"), installed=INSTALLED)
-    assert items[0]["is_default"] is True
+    assert items[0].is_default is True
 
 
 def test_available_models_carries_ollama_fields():
     item = available_models(_cfg(), installed=INSTALLED)[0]
-    assert item["context_window"] == 32768
-    assert item["supports_tools"] is True
+    assert item.context_window == 32768
+    assert item.supports_tools is True
 
 
 def test_display_name_defaults_to_id():
-    assert available_models(_cfg(), installed=INSTALLED)[0]["display_name"] == "qwen2.5:7b-instruct"
+    assert available_models(_cfg(), installed=INSTALLED)[0].display_name == "qwen2.5:7b-instruct"
 
 
 def test_display_name_taken_from_config_when_set():
     cfg = _cfg(available=[{"name": "qwen3:4b", "title": "Рассуждающая"}])
-    assert available_models(cfg, installed=INSTALLED)[0]["display_name"] == "Рассуждающая"
+    assert available_models(cfg, installed=INSTALLED)[0].display_name == "Рассуждающая"
 
 
 def test_no_models_installed_gives_empty_list():
@@ -66,8 +66,8 @@ def test_no_models_installed_gives_empty_list():
 def test_non_ollama_backend_reports_single_model():
     cfg = LLMConfig(backend="extractive", model="что-то")
     items = available_models(cfg)
-    assert [i["id"] for i in items] == ["что-то"]
-    assert items[0]["is_default"] is True
+    assert [i.id for i in items] == ["что-то"]
+    assert items[0].is_default is True
 
 
 def test_installed_models_never_raises_when_ollama_is_down():

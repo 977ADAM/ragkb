@@ -12,7 +12,24 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import BaseModel
+
 from .config import LLMConfig
+
+
+class ModelInfo(BaseModel):
+    """Модель, доступная для выбора.
+
+    Объявлена здесь, а не в слое HTTP: её порождает available_models,
+    а api.py и без того импортирует этот модуль — обратный импорт замкнул бы
+    круг. Заодно эндпоинт отдаёт её напрямую, без промежуточного отображения.
+    """
+
+    id: str
+    display_name: str | None = None
+    context_window: int | None = None
+    supports_tools: bool = False
+    is_default: bool = False
 
 
 def installed_models(base_url: str) -> list[dict[str, Any]]:
@@ -58,7 +75,7 @@ def installed_models(base_url: str) -> list[dict[str, Any]]:
 
 def available_models(
     cfg: LLMConfig, installed: list[dict[str, Any]] | None = None
-) -> list[dict[str, Any]]:
+) -> list[ModelInfo]:
     """Модели, которые можно выбрать прямо сейчас.
 
     Источник истины — сама Ollama: что установлено, то и предлагаем.
@@ -75,34 +92,28 @@ def available_models(
     от зависимости от запущенной Ollama.
     """
     if cfg.backend.lower() != "ollama":
-        return [{
-            "id": cfg.model,
-            "display_name": cfg.model,
-            "context_window": None,
-            "supports_tools": False,
-            "is_default": True,
-        }]
+        return [ModelInfo(id=cfg.model, display_name=cfg.model, is_default=True)]
 
     allowed = {entry.get("name", "") for entry in cfg.available if entry.get("name")}
     titles = {entry.get("name", ""): entry.get("title") for entry in cfg.available}
 
-    out: list[dict[str, Any]] = []
+    out: list[ModelInfo] = []
     source = installed if installed is not None else installed_models(cfg.base_url)
     for item in source:
         if allowed and item["id"] not in allowed:
             continue
-        out.append({
-            "id": item["id"],
-            "display_name": titles.get(item["id"]) or item["id"],
-            "context_window": item["context_window"],
-            "supports_tools": item["supports_tools"],
-            "is_default": item["id"] == cfg.model,
-        })
+        out.append(ModelInfo(
+            id=item["id"],
+            display_name=titles.get(item["id"]) or item["id"],
+            context_window=item["context_window"],
+            supports_tools=item["supports_tools"],
+            is_default=item["id"] == cfg.model,
+        ))
 
     # Модель из настроек может быть не установлена — тогда по умолчанию
     # выбирается первая доступная, иначе интерфейс не подсветит ничего.
-    if out and not any(item["is_default"] for item in out):
-        out[0]["is_default"] = True
+    if out and not any(item.is_default for item in out):
+        out[0].is_default = True
     return out
 
 
@@ -124,11 +135,11 @@ def resolve_model(
     items = available_models(cfg, installed)
     if not requested:
         for item in items:
-            if item["is_default"]:
-                return str(item["id"])
+            if item.is_default:
+                return item.id
         return cfg.model
 
-    allowed = {item["id"] for item in items}
+    allowed = {item.id for item in items}
     if requested not in allowed:
         available = ", ".join(sorted(allowed)) if allowed else "ни одной"
         raise ValueError(
