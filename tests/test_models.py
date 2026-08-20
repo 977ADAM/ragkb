@@ -72,6 +72,67 @@ def test_config_reads_available_from_dict():
     assert cfg.llm.available == [{"name": "a", "title": "А"}]
 
 
+# ------------------------------------------------- модель на запрос
+
+import tempfile
+
+from ragkb.pipeline import RAGPipeline, build_index
+
+SAMPLE_DOC = (
+    "# Политика\n\n## Отпуск\n\nЕжегодный отпуск составляет 28 календарных дней.\n"
+)
+
+
+def _pipeline() -> RAGPipeline:
+    workdir = Path(tempfile.mkdtemp(prefix="ragkb-models-"))
+    docs = workdir / "docs"
+    docs.mkdir()
+    (docs / "policy.md").write_text(SAMPLE_DOC, encoding="utf-8")
+    cfg = Config(docs_dir=str(docs), index_dir=str(workdir / "index"))
+    cfg.store.backend = "numpy"
+    cfg.history.path = str(workdir / "history.sqlite3")
+    build_index(cfg)
+    return RAGPipeline(cfg)
+
+
+def test_llm_for_returns_same_object_without_override():
+    rag = _pipeline()
+    assert rag._llm_for(None) is rag.llm
+    assert rag._llm_for(rag.cfg.llm.model) is rag.llm
+
+
+def test_llm_for_builds_new_llm_for_other_model():
+    rag = _pipeline()
+    # Экстрактивный бэкенд всегда зовётся «extractive» независимо от модели,
+    # поэтому имя модели видно только на бэкенде, который его включает.
+    # В сеть это не ходит: конструктор OllamaLLM лишь запоминает настройки.
+    rag.cfg.llm.backend = "ollama"
+    other = rag._llm_for("другая-модель")
+    assert other is not rag.llm
+    assert "другая-модель" in other.name
+
+
+def test_llm_for_keeps_backend_and_settings():
+    rag = _pipeline()
+    rag.cfg.llm.temperature = 0.7
+    other = rag._llm_for("другая-модель")
+    assert other.cfg.temperature == 0.7
+    assert other.cfg.backend == rag.cfg.llm.backend
+
+
+def test_ask_records_used_model():
+    rag = _pipeline()
+    answer = rag.ask("сколько дней отпуска?")
+    assert answer.llm_backend == rag.llm.name
+
+
+def test_stream_answer_accepts_model():
+    rag = _pipeline()
+    hits, stream = rag.stream_answer("сколько дней отпуска?", model=None)
+    assert isinstance(hits, list)
+    assert "".join(stream)
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
