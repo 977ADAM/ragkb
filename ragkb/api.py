@@ -1,7 +1,9 @@
 """HTTP API на FastAPI + минимальный веб-интерфейс."""
 from __future__ import annotations
 
-from typing import Any
+import json
+import time
+from typing import Any, Iterator
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -169,13 +171,82 @@ def create_app(cfg: Config) -> FastAPI:
 
     @app.post("/ask/stream")
     def ask_stream(req: AskRequest, user: User = Depends(current_user)) -> StreamingResponse:
+        store = history_store
+        conversation_id = req.conversation_id
+        turns: list[tuple[str, str]] | None = [tuple(h) for h in req.history] or None
+
+        if store is not None:
+            store.cleanup()
+            if conversation_id:
+                if not store.owns(conversation_id, user.name):
+                    # Чужой и несуществующий неотличимы по ответу.
+                    raise HTTPException(status_code=404, detail="Диалог не найден")
+                turns = store.recent_turns(
+                    conversation_id, user.name, cfg.history.window
+                ) or turns
+
+        # Поиск и подготовка потока выполняются здесь, до отдачи первого байта:
+        # пока статус ответа не отправлен, об отказе ещё можно сообщить кодом.
+        started = time.time()
         rag = pipeline()
+        hits, tokens = rag.stream_answer(req.question, top_k=req.top_k, history=turns)
 
-        def generate():
-            for piece in rag.stream_answer(req.question, top_k=req.top_k):
-                yield piece
+        def generate() -> Iterator[str]:
+            nonlocal conversation_id
+            collected: list[str] = []
+            try:
+                for piece in tokens:
+                    collected.append(piece)
+                    yield json.dumps(
+                        {"type": "token", "text": piece}, ensure_ascii=False
+                    ) + "\n"
+            except Exception as exc:
+                # Статус уже отправлен и равен 200 — сменить его нельзя,
+                # поэтому об отказе сообщаем событием. Молчаливый обрыв
+                # потока выглядел бы для пользователя зависшим ответом.
+                yield json.dumps(
+                    {"type": "error", "detail": str(exc)}, ensure_ascii=False
+                ) + "\n"
+                return
 
-        return StreamingResponse(generate(), media_type="text/plain; charset=utf-8")
+            text = "".join(collected)
+            # Считаем один раз: то же самое уходит и в историю, и в событие done.
+            sources = RAGPipeline._cited_sources(text, hits)
+            warnings: list[str] = []
+
+            if store is not None:
+                # Диалог заводим только после успешной генерации — как в /ask.
+                if not conversation_id:
+                    conversation_id = store.create_conversation(
+                        user.name, make_title(req.question)
+                    )
+                # Ответ уже отдан пользователю, отказ записи не должен его портить.
+                try:
+                    saved_question = store.append(
+                        conversation_id, user.name, "user", req.question
+                    )
+                    saved_answer = store.append(
+                        conversation_id, user.name, "assistant", text, sources
+                    )
+                    if not (saved_question and saved_answer):
+                        warnings.append("Ответ не сохранён в историю диалога")
+                except Exception:
+                    warnings.append("Ответ не сохранён в историю диалога")
+
+            yield json.dumps(
+                {
+                    "type": "done",
+                    "conversation_id": conversation_id,
+                    "sources": sources,
+                    "warnings": warnings,
+                    "elapsed_sec": round(time.time() - started, 2),
+                },
+                ensure_ascii=False,
+            ) + "\n"
+
+        return StreamingResponse(
+            generate(), media_type="application/x-ndjson; charset=utf-8"
+        )
 
     @app.post("/search")
     def search(req: SearchRequest, user: User = Depends(current_user)) -> dict[str, Any]:

@@ -73,6 +73,114 @@ def test_cited_sources_works_on_streamed_text():
     assert isinstance(sources, list)
 
 
+# ------------------------------------------------------- эндпоинт /ask/stream
+
+import json
+
+
+def _client(cfg: Config | None = None):
+    from fastapi.testclient import TestClient
+
+    from ragkb.api import create_app
+
+    cfg = cfg or _workspace()
+    cfg.auth.mode = "disabled"
+    return TestClient(create_app(cfg), raise_server_exceptions=False)
+
+
+def _events(response) -> list[dict]:
+    """Разбирает тело NDJSON в список событий."""
+    return [json.loads(line) for line in response.text.splitlines() if line.strip()]
+
+
+def _indexed_client():
+    """Клиент поверх построенного индекса — поток дойдёт до конца."""
+    cfg = _workspace()
+    build_index(cfg)
+    return _client(cfg), cfg
+
+
+def test_stream_returns_ndjson():
+    client, _ = _indexed_client()
+    resp = client.post("/ask/stream", json={"question": "сколько дней отпуска?"})
+    assert resp.status_code == 200
+    assert "ndjson" in resp.headers["content-type"]
+
+
+def test_stream_last_event_is_done():
+    client, _ = _indexed_client()
+    events = _events(client.post("/ask/stream", json={"question": "сколько дней отпуска?"}))
+    assert events, "поток пуст"
+    assert events[-1]["type"] == "done", events[-1]
+    assert any(e["type"] == "token" for e in events)
+
+
+def test_done_event_carries_conversation_and_sources():
+    client, _ = _indexed_client()
+    done = _events(client.post("/ask/stream", json={"question": "сколько дней отпуска?"}))[-1]
+    assert done["conversation_id"]
+    assert isinstance(done["sources"], list)
+    assert isinstance(done["warnings"], list)
+    assert isinstance(done["elapsed_sec"], (int, float))
+
+
+def test_stream_writes_both_messages_to_history():
+    from ragkb.history import HistoryStore
+
+    client, cfg = _indexed_client()
+    done = _events(client.post("/ask/stream", json={"question": "сколько дней отпуска?"}))[-1]
+    messages = HistoryStore(cfg.history.path).get_messages(done["conversation_id"], "anonymous")
+    assert [m.role for m in messages] == ["user", "assistant"]
+    assert messages[0].text == "сколько дней отпуска?"
+    assert messages[1].text
+
+
+def test_stream_continues_existing_conversation():
+    client, _ = _indexed_client()
+    first = _events(client.post("/ask/stream", json={"question": "сколько дней отпуска?"}))[-1]
+    second = _events(client.post(
+        "/ask/stream",
+        json={"question": "а какой длины пароль?", "conversation_id": first["conversation_id"]},
+    ))[-1]
+    assert second["conversation_id"] == first["conversation_id"]
+
+
+def test_stream_with_foreign_conversation_gives_404():
+    from ragkb.history import HistoryStore
+
+    client, cfg = _indexed_client()
+    foreign = HistoryStore(cfg.history.path).create_conversation("petrov", "чужой")
+    resp = client.post(
+        "/ask/stream", json={"question": "тест", "conversation_id": foreign}
+    )
+    assert resp.status_code == 404, resp.status_code
+
+
+def test_stream_without_index_does_not_start():
+    """Индекса нет — отказ приходит кодом ответа, поток не начинается."""
+    cfg = _workspace()          # build_index намеренно не вызываем
+    resp = _client(cfg).post("/ask/stream", json={"question": "тест"})
+    assert resp.status_code == 503, resp.status_code
+
+
+def test_failed_stream_leaves_no_conversation():
+    from ragkb.history import HistoryStore
+
+    cfg = _workspace()
+    client = _client(cfg)
+    assert client.post("/ask/stream", json={"question": "тест"}).status_code == 503
+    assert HistoryStore(cfg.history.path).list_conversations("anonymous") == []
+
+
+def test_stream_works_with_history_disabled():
+    cfg = _workspace()
+    build_index(cfg)
+    cfg.history.enabled = False
+    done = _events(_client(cfg).post("/ask/stream", json={"question": "сколько дней отпуска?"}))[-1]
+    assert done["type"] == "done"
+    assert done["conversation_id"] is None
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
