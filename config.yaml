@@ -56,6 +56,13 @@ llm:
   temperature: 0.1
   max_tokens: 1024
   timeout: 180
+  # Модели, которые разрешено выбирать в интерфейсе. Пустой список —
+  # переключения нет, работает только model выше.
+  available:
+    - name: qwen2.5:7b-instruct
+      title: Быстрая
+    - name: qwen2.5:14b-instruct
+      title: Точная
 
 auth:
   # proxy — логин приходит заголовком от oauth2-proxy (боевой режим)

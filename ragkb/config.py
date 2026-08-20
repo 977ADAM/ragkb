@@ -79,6 +79,11 @@ class LLMConfig:
     temperature: float = 0.1
     max_tokens: int = 1024
     timeout: int = 180
+    # Список моделей, которые разрешено запрашивать. Пустой — переключения нет,
+    # работает только model. Свободный ввод недопустим: незнакомое имя заставит
+    # Ollama скачивать модель, а это десятки минут и место на диске по запросу
+    # извне.
+    available: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
