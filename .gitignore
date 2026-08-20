@@ -11,6 +11,8 @@ data/index/
 data/*.sqlite3*
 data/history/
 
+.mypy_cache/
+.ruff_cache/
 __pycache__/
 *.pyc
 

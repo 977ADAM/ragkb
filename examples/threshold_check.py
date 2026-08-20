@@ -25,7 +25,8 @@ def main() -> int:
     if len(sys.argv) > 1:
         cfg.llm.backend, cfg.llm.model = "ollama", sys.argv[1]
     rag = RAGPipeline(cfg)
-    cases = [json.loads(l) for l in Path(DATASET).read_text(encoding="utf-8").splitlines() if l.strip()]
+    lines = Path(DATASET).read_text(encoding="utf-8").splitlines()
+    cases = [json.loads(line) for line in lines if line.strip()]
     print(f"Модель: {rag.llm.name}   случаев: {len(cases)}\n")
     for i, case in enumerate(cases, start=1):
         answer = rag.ask(case["question"])

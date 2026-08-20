@@ -3,16 +3,15 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterator
-
-import numpy as np
+from typing import Any
 
 from . import loaders
-from .chunking import Chunk, chunk_documents
+from .chunking import chunk_documents
 from .config import Config
-from .embeddings import Embedder, TfidfEmbedder, build_embedder  # noqa: F401
+from .embeddings import Embedder, TfidfEmbedder, build_embedder
 from .llm import LLM, LLMError, build_llm
 from .prompts import (
     ANSWER_TEMPLATE,
@@ -202,7 +201,11 @@ def remove_document(cfg: Config, path: str | Path) -> int:
     if not isinstance(store, ChromaStore):
         raise ValueError("Удаление доступно только при store.backend: chroma")
     target = str(Path(path))
-    doc_ids = {c.doc_id for c in store.chunks if c.source == target or Path(c.source).name == Path(target).name}
+    doc_ids = {
+        c.doc_id
+        for c in store.chunks
+        if c.source == target or Path(c.source).name == Path(target).name
+    }
     removed = sum(store.delete_document(doc_id) for doc_id in doc_ids)
     store.save()
     return removed

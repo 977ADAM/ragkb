@@ -16,13 +16,15 @@
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import shutil
 from abc import ABC, abstractmethod
+from collections.abc import Iterable, Sequence
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 import numpy as np
 
@@ -185,7 +187,7 @@ class NumpyStore(BaseStore):
         self._write_common()
 
     @classmethod
-    def load(cls, index_dir: str | Path) -> "NumpyStore":
+    def load(cls, index_dir: str | Path) -> NumpyStore:
         store = cls(index_dir)
         store._read_common()
         store.vectors = np.load(store.dir / VECTORS)
@@ -267,10 +269,9 @@ class ChromaStore(BaseStore):
             "hnsw:M": self.cfg.hnsw_m,
         }
         if create:
-            try:
+            # Коллекции ещё нет — это нормально.
+            with contextlib.suppress(Exception):
                 client.delete_collection(self.cfg.collection)
-            except Exception:
-                pass  # коллекции ещё нет — это нормально
             self._collection = client.create_collection(
                 name=self.cfg.collection, metadata=metadata, embedding_function=None
             )
@@ -316,7 +317,7 @@ class ChromaStore(BaseStore):
         self._write_common()
 
     @classmethod
-    def load(cls, index_dir: str | Path, cfg: StoreConfig | None = None) -> "ChromaStore":
+    def load(cls, index_dir: str | Path, cfg: StoreConfig | None = None) -> ChromaStore:
         store = cls(index_dir, cfg)
         store._read_common()
         store._get_collection(create=False)
@@ -336,7 +337,7 @@ class ChromaStore(BaseStore):
         distances = result["distances"][0]
         # Chroma отдаёт косинусную ДИСТАНЦИЮ (1 - cos). Возвращаем близость,
         # чтобы шкала совпадала с numpy-бэкендом и порогом retrieval.min_score.
-        return [(cid, 1.0 - float(dist)) for cid, dist in zip(ids, distances)]
+        return [(cid, 1.0 - float(dist)) for cid, dist in zip(ids, distances, strict=False)]
 
     def get_vectors(self, chunk_ids: Sequence[str]) -> np.ndarray:
         collection = self._get_collection()
@@ -381,10 +382,9 @@ class ChromaStore(BaseStore):
         self._reindex_lookup()
 
     def clear(self) -> None:
-        try:
+        # Коллекции может не быть — удалять тогда нечего.
+        with contextlib.suppress(Exception):
             self._get_client().delete_collection(self.cfg.collection)
-        except Exception:
-            pass
         self._collection = None
         self._client = None
         super().clear()

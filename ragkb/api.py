@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -38,7 +39,15 @@ def create_app(cfg: Config) -> FastAPI:
     # аутентификации (зависимости current_user там не участвуют). Снаружи
     # закрыты прокси, но любой сосед по сети compose иначе прочитал бы полную
     # схему API без единого заголовка.
-    app = FastAPI(title="RAG База знаний", version="1.0", docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(
+        title="RAG База знаний",
+        version="1.0",
+        # Схема API закрыта: снаружи её прячет прокси, но внутри сети compose
+        # её прочитал бы любой сосед.
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
 
     # Зависимости идентификации читают настройки отсюда.
     app.state.auth = cfg.auth
@@ -58,7 +67,7 @@ def create_app(cfg: Config) -> FastAPI:
                 state["error"] = None
             except Exception as exc:
                 state["error"] = str(exc)
-                raise HTTPException(status_code=503, detail=str(exc))
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
         return state["pipeline"]
 
     # Хранилище строится сразу, а не лениво: спека требует, чтобы несовместимая
@@ -115,7 +124,7 @@ def create_app(cfg: Config) -> FastAPI:
     def ask(req: AskRequest, user: User = Depends(current_user)) -> dict[str, Any]:
         store = history_store
         conversation_id = req.conversation_id
-        turns: list[tuple[str, str]] | None = [tuple(h) for h in req.history] or None
+        turns: list[tuple[str, str]] | None = [(q, a) for q, a in req.history] or None
 
         if store is not None:
             store.cleanup()
@@ -175,7 +184,7 @@ def create_app(cfg: Config) -> FastAPI:
     def ask_stream(req: AskRequest, user: User = Depends(current_user)) -> StreamingResponse:
         store = history_store
         conversation_id = req.conversation_id
-        turns: list[tuple[str, str]] | None = [tuple(h) for h in req.history] or None
+        turns: list[tuple[str, str]] | None = [(q, a) for q, a in req.history] or None
 
         if store is not None:
             store.cleanup()

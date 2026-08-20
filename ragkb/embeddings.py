@@ -12,13 +12,11 @@
 """
 from __future__ import annotations
 
-import json
 import math
-import re
 from abc import ABC, abstractmethod
 from collections import Counter
-from pathlib import Path
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 
@@ -110,7 +108,7 @@ class OllamaEmbedder(Embedder):
 class SentenceTransformerEmbedder(Embedder):
     def __init__(self, cfg: EmbeddingConfig):
         try:
-            from sentence_transformers import SentenceTransformer  # type: ignore
+            from sentence_transformers import SentenceTransformer
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError(
                 "pip install sentence-transformers — либо используйте backend=ollama/tfidf"

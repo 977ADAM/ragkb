@@ -9,7 +9,7 @@ extractive — без LLM вообще: собирает ответ из най�
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Iterator
+from collections.abc import Iterator
 
 from .config import LLMConfig
 
@@ -97,8 +97,10 @@ class OllamaLLM(LLM):
                 "num_predict": self.cfg.max_tokens,
             },
         }
-        with httpx.Client(timeout=self.cfg.timeout) as client:
-            with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as resp:
+        with (
+            httpx.Client(timeout=self.cfg.timeout) as client,
+            client.stream("POST", f"{self.base_url}/api/chat", json=payload) as resp,
+        ):
                 resp.raise_for_status()
                 for line in resp.iter_lines():
                     if not line:
@@ -181,7 +183,7 @@ def _extract_context_fragments(prompt: str) -> list[tuple[str, str]]:
     body = re.split(r"\n\s*ВОПРОС:", body)[0]
 
     fragments = []
-    pattern = re.compile(r"^\[(\d+)\][^\n]*\n(.*?)(?=\n\[\d+\]|\Z)", re.S | re.M)
+    pattern = re.compile(r"^\[(\d+)\][^\n]*\n(.*?)(?=\n\[\d+\]|\Z)", re.DOTALL | re.MULTILINE)
     for match in pattern.finditer(body):
         fragments.append((f"[{match.group(1)}]", match.group(2)))
     return fragments

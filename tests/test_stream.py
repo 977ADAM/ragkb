@@ -41,7 +41,7 @@ def test_stream_answer_returns_hits_and_iterator():
 
 
 def test_stream_answer_yields_text():
-    hits, stream = _pipeline().stream_answer("сколько дней отпуска?")
+    _hits, stream = _pipeline().stream_answer("сколько дней отпуска?")
     text = "".join(stream)
     assert "28" in text, text
 

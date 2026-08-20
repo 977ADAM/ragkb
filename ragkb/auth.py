@@ -6,8 +6,8 @@
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from fastapi import HTTPException, Request
 from starlette.datastructures import Headers

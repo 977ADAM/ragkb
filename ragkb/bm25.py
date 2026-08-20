@@ -9,8 +9,8 @@ from __future__ import annotations
 import math
 import pickle
 from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from .text import tokenize
 
@@ -25,7 +25,7 @@ class BM25Index:
         self.avg_len: float = 0.0
         self.n_docs: int = 0
 
-    def build(self, texts: Sequence[str]) -> "BM25Index":
+    def build(self, texts: Sequence[str]) -> BM25Index:
         self.postings = defaultdict(list)
         self.doc_len = []
         for doc_id, text in enumerate(texts):
@@ -70,7 +70,7 @@ class BM25Index:
         Path(path).write_bytes(pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL))
 
     @classmethod
-    def load(cls, path: str | Path) -> "BM25Index":
+    def load(cls, path: str | Path) -> BM25Index:
         index = cls()
         payload = pickle.loads(Path(path).read_bytes())
         index.postings = defaultdict(list, payload["postings"])

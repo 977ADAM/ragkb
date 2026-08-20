@@ -24,9 +24,41 @@ dependencies = [
 local-models = ["sentence-transformers>=3.0", "torch>=2.2"]
 better-pdf = ["pdfplumber>=0.11"]
 morphology = ["pymorphy3>=2.0"]
+# Инструменты разработки: uv pip install -e ".[dev]"
+dev = ["ruff>=0.16", "mypy>=1.11"]
 
 [project.scripts]
 ragkb = "ragkb.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["ragkb*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "PIE", "RUF", "FURB"]
+ignore = [
+    # FastAPI: Depends() в значении по умолчанию — идиома фреймворка, не дефект.
+    "B008",
+    # Кириллица в идентификаторах и строках — язык проекта.
+    "RUF001", "RUF002", "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Текст системного промпта и разметка интерфейса — проза и HTML, а не код:
+# переносить их по границе в 100 символов бессмысленно.
+"ragkb/prompts.py" = ["E501"]
+"ragkb/ui.py" = ["E501"]
+# В тестах импорты стоят секциями рядом с проверками, которые их используют,
+# а не общей шапкой — так видно, что к какой задаче относится.
+"tests/*.py" = ["E402"]
+
+[tool.mypy]
+# python_version намеренно не задан: заглушки numpy используют синтаксис 3.12+,
+# и проверка под 3.10 падает на них раньше, чем доходит до нашего кода.
+# Совместимость с 3.10 стережёт ruff через target-version.
+# У chromadb, python-docx, bs4 и sentence-transformers нет типовых заглушек.
+ignore_missing_imports = true
+warn_unused_ignores = true

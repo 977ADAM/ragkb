@@ -10,16 +10,18 @@ SQLite из стандартной библиотеки: новых зависи
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import sqlite3
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 # Версия схемы, которую понимает этот код. Хранится в PRAGMA user_version —
 # отдельная таблица миграций не нужна, хватает номера и лестницы обновлений.
@@ -80,10 +82,9 @@ def connect(path: str | Path) -> Iterator[sqlite3.Connection]:
     # создание файла) — и только если файла ещё нет: на каждое соединение
     # выставлять права незачем.
     if not path.exists():
-        try:
+        # Гонка безвредна: соединение другого потока уже создало файл.
+        with contextlib.suppress(FileExistsError):
             os.close(os.open(str(path), os.O_CREAT | os.O_EXCL, 0o600))
-        except FileExistsError:
-            pass  # соединение другого потока уже создало файл — гонка безвредна
     conn = sqlite3.connect(str(path), timeout=5)
     try:
         # Внешние ключи в SQLite выключены по умолчанию, а внутри транзакции
