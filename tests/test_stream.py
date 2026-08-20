@@ -181,6 +181,20 @@ def test_stream_works_with_history_disabled():
     assert done["conversation_id"] is None
 
 
+# ------------------------------------------------------------- разметка
+
+def test_ui_html_lives_in_its_own_module():
+    from ragkb.ui import UI_HTML
+    assert UI_HTML.lstrip().startswith("<!DOCTYPE html>")
+
+
+def test_index_page_serves_ui():
+    cfg = _workspace()
+    build_index(cfg)
+    body = _client(cfg).get("/").text
+    assert "<title>" in body
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
