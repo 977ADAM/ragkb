@@ -35,6 +35,20 @@ class AskRequest(BaseModel):
     model: str | None = None
 
 
+class ModelInfo(BaseModel):
+    """Модель, доступная для выбора."""
+
+    id: str
+    display_name: str | None = None
+    context_window: int | None = None
+    supports_tools: bool = False
+    is_default: bool = False
+
+
+class ModelsResponse(BaseModel):
+    models: list[ModelInfo]
+
+
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=2)
     top_k: int = 5
@@ -138,9 +152,21 @@ def create_app(cfg: Config) -> FastAPI:
             }
         return {"status": "ok"} if user is None else {"status": "ok", **stats}
 
-    @app.get("/models")
-    def list_models(user: User = Depends(current_user)) -> dict[str, Any]:
-        return {"models": available_models(cfg.llm)}
+
+    @app.get(
+        "/models",
+        response_model=ModelsResponse,
+        dependencies=[Depends(current_user)],
+    )
+    def list_models() -> ModelsResponse:
+        # probe=True добирает размер контекста и поддержку инструментов из Ollama.
+        # Отказ Ollama список не роняет: недостающие поля останутся пустыми.
+        return ModelsResponse(
+            models=[ModelInfo(**item) for item in available_models(cfg.llm, probe=True)]
+        )
+
+
+
 
     @app.post("/ask")
     def ask(req: AskRequest, user: User = Depends(current_user)) -> dict[str, Any]:

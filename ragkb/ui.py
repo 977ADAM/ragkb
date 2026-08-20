@@ -152,9 +152,9 @@ async function loadModels() {
     modelEl.innerHTML = '';
     items.forEach(m => {
       const o = document.createElement('option');
-      o.value = m.name;
-      o.textContent = m.title;
-      if (m.default) o.selected = true;
+      o.value = m.id;
+      o.textContent = m.display_name || m.id;
+      if (m.is_default) o.selected = true;
       modelEl.appendChild(o);
     });
     restoreChoice();

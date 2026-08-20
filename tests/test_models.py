@@ -22,21 +22,43 @@ def _cfg() -> LLMConfig:
 
 def test_available_models_marks_default():
     items = available_models(_cfg())
-    assert [i["name"] for i in items] == ["qwen2.5:7b-instruct", "qwen2.5:14b-instruct"]
-    assert items[0]["default"] is True
-    assert items[1]["default"] is False
+    assert [i["id"] for i in items] == ["qwen2.5:7b-instruct", "qwen2.5:14b-instruct"]
+    assert items[0]["is_default"] is True
+    assert items[1]["is_default"] is False
 
 
 def test_available_models_without_list_returns_current():
     items = available_models(LLMConfig(model="что-то:latest"))
     assert len(items) == 1
-    assert items[0]["name"] == "что-то:latest"
-    assert items[0]["default"] is True
+    assert items[0]["id"] == "что-то:latest"
+    assert items[0]["is_default"] is True
 
 
 def test_available_models_fills_missing_title():
     items = available_models(LLMConfig(model="a", available=[{"name": "a"}]))
-    assert items[0]["title"] == "a"
+    assert items[0]["display_name"] == "a"
+
+
+def test_available_models_has_new_fields():
+    """Поля описания модели: без обращения к Ollama они пустые, но присутствуют."""
+    item = available_models(_cfg())[0]
+    assert item["context_window"] is None
+    assert item["supports_tools"] is False
+
+
+def test_probe_does_not_raise_when_ollama_is_down():
+    """Список моделей не должен становиться недоступным из-за отказа Ollama."""
+    from ragkb.models import probe_ollama
+    assert probe_ollama("http://127.0.0.1:1", ["любая"]) == {}
+
+
+def test_available_models_survives_probe_without_ollama():
+    cfg = _cfg()
+    cfg.backend = "ollama"
+    cfg.base_url = "http://127.0.0.1:1"
+    items = available_models(cfg, probe=True)
+    assert [i["id"] for i in items] == ["qwen2.5:7b-instruct", "qwen2.5:14b-instruct"]
+    assert items[0]["context_window"] is None
 
 
 def test_resolve_model_returns_default_when_not_requested():
@@ -236,7 +258,7 @@ ALLOWED = [{"name": "extractive-a", "title": "А"}, {"name": "extractive-b", "ti
 def test_models_endpoint_lists_allowed():
     client, _cfg = _client(ALLOWED)
     body = client.get("/models").json()
-    assert [m["name"] for m in body["models"]] == ["extractive-a", "extractive-b"]
+    assert [m["id"] for m in body["models"]] == ["extractive-a", "extractive-b"]
 
 
 def test_models_endpoint_requires_auth_when_enabled():
