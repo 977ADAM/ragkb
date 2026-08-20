@@ -316,13 +316,35 @@ class RAGPipeline:
             warnings=warnings,
         )
 
-    def stream_answer(self, question: str, top_k: int | None = None) -> Iterator[str]:
-        hits = self.search(question, top_k=top_k)
+    def stream_answer(
+        self,
+        question: str,
+        *,
+        top_k: int | None = None,
+        history: list[tuple[str, str]] | None = None,
+    ) -> tuple[list[Hit], Iterator[str]]:
+        """Готовит поток ответа и отдаёт найденные фрагменты сразу.
+
+        Кортеж, а не генератор, по одной причине: источники вычисляются
+        по готовому тексту через _cited_sources, но список Hit нужен
+        вызывающему коду раньше — до того, как поток закончится. Генератор
+        отдать его не может, не смешивая типы событий в одном потоке.
+
+        Пустой список фрагментов означает, что поиск ничего не дал.
+        """
+        search_query = question
+        if history:
+            search_query = self._condense(question, history) or question
+
+        hits = self.search(search_query, top_k=top_k)
         if not hits:
-            yield "В базе знаний нет информации по этому вопросу."
-            return
+            def nothing_found() -> Iterator[str]:
+                yield "В базе знаний нет информации по этому вопросу."
+
+            return [], nothing_found()
+
         prompt = ANSWER_TEMPLATE.format(context=format_context(hits), question=question)
-        yield from self.llm.stream(SYSTEM_PROMPT, prompt)
+        return hits, self.llm.stream(SYSTEM_PROMPT, prompt)
 
     # ------------------------------------------------------------ служебное
 
