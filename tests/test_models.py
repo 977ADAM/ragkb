@@ -344,6 +344,67 @@ def test_mini_yaml_handles_real_config_without_pyyaml():
     assert isinstance(cfg, Config)
 
 
+# ------------------------------------------------------- сведения об организации
+
+def _org_client(**org):
+    """Приложение без индекса: /organizations читает только настройки."""
+    from fastapi.testclient import TestClient
+
+    from ragkb.api import create_app
+    from ragkb.config import Config, OrganizationConfig
+
+    cfg = Config()
+    cfg.auth.mode = "disabled"
+    cfg.history.enabled = False
+    cfg.organization = OrganizationConfig(**org)
+    return TestClient(create_app(cfg), raise_server_exceptions=False)
+
+
+def test_organizations_returns_configured_organization():
+    client = _org_client(id="acme", name="Акме", description="Отдел кадров")
+    body = client.get("/organizations").json()
+    assert body == {
+        "organizations": [
+            {"id": "acme", "name": "Акме", "description": "Отдел кадров"}
+        ]
+    }
+
+
+def test_organizations_is_empty_when_not_configured():
+    # Одна установка — одна организация, но пока её не настроили, честнее
+    # отдать пустой список, чем организацию без имени.
+    assert _org_client().get("/organizations").json() == {"organizations": []}
+
+
+def test_organization_id_falls_back_to_name():
+    # Идентификатор нужен клиенту для сравнения, но заставлять администратора
+    # придумывать его отдельно ни к чему.
+    body = _org_client(name="Акме").get("/organizations").json()
+    assert body["organizations"][0]["id"] == "Акме"
+
+
+def test_organizations_requires_authentication():
+    from fastapi.testclient import TestClient
+
+    from ragkb.api import create_app
+    from ragkb.config import Config, OrganizationConfig
+
+    cfg = Config()
+    cfg.history.enabled = False
+    cfg.organization = OrganizationConfig(name="Акме")
+    # Режим proxy, заголовка нет — сведения об организации наружу не уходят.
+    client = TestClient(create_app(cfg), raise_server_exceptions=False)
+    assert client.get("/organizations").status_code == 401
+
+
+def test_organization_config_comes_from_dict():
+    from ragkb.config import Config
+
+    cfg = Config.from_dict({"organization": {"name": "Акме", "id": "acme"}})
+    assert cfg.organization.name == "Акме"
+    assert cfg.organization.id == "acme"
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

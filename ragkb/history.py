@@ -339,6 +339,19 @@ class HistoryStore:
 
     # ------------------------------------------------------------ удаление
 
+    def rename_conversation(self, conversation_id: str, user: str, title: str) -> bool:
+        """Меняет заголовок диалога. False — диалога нет или он чужой.
+
+        updated_at не трогаем: переименование не реплика в переписке, и от
+        исправления опечатки диалог не должен прыгать наверх списка.
+        """
+        with connect(self.path) as conn:
+            cur = conn.execute(
+                "UPDATE conversations SET title = ? WHERE id = ? AND user = ?",
+                (title, conversation_id, user),
+            )
+        return cur.rowcount > 0
+
     def delete_conversation(self, conversation_id: str, user: str) -> bool:
         with connect(self.path) as conn:
             cur = conn.execute(

@@ -4,8 +4,29 @@
     {
       "name": "ragkb",
       "runtimeExecutable": ".venv/bin/python",
-      "runtimeArgs": ["-m", "ragkb.cli", "serve", "--host", "127.0.0.1", "--port", "8000"],
+      "runtimeArgs": [
+        "-m",
+        "ragkb.cli",
+        "serve",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8000"
+      ],
       "port": 8000
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": [
+        "run",
+        "--cwd",
+        "web",
+        "dev",
+        "--port",
+        "5173"
+      ],
+      "port": 5173
     }
   ]
 }
