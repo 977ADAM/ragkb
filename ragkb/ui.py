@@ -16,108 +16,252 @@ UI_HTML = """<!DOCTYPE html>
 <title>База знаний</title>
 <style>
   :root {
-    --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280; --line: #e5e7eb;
-    --accent: #2563eb; --card: #f9fafb;
+    --bg:#fff; --fg:#1a1a1a; --muted:#6b7280; --line:#e5e7eb;
+    --accent:#2563eb; --card:#f9fafb; --side:#f3f4f6;
   }
   @media (prefers-color-scheme: dark) {
     :root { --bg:#0f1115; --fg:#e8eaed; --muted:#9aa0a6; --line:#2a2f37;
-            --accent:#60a5fa; --card:#171a21; }
+            --accent:#60a5fa; --card:#171a21; --side:#12151b; }
   }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6
-         -apple-system, "Segoe UI", Roboto, Helvetica, sans-serif; }
-  .wrap { max-width: 780px; margin: 0 auto; padding: 32px 20px 80px; }
-  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
-  .sub { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
-  form { display: flex; gap: 8px; margin-bottom: 24px; }
-  input[type=text] { flex:1; padding:12px 14px; font-size:15px; border-radius:8px;
-    border:1px solid var(--line); background:var(--bg); color:var(--fg); }
-  input[type=text]:focus { outline:2px solid var(--accent); outline-offset:-1px; border-color:transparent; }
-  button { padding:12px 20px; font-size:15px; border:0; border-radius:8px;
-    background:var(--accent); color:#fff; cursor:pointer; }
-  button:disabled { opacity:.5; cursor:default; }
-  .answer { white-space: pre-wrap; padding:18px; background:var(--card);
-    border:1px solid var(--line); border-radius:10px; margin-bottom:20px; }
-  .sources { font-size:14px; }
-  .sources h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em;
-    color:var(--muted); margin:24px 0 10px; font-weight:600; }
-  details { border:1px solid var(--line); border-radius:8px; padding:10px 14px;
-    margin-bottom:8px; background:var(--card); }
-  summary { cursor:pointer; font-weight:500; }
-  .frag { color:var(--muted); font-size:14px; margin-top:8px; white-space:pre-wrap; }
-  .meta { color:var(--muted); font-size:13px; margin-top:20px; }
-  .warn { color:#b45309; font-size:14px; margin-top:10px; }
-  .spin { color:var(--muted); }
+  * { box-sizing:border-box; }
+  body { margin:0; height:100vh; display:flex; background:var(--bg); color:var(--fg);
+         font:15px/1.6 -apple-system,"Segoe UI",Roboto,Helvetica,sans-serif; }
+
+  aside { width:260px; flex:none; border-right:1px solid var(--line);
+          background:var(--side); display:flex; flex-direction:column; }
+  aside h1 { font-size:15px; margin:0; padding:14px 16px 10px; }
+  #new { margin:0 12px 10px; padding:8px; border:1px solid var(--line);
+         border-radius:8px; background:var(--bg); color:var(--fg); cursor:pointer; }
+  #list { flex:1; overflow-y:auto; padding:0 8px 12px; }
+  .conv { display:flex; align-items:center; gap:6px; padding:8px 10px;
+          border-radius:8px; cursor:pointer; }
+  .conv:hover { background:var(--card); }
+  .conv.active { background:var(--card); outline:1px solid var(--line); }
+  .conv .t { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .conv .d { color:var(--muted); font-size:12px; }
+  .del { border:0; background:none; color:var(--muted); cursor:pointer;
+         font-size:16px; line-height:1; padding:0 2px; }
+  .del:hover { color:#dc2626; }
+
+  main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  #status { color:var(--muted); font-size:13px; padding:14px 20px 6px; }
+  #thread { flex:1; overflow-y:auto; padding:8px 20px 20px; }
+  .msg { margin-bottom:18px; max-width:760px; }
+  .msg.user .who { color:var(--accent); }
+  .who { font-size:12px; text-transform:uppercase; letter-spacing:.05em;
+         color:var(--muted); margin-bottom:4px; }
+  .body { white-space:pre-wrap; }
+  .msg.assistant .body { padding:14px 16px; background:var(--card);
+         border:1px solid var(--line); border-radius:10px; }
+  .src { font-size:13px; color:var(--muted); margin-top:8px; }
+  .src .gone { color:#b45309; }
+  .warn { color:#b45309; font-size:13px; margin-top:6px; }
+  .meta { color:var(--muted); font-size:12px; margin-top:6px; }
+  .empty { color:var(--muted); padding:40px 0; text-align:center; }
+
+  form { display:flex; gap:8px; padding:12px 20px 18px; border-top:1px solid var(--line); }
+  #q { flex:1; padding:11px 13px; font-size:15px; border-radius:8px;
+       border:1px solid var(--line); background:var(--bg); color:var(--fg); }
+  #q:focus { outline:2px solid var(--accent); outline-offset:-1px; border-color:transparent; }
+  #send { padding:11px 20px; border:0; border-radius:8px; background:var(--accent);
+          color:#fff; cursor:pointer; }
+  #send:disabled { opacity:.5; cursor:default; }
+
+  @media (max-width:760px) {
+    body { flex-direction:column; height:auto; min-height:100vh; }
+    aside { width:auto; border-right:0; border-bottom:1px solid var(--line); max-height:38vh; }
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
+<aside>
   <h1>База знаний</h1>
-  <div class="sub" id="status">загрузка…</div>
-  <div class="sub"><a href="/oauth2/sign_out" id="signout">выйти</a></div>
+  <button id="new">Новый диалог</button>
+  <div id="list"></div>
+  <div style="padding:10px 16px"><a href="/oauth2/sign_out">выйти</a></div>
+</aside>
+<main>
+  <div id="status">загрузка…</div>
+  <div id="thread"></div>
   <form id="f">
-    <input type="text" id="q" placeholder="Задайте вопрос по документам…" autocomplete="off" autofocus>
-    <button type="submit" id="btn">Спросить</button>
+    <input type="text" id="q" placeholder="Задайте вопрос по документам…"
+           autocomplete="off" autofocus>
+    <button type="submit" id="send">Спросить</button>
   </form>
-  <div id="out"></div>
-</div>
+</main>
 <script>
-const out = document.getElementById('out');
-const btn = document.getElementById('btn');
+const listEl = document.getElementById('list');
+const threadEl = document.getElementById('thread');
+const qEl = document.getElementById('q');
+const sendEl = document.getElementById('send');
 
-fetch('/health').then(r => r.json()).then(d => {
-  document.getElementById('status').textContent = d.status === 'ok'
-    ? `${d.documents} документов · ${d.chunks} фрагментов · ${d.embedder} · ${d.llm}`
-    : 'Индекс не построен: ' + (d.detail || '');
-});
-
-document.getElementById('f').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const question = document.getElementById('q').value.trim();
-  if (!question) return;
-  btn.disabled = true;
-  out.innerHTML = '<div class="spin">Ищу…</div>';
-  try {
-    const res = await fetch('/ask', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({question})
-    });
-    const data = await res.json();
-    render(data);
-  } catch (err) {
-    out.innerHTML = '<div class="warn">Ошибка: ' + err.message + '</div>';
-  } finally {
-    btn.disabled = false;
-  }
-});
+let currentId = null;   // единственное состояние на клиенте
 
 function esc(s) {
   return String(s).replace(/[&<>"]/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 }
 
-function render(d) {
-  let html = '<div class="answer">' + esc(d.answer) + '</div>';
-  if (d.sources && d.sources.length) {
-    html += '<div class="sources"><h2>Источники</h2>';
-    d.sources.forEach(s => {
-      html += `<div>[${s.n}] ${esc(s.citation)}</div>`;
-    });
-    html += '</div>';
-  }
-  if (d.chunks && d.chunks.length) {
-    html += '<div class="sources"><h2>Найденные фрагменты</h2>';
-    d.chunks.forEach((c, i) => {
-      html += `<details><summary>[${i+1}] ${esc(c.citation)} · ${c.score}</summary>
-               <div class="frag">${esc(c.text)}</div></details>`;
-    });
-    html += '</div>';
-  }
-  (d.warnings || []).forEach(w => { html += '<div class="warn">⚠ ' + esc(w) + '</div>'; });
-  html += `<div class="meta">${d.elapsed_sec} с · ${esc(d.llm)}</div>`;
-  out.innerHTML = html;
+function shortDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return isNaN(d) ? '' : d.toLocaleDateString('ru-RU', {day:'2-digit', month:'2-digit'});
 }
+
+fetch('/health').then(r => r.json()).then(d => {
+  document.getElementById('status').textContent = d.status === 'ok'
+    ? `${d.documents} документов · ${d.chunks} фрагментов · ${d.embedder} · ${d.llm}`
+    : 'Индекс не построен';
+}).catch(() => {});
+
+async function loadList() {
+  const r = await fetch('/conversations');
+  if (!r.ok) { listEl.innerHTML = ''; return []; }
+  const items = (await r.json()).conversations || [];
+  listEl.innerHTML = '';
+  items.forEach(c => {
+    const row = document.createElement('div');
+    row.className = 'conv' + (c.id === currentId ? ' active' : '');
+    row.innerHTML = `<span class="t">${esc(c.title || 'Без названия')}</span>` +
+                    `<span class="d">${shortDate(c.updated_at)}</span>` +
+                    `<button class="del" title="Удалить">×</button>`;
+    row.querySelector('.t').onclick = () => openConv(c.id);
+    row.querySelector('.d').onclick = () => openConv(c.id);
+    row.querySelector('.del').onclick = e => { e.stopPropagation(); removeConv(c.id, c.title); };
+    listEl.appendChild(row);
+  });
+  return items;
+}
+
+function renderSources(sources) {
+  if (!sources || !sources.length) return '';
+  const rows = sources.map(s => {
+    // available отсутствует — состав индекса неизвестен, пометку не ставим.
+    const gone = s.available === false
+      ? ' <span class="gone">(источник больше не в базе)</span>' : '';
+    return `[${s.n}] ${esc(s.citation)}${gone}`;
+  });
+  return `<div class="src">${rows.join('<br>')}</div>`;
+}
+
+function addMessage(role, text, sources, warnings, meta) {
+  const el = document.createElement('div');
+  el.className = 'msg ' + role;
+  el.innerHTML = `<div class="who">${role === 'user' ? 'Вы' : 'Ассистент'}</div>` +
+                 `<div class="body"></div>`;
+  el.querySelector('.body').textContent = text || '';
+  threadEl.appendChild(el);
+  if (sources) el.insertAdjacentHTML('beforeend', renderSources(sources));
+  (warnings || []).forEach(w =>
+    el.insertAdjacentHTML('beforeend', `<div class="warn">⚠ ${esc(w)}</div>`));
+  if (meta) el.insertAdjacentHTML('beforeend', `<div class="meta">${esc(meta)}</div>`);
+  threadEl.scrollTop = threadEl.scrollHeight;
+  return el;
+}
+
+async function openConv(id) {
+  const r = await fetch('/conversations/' + encodeURIComponent(id));
+  if (!r.ok) { await startNew(); return; }
+  const data = await r.json();
+  currentId = data.id;
+  threadEl.innerHTML = '';
+  (data.messages || []).forEach(m =>
+    addMessage(m.role, m.text, m.sources, null, null));
+  await loadList();
+}
+
+async function startNew() {
+  currentId = null;
+  threadEl.innerHTML = '<div class="empty">Задайте вопрос по документам</div>';
+  await loadList();
+  qEl.focus();
+}
+
+async function removeConv(id, title) {
+  if (!confirm(`Удалить диалог «${title || 'Без названия'}»? Восстановить нельзя.`)) return;
+  const r = await fetch('/conversations/' + encodeURIComponent(id), {method:'DELETE'});
+  if (!r.ok) return;
+  if (id === currentId) {
+    const rest = await loadList();
+    if (rest.length) await openConv(rest[0].id); else await startNew();
+  } else {
+    await loadList();
+  }
+}
+
+document.getElementById('new').onclick = () => startNew();
+
+document.getElementById('f').addEventListener('submit', async e => {
+  e.preventDefault();
+  const question = qEl.value.trim();
+  if (!question) return;
+  qEl.value = '';
+  sendEl.disabled = true;
+
+  if (threadEl.querySelector('.empty')) threadEl.innerHTML = '';
+  addMessage('user', question, null, null, null);
+  const box = addMessage('assistant', '', null, null, null);
+  const bodyEl = box.querySelector('.body');
+  bodyEl.textContent = '…';
+
+  try {
+    const resp = await fetch('/ask/stream', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({question, conversation_id: currentId})
+    });
+    if (!resp.ok) {
+      bodyEl.textContent = 'Ошибка: ' + resp.status;
+      return;
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '', text = '';
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, {stream: true});
+      let nl;
+      while ((nl = buf.indexOf('\\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let ev;
+        try { ev = JSON.parse(line); } catch (_) { continue; }
+        if (ev.type === 'token') {
+          text += ev.text;
+          bodyEl.textContent = text;
+          threadEl.scrollTop = threadEl.scrollHeight;
+        } else if (ev.type === 'error') {
+          // Статус уже 200 — об отказе сообщает событие, и его надо показать,
+          // иначе обрыв выглядит зависшим ответом.
+          bodyEl.textContent = text || '';
+          box.insertAdjacentHTML('beforeend',
+            `<div class="warn">⚠ Ошибка генерации: ${esc(ev.detail)}</div>`);
+          return;
+        } else if (ev.type === 'done') {
+          currentId = ev.conversation_id || currentId;
+          box.insertAdjacentHTML('beforeend', renderSources(ev.sources));
+          (ev.warnings || []).forEach(w =>
+            box.insertAdjacentHTML('beforeend', `<div class="warn">⚠ ${esc(w)}</div>`));
+          box.insertAdjacentHTML('beforeend',
+            `<div class="meta">${ev.elapsed_sec} с</div>`);
+          await loadList();
+        }
+      }
+    }
+  } catch (err) {
+    bodyEl.textContent = 'Ошибка: ' + err.message;
+  } finally {
+    sendEl.disabled = false;
+    qEl.focus();
+  }
+});
+
+(async () => {
+  const items = await loadList();
+  if (items.length) await openConv(items[0].id); else await startNew();
+})();
 </script>
 </body>
 </html>"""
