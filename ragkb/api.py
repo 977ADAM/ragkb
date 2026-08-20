@@ -14,7 +14,7 @@ from .auth import User, current_user, optional_user, require_admin
 from .config import Config
 from .history import HistoryStore, make_title
 from .llm import ExtractiveLLM
-from .models import available_models, resolve_model
+from .models import ModelInfo, available_models, resolve_model
 from .pipeline import ANSWER_TEMPLATE, SYSTEM_PROMPT, RAGPipeline, build_index, format_context
 from .ui import UI_HTML
 
@@ -33,16 +33,6 @@ class AskRequest(BaseModel):
     conversation_id: str | None = None
     # Пустое значение означает «модель по умолчанию из настроек».
     model: str | None = None
-
-
-class ModelInfo(BaseModel):
-    """Модель, доступная для выбора."""
-
-    id: str
-    display_name: str | None = None
-    context_window: int | None = None
-    supports_tools: bool = False
-    is_default: bool = False
 
 
 class ModelsResponse(BaseModel):
@@ -159,14 +149,9 @@ def create_app(cfg: Config) -> FastAPI:
         dependencies=[Depends(current_user)],
     )
     def list_models() -> ModelsResponse:
-        # probe=True добирает размер контекста и поддержку инструментов из Ollama.
-        # Отказ Ollama список не роняет: недостающие поля останутся пустыми.
-        return ModelsResponse(
-            models=[ModelInfo(**item) for item in available_models(cfg.llm)]
-        )
-
-
-
+        # Список приходит из самой Ollama; её недоступность даёт пустой ответ,
+        # а не ошибку — это и есть признак режима поиска.
+        return ModelsResponse(models=available_models(cfg.llm))
 
     @app.post("/ask")
     def ask(req: AskRequest, user: User = Depends(current_user)) -> dict[str, Any]:
