@@ -149,6 +149,7 @@ class Config:
 
     @classmethod
     def load(cls, path: str | os.PathLike | None = None) -> Config:
+        _load_dotenv(path)
         data: dict[str, Any] = {}
         if path and Path(path).exists():
             text = Path(path).read_text(encoding="utf-8")
@@ -222,6 +223,38 @@ class Config:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _load_dotenv(path: str | os.PathLike | None) -> None:
+    """Читает `.env` рядом с конфигом и кладёт переменные в окружение.
+
+    Файл не коммитится (см. .gitignore): здесь живут адреса и секреты
+    развёртывания. Настоящее окружение важнее файла — уже заданная переменная
+    не перезаписывается. Синтаксис намеренно простейший: `KEY=VALUE`, пустые
+    строки и строки с `#` пропускаются, префикс `export` не обязателен,
+    кавычки снимаются. Окружение применяется позже, в _apply_env, общим
+    порядком — для конфига .env и экспортированные переменные неразличимы.
+    """
+    if not path:
+        return
+    env_path = Path(path).resolve().parent / ".env"
+    if not env_path.exists():
+        return
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        key, sep, value = line.partition("=")
+        key = key.strip()
+        if not sep or not key:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        if key not in os.environ:
+            os.environ[key] = value
 
 
 def _load_yaml(text: str) -> dict[str, Any]:
