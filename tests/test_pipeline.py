@@ -358,6 +358,43 @@ def test_loaders_read_all_formats():
         assert doc.title
 
 
+# ------------------------------------------------------------- загрузка .env
+
+def test_dotenv_next_to_config_is_loaded():
+    import os
+
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, ".env").write_text(
+            "RAGKB_LLM_URL=http://10.0.0.1:9999/v1\n", encoding="utf-8"
+        )
+        try:
+            cfg = Config.load(Path(tmp) / "config.yaml")
+            assert cfg.llm.base_url == "http://10.0.0.1:9999/v1"
+        finally:
+            os.environ.pop("RAGKB_LLM_URL", None)
+
+
+def test_dotenv_does_not_override_real_environment():
+    import os
+
+    os.environ["RAGKB_LLM_URL"] = "http://127.0.0.1:1234"
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, ".env").write_text(
+                "RAGKB_LLM_URL=http://10.0.0.1:9999/v1\n", encoding="utf-8"
+            )
+            cfg = Config.load(Path(tmp) / "config.yaml")
+            assert cfg.llm.base_url == "http://127.0.0.1:1234"
+    finally:
+        os.environ.pop("RAGKB_LLM_URL", None)
+
+
+def test_dotenv_absent_means_defaults():
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = Config.load(Path(tmp) / "config.yaml")
+        assert cfg.llm.base_url == "http://localhost:11434"
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

@@ -58,13 +58,20 @@ retrieval:
 
 llm:
   # extractive — без нейросети, собирает ответ из фрагментов
-  # ollama — локальная модель; openai — любой OpenAI-совместимый endpoint
-  backend: ollama
-  model: qwen2.5:14b-instruct
-  base_url: http://localhost:11434
+  # ollama — локальная модель
+  # openai — любой OpenAI-совместимый endpoint: vLLM, LM Studio, llama.cpp server.
+  #          Ключ не требуется: Authorization уходит только при заданном api_key.
+  # Адрес сервера (base_url) здесь не задан намеренно: он читается только
+  # из .env (RAGKB_LLM_URL) — загрузку файла выполняет Config.load при старте.
+  backend: openai
+  # llama.cpp server, единственная модель:
+  model: /home/adminai/models/qwen2.5-coder-14b/qwen2.5-coder-14b-instruct-q4_k_m.gguf
   temperature: 0.1
-  max_tokens: 1024
-  timeout: 180
-  # Список моделей приходит из самой Ollama — что установлено, то и предлагается.
-  # Здесь можно сузить выбор до подмножества; пустой список означает «всё».
+  # Сервер выдаёт ~1 токен/с: ответ в 1024 токена шёл бы ~17 минут, и пришёл бы
+  # одним куском (openai-бэкенд не потоковый). 256 — разумный предел для ответа
+  # с цитатами; таймаут обязан пережить генерацию.
+  max_tokens: 256
+  timeout: 600
+  # Список моделей, доступных для выбора. У openai-бэкенда единственная модель —
+  # из настроек; список лишь сужает её до вручную заданного подмножества.
   available: []
