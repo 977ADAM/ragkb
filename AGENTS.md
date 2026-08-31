@@ -35,7 +35,8 @@ CLI (`ragkb serve` / `index` / `ask`) нет. Индекс — `POST /index/rebu
 - Не возвращать HTML из FastAPI и не заводить второй UI рядом с `frontend/`.
 - Не импортировать `sqlalchemy`/`alembic` вне `backend/migrations/`.
 - Не ходить из браузера в FastAPI напрямую: только BFF `frontend/src/routes/api/`.
-- В боевом compose не задавать `RAGKB_DEV_USER`.
+- В боевом compose не задавать `RAGKB_DEV_USER` (вход — Angie, заголовки
+  `X-Forwarded-*`). oauth2-proxy в стеке нет.
 - Модели не поднимать в compose: только OpenAI-совместимый HTTP
   (`RAGKB_LLM_URL`, `RAGKB_EMBEDDING_URL`). Ollama в стеке нет.
 - Исторические планы в `docs/superpowers/plans/` не переписывать под новую

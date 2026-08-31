@@ -110,16 +110,19 @@ RAGKB_EMBEDDING_MODEL=bge-m3
 
 Смена эмбеддера: `POST /index/rebuild` (админ в интерфейсе).
 
-Или целиком в Docker: `docker compose up -d` (см. `docker-compose.yml`). Помимо
-самого сервиса compose поднимает oauth2-proxy и Keycloak — без этого запуск
-не сводится к одной команде:
+Или целиком в Docker: `docker compose up -d` (см. `docker-compose.yml`).
+oauth2-proxy в стеке нет: на сервере TLS и вход делает **Angie** (вне compose),
+он проксирует на `frontend:3000` и ставит `X-Forwarded-*`. Compose поднимает
+Keycloak для OIDC на стороне Angie.
 
-- нужен `.env` из `.env.example`: пароли Keycloak, секреты oauth2-proxy **и
-  адреса моделей** (`RAGKB_LLM_URL`, `RAGKB_EMBEDDING_URL`) — без URL
-  compose поднимет rag, но генерация и эмбеддинги не заработают;
-- нужны сертификаты в `./certs/` — `tls.crt`, `tls.key`, `ca.crt` (см.
-  комментарии в `.env.example`);
-- нужен настроенный realm Keycloak (клиент `ragkb`, группы `ragkb-users` и
+- нужен `.env` из `.env.example`: пароли Keycloak **и адреса моделей**
+  (`RAGKB_LLM_URL`, `RAGKB_EMBEDDING_URL`) — без URL compose поднимет rag,
+  но генерация и эмбеддинги не заработают;
+- локально без Angie: `RAGKB_DEV_USER` (и при необходимости `RAGKB_DEV_GROUPS`);
+  в бою эти переменные не задавать;
+- нужны сертификаты в `./certs/` для Keycloak — `tls.crt`, `tls.key`, `ca.crt`
+  (см. комментарии в `.env.example`);
+- нужен настроенный realm Keycloak (клиент для Angie, группы `ragkb-users` и
   `ragkb-admins`) — в эту работу не входит, настраивается отдельно.
 
 ### Что выбрать
@@ -160,8 +163,9 @@ RAGKB_EMBEDDING_MODEL=bge-m3
 | `POST /events` | телеметрия пачкой (до 100 событий) |
 | `POST /index/rebuild` | переиндексация, только `ragkb-admins` |
 
-Все эндпоинты, кроме `/health`, требуют аутентификации (заголовок от
-oauth2-proxy) и без неё отвечают `401`. Встроенной страницы `GET /` нет.
+Все эндпоинты, кроме `/health`, требуют аутентификации (заголовок
+`X-Forwarded-*` от Angie или от BFF) и без неё отвечают `401`.
+Встроенной страницы `GET /` нет.
 
 При `RAGKB_AUTH_MODE=disabled` все запросы идут от имени `anonymous`.
 Приватности в этом режиме нет.
@@ -256,9 +260,9 @@ python examples/bench_store.py
 - **BM25 пересобирается целиком** при каждом изменении корпуса в коде
   `update`/`delete`. На миллионах чанков это заметно; тогда лексический поиск
   стоит вынести в OpenSearch.
-- **Разграничение доступа грубое.** Аутентификация внешняя (oauth2-proxy
-  и Keycloak), доступ к сервису ограничивается группой Active Directory
-  на стороне прокси. Разграничения по отдельным документам нет: метаданные
+- **Разграничение доступа грубое.** Аутентификация внешняя (Angie и Keycloak),
+  доступ к сервису ограничивается группой на стороне прокси. Разграничения
+  по отдельным документам нет: метаданные
   в Chroma для этого есть (`doc_id`, `source`, `section`), не хватает фильтра
   `where` в запросе и модели прав.
 

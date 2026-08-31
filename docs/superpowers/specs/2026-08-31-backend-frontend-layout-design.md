@@ -41,6 +41,6 @@ data/  docs/  docker-compose.yml  .env.example
 
 Сервис приложения в compose называется `rag` (как раньше), контекст сборки —
 `backend/`. Сервис интерфейса называется `frontend`, контекст — `frontend/`,
-порт 3000. oauth2-proxy: `--upstream=http://frontend:3000`.
+порт 3000. На сервере перед ним стоит Angie (не в compose).
 
 Тест правила зависимостей обходит `backend/ragkb/` и `backend/migrations/`.

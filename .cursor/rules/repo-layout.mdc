@@ -10,8 +10,9 @@ alwaysApply: true
 - Точка входа: `uvicorn ragkb.platform.app:build --factory`. Конфиг:
   `backend/config.yaml`.
 - Миграции истории: `backend/migrations/`, команда `alembic upgrade head`.
-- В compose нет Ollama: LLM и эмбеддинги — OpenAI-совместимый HTTP
-  (`RAGKB_LLM_URL`, `RAGKB_EMBEDDING_URL`).
+- В compose нет Ollama и нет oauth2-proxy: LLM и эмбеддинги —
+  OpenAI-совместимый HTTP (`RAGKB_LLM_URL`, `RAGKB_EMBEDDING_URL`).
+  На сервере TLS и вход — Angie; compose отдаёт `frontend:3000`.
 - Живые доки: корневой `README.md`, `AGENTS.md`, спеки
   `2026-08-21-hexagonal-slices` и `2026-08-31-backend-frontend-layout`.
   В спеке слайсов путь `web/` читать как `frontend/`.

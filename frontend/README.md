@@ -22,7 +22,7 @@ bun run dev
 | Переменная | Смысл |
 |---|---|
 | `RAGKB_BACKEND_URL` | Адрес бэкенда, по умолчанию `http://127.0.0.1:8000` |
-| `RAGKB_DEV_USER` | Логин без oauth2-proxy. В бою не задавать |
+| `RAGKB_DEV_USER` | Логин без Angie. В бою не задавать |
 | `RAGKB_DEV_GROUPS` | Например `ragkb-admins` |
 
-В compose `RAGKB_DEV_USER` не задаётся. Proxy → `frontend:3000` → `rag:8000`.
+В боевом compose `RAGKB_DEV_USER` не задаётся. Angie → `frontend:3000` → `rag:8000`.

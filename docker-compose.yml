@@ -1,9 +1,10 @@
-# Локальный контур: RAG + SvelteKit за oauth2-proxy, Keycloak на MariaDB.
+# Локальный контур: RAG + SvelteKit + Keycloak на MariaDB.
 # Модели — снаружи, OpenAI-совместимый HTTP (vLLM, llama.cpp, облако…).
-# Наружу — proxy (443) и keycloak (8443).
+# Наружу — frontend (3000) и keycloak (8443). На сервере TLS и вход — Angie,
+# не входит в этот compose.
 #
 #   cp .env.example .env   # пароли, RAGKB_LLM_URL, RAGKB_EMBEDDING_URL
-#   # сертификаты в ./certs
+#   # сертификаты в ./certs (для Keycloak)
 #   docker compose up -d
 
 services:
@@ -43,8 +44,13 @@ services:
     build: ./frontend
     depends_on:
       - rag
+    ports:
+      - "3000:3000"
     environment:
       RAGKB_BACKEND_URL: http://rag:8000
+      # Только локально, без Angie. В бою не задавать — заголовки ставит Angie.
+      RAGKB_DEV_USER: ${RAGKB_DEV_USER:-}
+      RAGKB_DEV_GROUPS: ${RAGKB_DEV_GROUPS:-}
 
   mariadb:
     image: mariadb:11.8
@@ -79,35 +85,6 @@ services:
       default:
         aliases:
           - ${KEYCLOAK_HOSTNAME}
-
-  proxy:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.2
-    depends_on:
-      - keycloak
-      - frontend
-    ports:
-      - "443:4180"
-    volumes:
-      - ./certs:/certs:ro
-    command:
-      - --provider=keycloak-oidc
-      - --oidc-issuer-url=${KEYCLOAK_ISSUER_URL}
-      - --client-id=ragkb
-      - --client-secret=${OAUTH2_CLIENT_SECRET}
-      - --cookie-secret=${OAUTH2_COOKIE_SECRET}
-      - --cookie-secure=true
-      - --email-domain=*
-      - --http-address=
-      - --https-address=0.0.0.0:4180
-      - --tls-cert-file=/certs/tls.crt
-      - --tls-key-file=/certs/tls.key
-      - --upstream=http://frontend:3000
-      - --redirect-url=${OAUTH2_REDIRECT_URL}
-      - --reverse-proxy=false
-      - --provider-ca-file=/certs/ca.crt
-      - --allowed-group=ragkb-users
-      - --pass-user-headers=true
-      - --skip-auth-strip-headers=true
 
 volumes:
   rag_index:

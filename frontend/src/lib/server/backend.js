@@ -15,7 +15,7 @@ const BASE = (env.RAGKB_BACKEND_URL || env.RAGKB_API_URL || 'http://127.0.0.1:80
 /**
  * Заголовки идентификации для бэкенда.
  *
- * В боевом контуре их проставляет oauth2-proxy перед SvelteKit — тогда
+ * В боевом контуре их проставляет Angie перед SvelteKit — тогда
  * пробрасываем пришедшие как есть. Имена — те же, что читает ragkb/auth.py
  * (семейство X-Forwarded-*, НЕ X-Auth-Request-*).
  *

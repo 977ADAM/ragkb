@@ -90,14 +90,14 @@ class LLMConfig:
 
 @dataclass
 class AuthConfig:
-    # mode: "proxy" — логин приходит заголовком от oauth2-proxy
+    # mode: "proxy" — логин приходит заголовком от reverse proxy (Angie)
     #       "disabled" — аутентификации нет, всё работает от имени anonymous
     # По умолчанию закрыто: забытая настройка должна давать отказ,
     # а не открытый наружу сервис.
     mode: str = "proxy"
-    # Заголовки семейства X-Forwarded-*, которые oauth2-proxy передаёт наверх
-    # опцией --pass-user-headers. НЕ X-Auth-Request-*: те выставляются
-    # в заголовки ответа для режима nginx auth_request.
+    # Заголовки семейства X-Forwarded-*, которые прокси передаёт наверх.
+    # НЕ X-Auth-Request-*: те выставляются в заголовки ответа для режима
+    # nginx/Angie auth_request.
     header: str = "X-Forwarded-Preferred-Username"
     email_header: str = "X-Forwarded-Email"
     groups_header: str = "X-Forwarded-Groups"
