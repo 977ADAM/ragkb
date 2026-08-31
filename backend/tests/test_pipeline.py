@@ -341,7 +341,7 @@ def test_pipeline_rejects_mismatched_embedder():
     cfg = _workspace("numpy")
     build_index(cfg)
 
-    cfg.embedding.backend = "ollama"
+    cfg.embedding.backend = "openai"
     cfg.embedding.model = "bge-m3"
     try:
         RAGPipeline(cfg)
@@ -395,4 +395,4 @@ def test_dotenv_does_not_override_real_environment():
 def test_dotenv_absent_means_defaults():
     with tempfile.TemporaryDirectory() as tmp:
         cfg = Config.load(Path(tmp) / "config.yaml")
-        assert cfg.llm.base_url == "http://localhost:11434"
+        assert cfg.llm.base_url == ""

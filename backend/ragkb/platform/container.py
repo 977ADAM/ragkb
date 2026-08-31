@@ -7,6 +7,7 @@ from ragkb.core.ports import AnswerEngine
 from ragkb.features.chat_conversations.ephemeral import EphemeralHistory
 from ragkb.features.chat_conversations.sqlite import SqliteHistory
 from ragkb.features.models.ollama import OllamaCatalog
+from ragkb.features.models.openai import OpenAICatalog
 from ragkb.features.models.static import StaticCatalog
 from ragkb.features.telemetry.stdout import StdoutSink
 from ragkb.platform.errors import EngineUnavailable
@@ -24,7 +25,10 @@ class Container:
             ephemeral = EphemeralHistory()
             self.conversations = ephemeral
             self.answer_history = ephemeral
-        if cfg.llm.backend.lower() == "ollama":
+        kind = cfg.llm.backend.lower()
+        if kind in {"openai", "vllm", "openai-compatible"}:
+            self.models = OpenAICatalog(cfg.llm)
+        elif kind == "ollama":
             self.models = OllamaCatalog(cfg.llm)
         else:
             self.models = StaticCatalog(cfg.llm)

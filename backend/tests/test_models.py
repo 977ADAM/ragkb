@@ -1,6 +1,18 @@
 from ragkb.core.config import LLMConfig
 from ragkb.features.models.ollama import OllamaCatalog
+from ragkb.features.models.openai import OpenAICatalog
 from ragkb.features.models.static import StaticCatalog
+
+
+def test_openai_catalog_filters_and_falls_back():
+    cfg = LLMConfig(backend="openai", model="a", available=[{"name": "a"}])
+    cat = OpenAICatalog(
+        cfg,
+        installed=[{"id": "a"}, {"id": "b"}],
+    )
+    assert {m.id for m in cat.list()} == {"a"}
+    empty = OpenAICatalog(LLMConfig(backend="openai", model="local"), installed=[])
+    assert empty.list()[0].id == "local"
 
 
 def test_static_catalog_default():

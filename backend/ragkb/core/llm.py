@@ -1,10 +1,9 @@
 """Бэкенды генерации.
 
-ollama     — локальная модель (qwen2.5, llama3.1, mistral, saiga). Рекомендуется.
-openai     — любой OpenAI-совместимый endpoint: vLLM, LM Studio, TGI, llama.cpp.
-extractive — без LLM вообще: собирает ответ из найденных фрагментов. Нужен,
-             чтобы проверить качество поиска отдельно от качества генерации, и
-             как деградация, когда LLM-сервис недоступен.
+openai     — любой OpenAI-совместимый HTTP API: vLLM, llama.cpp server,
+             LM Studio, TGI, облачный OpenAI. Это основной боевой путь.
+ollama     — нативный протокол Ollama (/api/chat), не OpenAI. В compose его нет.
+extractive — без LLM: ответ из найденных фрагментов. Тесты и деградация.
 """
 from __future__ import annotations
 
@@ -146,6 +145,45 @@ class OpenAILLM(LLM):
                 resp = client.post(f"{self.base_url}/chat/completions", json=payload)
                 resp.raise_for_status()
                 return resp.json()["choices"][0]["message"]["content"].strip()
+        except Exception as exc:
+            raise LLMError(f"LLM-эндпоинт недоступен ({self.base_url}): {exc}") from exc
+
+    def stream(self, system: str, user: str) -> Iterator[str]:
+        import json
+
+        import httpx
+
+        payload = {
+            "model": self.cfg.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": self.cfg.temperature,
+            "max_tokens": self.cfg.max_tokens,
+            "stream": True,
+        }
+        try:
+            with (
+                httpx.Client(timeout=self.cfg.timeout, headers=self._headers()) as client,
+                client.stream("POST", f"{self.base_url}/chat/completions", json=payload) as resp,
+            ):
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("data: "):
+                        line = line[6:]
+                    if line.strip() == "[DONE]":
+                        return
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    delta = (data.get("choices") or [{}])[0].get("delta") or {}
+                    piece = delta.get("content") or ""
+                    if piece:
+                        yield piece
         except Exception as exc:
             raise LLMError(f"LLM-эндпоинт недоступен ({self.base_url}): {exc}") from exc
 

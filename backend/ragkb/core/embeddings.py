@@ -4,11 +4,11 @@
 произведение = косинусная близость.
 
 Выбор бэкенда:
-  ollama                — рекомендуется on-premise: bge-m3 или multilingual-e5
-  sentence-transformers — если модель уже скачана и нужен offline без сервера
-  openai                — совместимые API (в т.ч. vLLM, LM Studio, Infinity)
-  tfidf                 — без нейросетей вообще: работает сразу, качество ниже,
-                          полезен как baseline и для тестов/CI
+  openai                — OpenAI-совместимый HTTP: /v1/embeddings (vLLM, Infinity,
+                          llama.cpp, облако). Основной боевой путь.
+  sentence-transformers — модель уже на диске, без HTTP
+  ollama                — нативный /api/embeddings; в compose его нет
+  tfidf                 — без нейросетей: baseline и CI
 """
 from __future__ import annotations
 
@@ -111,7 +111,7 @@ class SentenceTransformerEmbedder(Embedder):
             from sentence_transformers import SentenceTransformer
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError(
-                "pip install sentence-transformers — либо используйте backend=ollama/tfidf"
+                "pip install sentence-transformers — либо используйте backend=openai/tfidf"
             ) from exc
         self.cfg = cfg
         self.model = SentenceTransformer(cfg.model)

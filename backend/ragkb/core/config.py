@@ -24,11 +24,11 @@ class ChunkConfig:
 
 @dataclass
 class EmbeddingConfig:
-    # backend: "ollama" | "sentence-transformers" | "openai" | "tfidf"
+    # backend: "openai" | "sentence-transformers" | "tfidf" | "ollama"
     backend: str = "tfidf"
     model: str = "bge-m3"
-    # Для ollama / openai-совместимых серверов
-    base_url: str = "http://localhost:11434"
+    # OpenAI-совместимый корень, обычно …/v1. Пусто — задайте RAGKB_EMBEDDING_URL.
+    base_url: str = ""
     api_key: str = ""
     batch_size: int = 32
     # e5-модели требуют префиксов "query: " / "passage: "
@@ -74,18 +74,17 @@ class RetrievalConfig:
 
 @dataclass
 class LLMConfig:
-    # backend: "ollama" | "openai" | "extractive"
+    # backend: "openai" | "extractive" | "ollama"
     backend: str = "extractive"
     model: str = "qwen2.5:7b-instruct"
-    base_url: str = "http://localhost:11434"
+    # OpenAI-совместимый корень, обычно …/v1. Пусто — задайте RAGKB_LLM_URL.
+    base_url: str = ""
     api_key: str = ""
     temperature: float = 0.1
     max_tokens: int = 1024
     timeout: int = 180
-    # Список моделей, которые разрешено запрашивать. Пустой — переключения нет,
-    # работает только model. Свободный ввод недопустим: незнакомое имя заставит
-    # Ollama скачивать модель, а это десятки минут и место на диске по запросу
-    # извне.
+    # Пустой available — можно выбрать всё, что отдал GET /models сервера.
+    # Заполненный — подмножество. Свободный ввод недопустим.
     available: list[dict[str, str]] = field(default_factory=list)
 
 
@@ -200,6 +199,7 @@ class Config:
             "RAGKB_EMBEDDING_BACKEND": ("backend", self.embedding),
             "RAGKB_EMBEDDING_MODEL": ("model", self.embedding),
             "RAGKB_EMBEDDING_URL": ("base_url", self.embedding),
+            "RAGKB_EMBEDDING_API_KEY": ("api_key", self.embedding),
             "RAGKB_STORE_BACKEND": ("backend", self.store),
             "RAGKB_CHROMA_HOST": ("chroma_host", self.store),
             "RAGKB_CHROMA_COLLECTION": ("collection", self.store),

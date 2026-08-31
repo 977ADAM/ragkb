@@ -1,0 +1,17 @@
+---
+description: Раскладка ragkb — backend/, frontend/, без CLI
+alwaysApply: true
+---
+
+# Раскладка репозитория
+
+- Код сервиса только в `backend/` (пакет `ragkb`: `core`, `platform`, `features`).
+- Интерфейс только в `frontend/` (SvelteKit + BFF). FastAPI не отдаёт HTML.
+- Точка входа: `uvicorn ragkb.platform.app:build --factory`. Конфиг:
+  `backend/config.yaml`.
+- Миграции истории: `backend/migrations/`, команда `alembic upgrade head`.
+- В compose нет Ollama: LLM и эмбеддинги — OpenAI-совместимый HTTP
+  (`RAGKB_LLM_URL`, `RAGKB_EMBEDDING_URL`).
+- Живые доки: корневой `README.md`, `AGENTS.md`, спеки
+  `2026-08-21-hexagonal-slices` и `2026-08-31-backend-frontend-layout`.
+  В спеке слайсов путь `web/` читать как `frontend/`.

@@ -21,11 +21,12 @@ chunking:
   respect_structure: true
 
 embedding:
-  # tfidf — работает сразу, без моделей и сети (baseline, для тестов и CI)
-  # ollama — рекомендуется для боевой эксплуатации: bge-m3 или multilingual-e5
+  # tfidf — без сети (baseline, тесты)
+  # openai — OpenAI-совместимый HTTP: POST /embeddings
   backend: tfidf
   model: bge-m3
-  base_url: http://localhost:11434
+  # Адрес и ключ: RAGKB_EMBEDDING_URL, RAGKB_EMBEDDING_API_KEY
+  base_url: ""
   batch_size: 32
   query_prefix: ""   # для e5-моделей: "query: "
   doc_prefix: ""     # для e5-моделей: "passage: "
@@ -33,7 +34,7 @@ embedding:
 
 store:
   # chroma — ChromaDB: HNSW-индекс, фильтры по метаданным, инкрементальное
-  #          обновление документов (ragkb update / delete)
+  #          обновление документов (в коде библиотеки)
   # numpy  — матрица в памяти, точный перебор, без внешних зависимостей
   backend: chroma
   collection: knowledge_base
@@ -57,21 +58,14 @@ retrieval:
   reranker_model: BAAI/bge-reranker-v2-m3
 
 llm:
-  # extractive — без нейросети, собирает ответ из фрагментов
-  # ollama — локальная модель
-  # openai — любой OpenAI-совместимый endpoint: vLLM, LM Studio, llama.cpp server.
-  #          Ключ не требуется: Authorization уходит только при заданном api_key.
-  # Адрес сервера (base_url) здесь не задан намеренно: он читается только
-  # из .env (RAGKB_LLM_URL) — загрузку файла выполняет Config.load при старте.
+  # extractive — без нейросети
+  # openai — любой OpenAI-совместимый HTTP (vLLM, llama.cpp, LM Studio, облако).
+  #          Authorization только при RAGKB_LLM_API_KEY.
+  # Адрес: RAGKB_LLM_URL (обычно …/v1).
   backend: openai
-  # llama.cpp server, единственная модель:
-  model: /home/adminai/models/qwen2.5-coder-14b/qwen2.5-coder-14b-instruct-q4_k_m.gguf
+  model: qwen2.5-instruct
   temperature: 0.1
-  # Сервер выдаёт ~1 токен/с: ответ в 1024 токена шёл бы ~17 минут, и пришёл бы
-  # одним куском (openai-бэкенд не потоковый). 256 — разумный предел для ответа
-  # с цитатами; таймаут обязан пережить генерацию.
   max_tokens: 256
   timeout: 600
-  # Список моделей, доступных для выбора. У openai-бэкенда единственная модель —
-  # из настроек; список лишь сужает её до вручную заданного подмножества.
+  # Пусто — GET /models сервера; если сервер список не отдаёт, остаётся model.
   available: []

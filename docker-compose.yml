@@ -1,22 +1,12 @@
-# Локальный контур: Ollama + RAG-бэкенд + SvelteKit за oauth2-proxy,
-# Keycloak (группы ragkb-users / ragkb-admins) на MariaDB.
+# Локальный контур: RAG + SvelteKit за oauth2-proxy, Keycloak на MariaDB.
+# Модели — снаружи, OpenAI-совместимый HTTP (vLLM, llama.cpp, облако…).
 # Наружу — proxy (443) и keycloak (8443).
 #
-#   cp .env.example .env
+#   cp .env.example .env   # пароли, RAGKB_LLM_URL, RAGKB_EMBEDDING_URL
 #   # сертификаты в ./certs
 #   docker compose up -d
-#   docker compose exec ollama ollama pull bge-m3
-#   docker compose exec ollama ollama pull qwen2.5:7b-instruct
-#   # индекс: кнопка в интерфейсе (админ) или POST /index/rebuild через сеанс
 
 services:
-  ollama:
-    image: ollama/ollama:latest
-    volumes:
-      - ollama_models:/root/.ollama
-    ports:
-      - "11434:11434"
-
   migrate:
     build: ./backend
     image: ragkb:local
@@ -31,8 +21,6 @@ services:
     build: ./backend
     image: ragkb:local
     depends_on:
-      ollama:
-        condition: service_started
       migrate:
         condition: service_completed_successfully
     volumes:
@@ -40,12 +28,14 @@ services:
       - rag_index:/app/data/index
       - rag_history:/app/data/history
     environment:
-      RAGKB_EMBEDDING_BACKEND: ollama
-      RAGKB_EMBEDDING_MODEL: bge-m3
-      RAGKB_EMBEDDING_URL: http://ollama:11434
-      RAGKB_LLM_BACKEND: ollama
-      RAGKB_LLM_MODEL: qwen2.5:7b-instruct
-      RAGKB_LLM_URL: http://ollama:11434
+      RAGKB_EMBEDDING_BACKEND: ${RAGKB_EMBEDDING_BACKEND:-openai}
+      RAGKB_EMBEDDING_MODEL: ${RAGKB_EMBEDDING_MODEL:-bge-m3}
+      RAGKB_EMBEDDING_URL: ${RAGKB_EMBEDDING_URL}
+      RAGKB_EMBEDDING_API_KEY: ${RAGKB_EMBEDDING_API_KEY:-}
+      RAGKB_LLM_BACKEND: ${RAGKB_LLM_BACKEND:-openai}
+      RAGKB_LLM_MODEL: ${RAGKB_LLM_MODEL}
+      RAGKB_LLM_URL: ${RAGKB_LLM_URL}
+      RAGKB_LLM_API_KEY: ${RAGKB_LLM_API_KEY:-}
       RAGKB_HISTORY_PATH: /app/data/history/history.sqlite3
       RAGKB_STORE_BACKEND: chroma
 
@@ -55,7 +45,6 @@ services:
       - rag
     environment:
       RAGKB_BACKEND_URL: http://rag:8000
-    # RAGKB_DEV_USER в бою не задаётся.
 
   mariadb:
     image: mariadb:11.8
@@ -121,7 +110,6 @@ services:
       - --skip-auth-strip-headers=true
 
 volumes:
-  ollama_models:
   rag_index:
   rag_history:
   keycloak_db:

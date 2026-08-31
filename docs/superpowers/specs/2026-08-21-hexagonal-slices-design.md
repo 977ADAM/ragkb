@@ -4,7 +4,7 @@
 |---|---|
 | Дата | 2026-08-21 |
 | Версия | 1 |
-| Статус | на вычитке |
+| Статус | реализовано (2026-08-31): корни `backend/` и `frontend/`, не `web/` в корне; см. [2026-08-31-backend-frontend-layout-design.md](2026-08-31-backend-frontend-layout-design.md). Текст ниже — исходная спека, пути `web/` читать как `frontend/`. |
 | Автор | Claude Opus 5 |
 
 ## Зачем
