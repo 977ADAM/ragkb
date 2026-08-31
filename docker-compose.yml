@@ -1,17 +1,13 @@
-# Локальный контур с идентификацией: Ollama + RAG-сервис за oauth2-proxy,
-# Keycloak (realm с группами ragkb-users / ragkb-admins) на MariaDB.
-# Наружу публикуются только proxy (443) и keycloak (8443, нужен браузеру для
-# authorization endpoint); rag и mariadb доступны только внутри сети compose.
+# Локальный контур: Ollama + RAG-бэкенд + SvelteKit за oauth2-proxy,
+# Keycloak (группы ragkb-users / ragkb-admins) на MariaDB.
+# Наружу — proxy (443) и keycloak (8443).
 #
-#   cp .env.example .env               # заполнить пароли и секреты
-#   # положить сертификаты в ./certs: tls.crt, tls.key, ca.crt
-#   # настроить realm Keycloak (клиент ragkb, группы ragkb-users/ragkb-admins) — отдельная задача
+#   cp .env.example .env
+#   # сертификаты в ./certs
 #   docker compose up -d
 #   docker compose exec ollama ollama pull bge-m3
 #   docker compose exec ollama ollama pull qwen2.5:7b-instruct
-#   docker compose exec rag ragkb index
-#
-# Затем открыть https://kb.example.local (через proxy, требует входа Keycloak)
+#   # индекс: кнопка в интерфейсе (админ) или POST /index/rebuild через сеанс
 
 services:
   ollama:
@@ -20,27 +16,28 @@ services:
       - ollama_models:/root/.ollama
     ports:
       - "11434:11434"
-    # Раскомментируйте при наличии GPU NVIDIA:
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+
+  migrate:
+    build: ./backend
+    image: ragkb:local
+    volumes:
+      - rag_history:/app/data/history
+    environment:
+      RAGKB_HISTORY_PATH: /app/data/history/history.sqlite3
+    command: alembic upgrade head
+    restart: "no"
 
   rag:
-    build: .
+    build: ./backend
+    image: ragkb:local
     depends_on:
-      - ollama
+      ollama:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
     volumes:
-      - ./data/docs:/app/data/docs:ro    # документы монтируются только на чтение
+      - ./data/docs:/app/data/docs:ro
       - rag_index:/app/data/index
-      # База диалогов хранит персональные данные (журнал вопросов
-      # сотрудников) и требует резервного копирования — в отличие от
-      # rag_index, который в любой момент пересобирается командой
-      # `ragkb index`. WAL заводит рядом файлы -wal/-shm, поэтому монтируем
-      # каталог целиком, а не отдельный файл базы.
       - rag_history:/app/data/history
     environment:
       RAGKB_EMBEDDING_BACKEND: ollama
@@ -49,24 +46,16 @@ services:
       RAGKB_LLM_BACKEND: ollama
       RAGKB_LLM_MODEL: qwen2.5:7b-instruct
       RAGKB_LLM_URL: http://ollama:11434
-      # Без этого база истории попала бы в записываемый слой контейнера
-      # и молча терялась бы при каждом пересоздании сервиса.
       RAGKB_HISTORY_PATH: /app/data/history/history.sqlite3
-      # Chroma во встроенном режиме: база лежит в томе rag_index,
-      # отдельный сервис не нужен. Чтобы вынести её в свой контейнер —
-      # раскомментируйте сервис chroma ниже и эту переменную.
       RAGKB_STORE_BACKEND: chroma
-      # RAGKB_CHROMA_HOST: chroma
-    command: ragkb serve --host 0.0.0.0 --port 8000
 
-  # Отдельный сервер Chroma нужен, только если к базе обращается несколько
-  # приложений или её администрируют отдельно от RAG-сервиса.
-  # chroma:
-  #   image: chromadb/chroma:latest
-  #   volumes:
-  #     - chroma_data:/data
-  #   ports:
-  #     - "8001:8000"
+  frontend:
+    build: ./frontend
+    depends_on:
+      - rag
+    environment:
+      RAGKB_BACKEND_URL: http://rag:8000
+    # RAGKB_DEV_USER в бою не задаётся.
 
   mariadb:
     image: mariadb:11.8
@@ -82,44 +71,31 @@ services:
     image: quay.io/keycloak/keycloak:26.4
     depends_on:
       - mariadb
-    # Не --optimized: этот режим требует отдельного этапа `kc.sh build`,
-    # без которого KC_DB молча игнорируется и используется ранее собранная
-    # (не MariaDB) конфигурация. Стоковый `start` читает настройки в рантайме.
     command: start
     environment:
       KC_DB: mariadb
       KC_DB_URL: jdbc:mariadb://mariadb:3306/keycloak
       KC_DB_USERNAME: keycloak
       KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
-      # Полный URL со схемой и портом: при hostname v2 в Keycloak значение без
-      # порта подразумевает стандартные 443/80, а не 8443, и issuer в токене
-      # расходится с KEYCLOAK_ISSUER_URL — discovery прокси падает при старте.
       KC_HOSTNAME: ${KEYCLOAK_HOSTNAME_URL}
       KC_HTTPS_CERTIFICATE_FILE: /certs/tls.crt
       KC_HTTPS_CERTIFICATE_KEY_FILE: /certs/tls.key
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
-    # Публикуется наружу: браузеру нужен прямой доступ к authorization
-    # endpoint Keycloak (proxy проксирует только rag, не keycloak).
     ports:
       - "8443:8443"
     volumes:
       - ./certs:/certs:ro
-    # Алиас делает KEYCLOAK_HOSTNAME резолвящимся в контейнер keycloak и
-    # внутри сети compose — иначе proxy не сможет обратиться по тому же
-    # имени, что указано в KEYCLOAK_ISSUER_URL, при discovery и обмене токена.
     networks:
       default:
         aliases:
           - ${KEYCLOAK_HOSTNAME}
 
   proxy:
-    # Версия закреплена: CVE-2026-40575 (обход аутентификации подделкой
-    # X-Forwarded-Uri) затрагивает 7.5.0–7.15.1.
     image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.2
     depends_on:
       - keycloak
-      - rag
+      - frontend
     ports:
       - "443:4180"
     volumes:
@@ -136,26 +112,10 @@ services:
       - --https-address=0.0.0.0:4180
       - --tls-cert-file=/certs/tls.crt
       - --tls-key-file=/certs/tls.key
-      - --upstream=http://rag:8000
+      - --upstream=http://frontend:3000
       - --redirect-url=${OAUTH2_REDIRECT_URL}
-      # false: proxy опубликован на 443 напрямую, перед ним ничего нет.
-      # true доверял бы клиентским X-Forwarded-For/X-Real-IP — это первая
-      # половина условия срабатывания CVE-2026-40575 (см. --skip-auth-strip-headers
-      # ниже про вторую половину и docs/superpowers/specs/2026-08-19-identity-and-history-design.md).
       - --reverse-proxy=false
-      # --trusted-proxy-ip и --trusted-ip здесь намеренно не заданы:
-      # --trusted-ip — это список сетей, которым разрешён ОБХОД аутентификации,
-      # подставлять его сюда нельзя. Защита от CVE-2026-40575 держится на
-      # закреплённой версии не ниже 7.15.2; условие срабатывания уязвимости
-      # (--reverse-proxy вместе с правилами --skip-auth-routes/--skip-auth-regex)
-      # в этой конфигурации отсутствует по построению — правил пропуска нет.
-      # provider-ca-file: сертификат Keycloak на discovery-адресе самоподписан
-      # или выпущен внутренним УЦ, системному доверию неизвестен.
       - --provider-ca-file=/certs/ca.crt
-      # Без ведущей косой: соответствует mapper Group Membership с выключенной
-      # галкой "Full group path" в клиенте Keycloak (см. план настройки). Если
-      # галку включить, claim придёт путями вида /ragkb-users — тогда и здесь,
-      # и в config.yaml → auth.admin_group имя нужно поменять на путь.
       - --allowed-group=ragkb-users
       - --pass-user-headers=true
       - --skip-auth-strip-headers=true
@@ -164,5 +124,4 @@ volumes:
   ollama_models:
   rag_index:
   rag_history:
-  # chroma_data:
   keycloak_db:

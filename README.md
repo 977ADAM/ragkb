@@ -61,29 +61,31 @@ chroma, HNSW ef=400       2.9 мс/запрос,  recall@10 100%
 На таком объёме перебор быстрее — HNSW начинает выигрывать после сотен тысяч
 векторов, а до этого платит за обход графа. Берём Chroma не ради скорости поиска,
 а ради инкрементальных обновлений и того, что не нужно держать всю матрицу в
-памяти процесса. Проверить на своём объёме: `python examples/bench_store.py 200000 1024`.
+памяти процесса. Проверить на своём объёме: `python backend/examples/bench_store.py 200000 1024`.
 
 Отдельно про recall: HNSW — приближённый поиск. На кластеризованных данных он
 находит всё, но на близком к равномерному шуму распределении recall@10 падает
 примерно до 60% при тех же настройках. Если ваши документы очень разнородны,
-поднимите `store.hnsw_search_ef` и померьте `ragkb eval` до и после.
+поднимите `store.hnsw_search_ef` и померьте `python backend/examples/eval.py` до и после.
 
 ## Быстрый старт
 
 ```bash
-uv sync                            # окружение из uv.lock
+cd backend
+uv sync --extra migrations --extra dev
 
-cp ваши_документы/* data/docs/
-uv run ragkb index                 # построить индекс
+# схема истории
+alembic upgrade head
 
-uv run ragkb ask "За сколько дней подавать заявление на отпуск?"
-
-# Аутентификация по умолчанию включена и ждёт заголовок от oauth2-proxy.
-# Для локального запуска её отключают явно — в общем контуре так нельзя:
-# все запросы пойдут от имени «anonymous». CLI (ragkb ask/search/chat)
-# аутентификацию не использует, переменная нужна только для serve.
+# индекс — POST /index/rebuild (кнопка в интерфейсе у администратора)
+# локально, без прокси:
 export RAGKB_AUTH_MODE=disabled
-uv run ragkb serve                 # веб-интерфейс на http://127.0.0.1:8000
+uv run uvicorn ragkb.platform.app:build --factory --host 127.0.0.1 --port 8000
+
+# в другом терминале — интерфейс
+cd ../frontend
+bun install
+RAGKB_BACKEND_URL=http://127.0.0.1:8000 RAGKB_DEV_USER=dev bun run dev
 ```
 
 Из коробки работает без единой нейросети: эмбеддинги TF-IDF, ответ собирается
@@ -133,17 +135,24 @@ python -m ragkb.cli index --rebuild   # смена эмбеддера требу
 
 ## Команды
 
-```bash
-ragkb index [путь] [--rebuild]     # полная индексация
-ragkb update файл...               # добавить/обновить документы (только chroma)
-ragkb delete файл                  # убрать документ из индекса (только chroma)
-ragkb ask "вопрос" [--show-chunks] [--expand] [--json]
-ragkb search "запрос" -k 10        # только поиск, без генерации
-ragkb chat                         # диалог с учётом истории
-ragkb serve --port 8000            # HTTP API + веб-интерфейс
-ragkb eval examples/eval_set.jsonl # метрики поиска
-ragkb stats                        # что в индексе
-```
+Консольной точки входа больше нет. Сервер — uvicorn, индекс — `POST /index/rebuild`,
+оценка поиска — `python backend/examples/eval.py`.
+
+## HTTP API
+
+| Метод | Назначение |
+|---|---|
+| `GET /health` | живость, без аутентификации |
+| `GET /status` | индекс, эмбеддер, LLM |
+| `GET /bootstrap?session_id=` | первый экран |
+| `GET /models` | модели |
+| `POST /search` | поиск без генерации |
+| `GET /organization` | чья база |
+| `GET/POST /organization/{id}/chat_conversations` | список / завести диалог |
+| `GET/PATCH/DELETE .../chat_conversations/{cid}` | сообщения, имя, удаление |
+| `POST .../chat_conversations/{cid}/messages` | вопрос, поток NDJSON |
+| `POST /events` | телеметрия |
+| `POST /index/rebuild` | переиндексация, только администратор |
 
 ## HTTP API
 
@@ -292,28 +301,17 @@ python examples/bench_store.py     # numpy против chroma: скорость
 ## Структура
 
 ```
-ragkb/
-  config.py       конфигурация
-  loaders.py      парсеры PDF/DOCX/MD/TXT/HTML
-  chunking.py     нарезка с сохранением иерархии заголовков
-  text.py         токенизация и стемминг для русского
-  embeddings.py   ollama / sentence-transformers / openai / tfidf
-  bm25.py         лексический поиск
-  store.py        ChromaStore и NumpyStore за общим интерфейсом
-  retrieval.py    гибридный поиск, RRF, MMR, реранк
-  llm.py          ollama / openai-совместимые / экстрактивный фолбэк
-  prompts.py      системный промпт и шаблоны
-  pipeline.py     индексация и вопрос-ответ
-  evaluation.py   метрики поиска
-  api.py          FastAPI + веб-интерфейс
-  cli.py          командная строка
-tests/            5 файлов, около 160 тестов, запуск: python tests/test_pipeline.py
-examples/         тестовый набор, сравнение режимов поиска, бенчмарк хранилищ
+backend/ragkb/
+  core/         поиск и генерация
+  platform/     FastAPI, контейнер, идентификация
+  features/     слайсы HTTP
+frontend/       SvelteKit, BFF
 ```
 
 ## Тесты
 
 ```bash
-python tests/test_pipeline.py      # без зависимостей
-python -m pytest tests/ -q         # если есть pytest
+cd backend
+uv sync --extra migrations --extra dev
+uv run pytest
 ```

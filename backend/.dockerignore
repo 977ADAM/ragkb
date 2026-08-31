@@ -1,0 +1,9 @@
+.venv
+.git
+data/index
+*.egg-info
+**/__pycache__
+.DS_Store
+.env
+frontend
+docs
