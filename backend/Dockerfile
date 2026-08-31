@@ -6,6 +6,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       curl \
+      libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 ENV UV_COMPILE_BYTECODE=1 \
@@ -14,14 +15,14 @@ ENV UV_COMPILE_BYTECODE=1 \
     PATH="/app/.venv/bin:$PATH"
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --extra migrations --no-install-project
+RUN uv sync --locked --extra migrations --extra local-models --no-install-project
 
 COPY ragkb ./ragkb
 COPY migrations ./migrations
 COPY alembic.ini ./
 COPY config.yaml ./
 
-RUN uv sync --locked --extra migrations --no-editable
+RUN uv sync --locked --extra migrations --extra local-models --no-editable
 
 EXPOSE 8000
 

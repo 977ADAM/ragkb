@@ -22,10 +22,11 @@ chunking:
 
 embedding:
   # tfidf — без сети (baseline, тесты)
+  # sentence-transformers — HuggingFace (transformers), модель в процессе rag
   # openai — OpenAI-совместимый HTTP: POST /embeddings
   backend: tfidf
-  model: bge-m3
-  # Адрес и ключ: RAGKB_EMBEDDING_URL, RAGKB_EMBEDDING_API_KEY
+  model: BAAI/bge-m3
+  # Адрес и ключ: RAGKB_EMBEDDING_URL, RAGKB_EMBEDDING_API_KEY (только openai)
   base_url: ""
   batch_size: 32
   query_prefix: ""   # для e5-моделей: "query: "

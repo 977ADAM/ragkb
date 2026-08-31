@@ -37,7 +37,8 @@ CLI (`ragkb serve` / `index` / `ask`) нет. Индекс — `POST /index/rebu
 - Не ходить из браузера в FastAPI напрямую: только BFF `frontend/src/routes/api/`.
 - В боевом compose не задавать `RAGKB_DEV_USER` (вход — Angie, заголовки
   `X-Forwarded-*`). oauth2-proxy в стеке нет.
-- Модели не поднимать в compose: только OpenAI-совместимый HTTP
-  (`RAGKB_LLM_URL`, `RAGKB_EMBEDDING_URL`). Ollama в стеке нет.
+- LLM не поднимать в compose: OpenAI-совместимый HTTP (`RAGKB_LLM_URL`).
+  Эмбеддинги в контейнере `rag` — HuggingFace (`sentence-transformers`,
+  модель `BAAI/bge-m3`). Ollama в стеке нет.
 - Исторические планы в `docs/superpowers/plans/` не переписывать под новую
   раскладку — это слепок прошлого.

@@ -5,8 +5,8 @@
 
 Выбор бэкенда:
   openai                — OpenAI-совместимый HTTP: /v1/embeddings (vLLM, Infinity,
-                          llama.cpp, облако). Основной боевой путь.
-  sentence-transformers — модель уже на диске, без HTTP
+                          llama.cpp, облако).
+  sentence-transformers — HuggingFace Hub (transformers) в процессе сервиса
   ollama                — нативный /api/embeddings; в compose его нет
   tfidf                 — без нейросетей: baseline и CI
 """

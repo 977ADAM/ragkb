@@ -94,8 +94,11 @@ RAGKB_BACKEND_URL=http://127.0.0.1:8000 RAGKB_DEV_USER=dev bun run dev
 
 ## Боевая конфигурация
 
-Генерация и эмбеддинги — любой **OpenAI-совместимый HTTP** (обычно корень `…/v1`):
-vLLM, llama.cpp server, LM Studio, облачный OpenAI. В compose **нет Ollama**.
+Генерация — любой **OpenAI-совместимый HTTP** (обычно корень `…/v1`):
+vLLM, llama.cpp server, LM Studio, облачный OpenAI. Эмбеддинги в compose
+считает сам `rag`: HuggingFace / transformers (`sentence-transformers`),
+модель `BAAI/bge-m3` (первый запуск качает веса в том `rag_hf`).
+В compose **нет Ollama**.
 
 В `.env`:
 
@@ -103,9 +106,8 @@ vLLM, llama.cpp server, LM Studio, облачный OpenAI. В compose **нет 
 RAGKB_LLM_BACKEND=openai
 RAGKB_LLM_URL=http://10.10.1.114:8080/v1
 RAGKB_LLM_MODEL=qwen2.5-instruct
-RAGKB_EMBEDDING_BACKEND=openai
-RAGKB_EMBEDDING_URL=http://10.10.1.114:8080/v1
-RAGKB_EMBEDDING_MODEL=bge-m3
+RAGKB_EMBEDDING_BACKEND=sentence-transformers
+RAGKB_EMBEDDING_MODEL=BAAI/bge-m3
 ```
 
 Смена эмбеддера: `POST /index/rebuild` (админ в интерфейсе).
@@ -115,9 +117,9 @@ oauth2-proxy в стеке нет: на сервере TLS и вход дела�
 он проксирует на `frontend:3000` и ставит `X-Forwarded-*`. Compose поднимает
 Keycloak для OIDC на стороне Angie.
 
-- нужен `.env` из `.env.example`: пароли Keycloak **и адреса моделей**
-  (`RAGKB_LLM_URL`, `RAGKB_EMBEDDING_URL`) — без URL compose поднимет rag,
-  но генерация и эмбеддинги не заработают;
+- нужен `.env` из `.env.example`: пароли Keycloak **и адрес LLM**
+  (`RAGKB_LLM_URL`) — без URL compose поднимет rag, но генерация не заработает;
+  эмбеддинги качаются с HuggingFace при первой индексации;
 - локально без Angie: `RAGKB_DEV_USER` (и при необходимости `RAGKB_DEV_GROUPS`);
   в бою эти переменные не задавать;
 - нужны сертификаты в `./certs/` для Keycloak — `tls.crt`, `tls.key`, `ca.crt`
