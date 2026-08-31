@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from ragkb.core.config import LLMConfig
+from ragkb.features.models.labels import model_label
 from ragkb.features.models.schemas import ModelInfo
 
 
@@ -10,7 +11,8 @@ class StaticCatalog:
         self.cfg = cfg
 
     def list(self) -> list[ModelInfo]:
-        return [ModelInfo(id=self.cfg.model, display_name=self.cfg.model, is_default=True)]
+        mid = self.cfg.model
+        return [ModelInfo(id=mid, display_name=model_label(mid), is_default=True)]
 
     def resolve(self, requested: str | None) -> str:
         items = self.list()

@@ -53,10 +53,17 @@ export const chat = $state({
  * возвращает его эхом и пишет в лог, поэтому старт конкретной вкладки
  * можно проследить в журнале.
  */
+function sessionId() {
+	if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+		return crypto.randomUUID();
+	}
+	return `00000000-0000-4000-8000-${Date.now().toString(16).padStart(12, '0').slice(-12)}`;
+}
+
 export async function start() {
 	if (chat.started) return;
 	chat.started = true;
-	const session = crypto.randomUUID();
+	const session = sessionId();
 	initEvents(session);
 	try {
 		const response = await fetch(`/api/bootstrap?session_id=${session}`);
@@ -73,8 +80,10 @@ export async function start() {
 		chat.canReindex = Boolean(body.capabilities?.reindex);
 		chat.conversations = body.conversations ?? [];
 		chat.conversationsTotal = body.conversations_total ?? chat.conversations.length;
-		if (body.index?.status === 'no_index') {
-			chat.fatal = 'Индекс не построен — ответы пока невозможны.';
+		if (!chat.organization?.id) {
+			chat.fatal = 'Организация не задана — укажите RAGKB_ORG_NAME на сервере.';
+		} else if (body.index?.status === 'no_index') {
+			chat.fatal = 'Индекс не построен — нажмите «Перестроить индекс».';
 		}
 		track('app_start', { index: body.index?.status, models: chat.models.length });
 	} catch (error) {
@@ -95,7 +104,7 @@ const PAGE = 50;
  *   фонового обновления, но не после только что заданного вопроса.
  */
 export async function loadConversations(options = {}) {
-	if (!chat.historyEnabled) return;
+	if (!chat.historyEnabled || !chat.organization?.id) return;
 	const { offset = 0, append = false, consistency = 'strong' } = options;
 	const query = new URLSearchParams({
 		limit: String(PAGE),
@@ -134,6 +143,10 @@ export function loadMoreConversations() {
  * @returns {Promise<boolean>} false — диалога нет или он чужой
  */
 export async function openConversation(id) {
+	if (!chat.organization?.id) {
+		chat.fatal = 'Организация не задана — укажите RAGKB_ORG_NAME на сервере.';
+		return false;
+	}
 	try {
 		const response = await fetch(`/api/conversations/${encodeURIComponent(id)}?org=${encodeURIComponent(chat.organization.id)}`);
 		const body = await response.json();
@@ -176,6 +189,7 @@ export function reset() {
  * @param {string} title
  */
 export async function renameConversation(id, title) {
+	if (!chat.organization?.id) return;
 	try {
 		const response = await fetch(
 			`/api/conversations/${encodeURIComponent(id)}?org=${encodeURIComponent(chat.organization.id)}`,
@@ -207,6 +221,7 @@ export async function renameConversation(id, title) {
  * @param {string} id
  */
 export async function removeConversation(id) {
+	if (!chat.organization?.id) return false;
 	try {
 		const response = await fetch(`/api/conversations/${encodeURIComponent(id)}?org=${encodeURIComponent(chat.organization.id)}`, {
 			method: 'DELETE'
@@ -234,6 +249,10 @@ export async function removeConversation(id) {
 export async function ask(onCreated) {
 	const text = chat.question.trim();
 	if (!text || chat.busy) return;
+	if (!chat.organization?.id) {
+		chat.fatal = 'Организация не задана — укажите RAGKB_ORG_NAME на сервере.';
+		return;
+	}
 	chat.question = '';
 	chat.busy = true;
 	chat.fatal = '';

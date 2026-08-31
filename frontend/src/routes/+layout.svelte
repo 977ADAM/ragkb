@@ -24,17 +24,20 @@
 	// onMount, а не $effect: start() читает состояние, которое сам же
 	// присваивает, и эффект перезапускался бы от собственной работы.
 	onMount(() => {
-		start();
-		// Вернулись во вкладку — список мог устареть, пока её не смотрели.
-		// Здесь допустимо отставание в несколько секунд, поэтому eventual:
-		// сервер вправе ответить из кеша, не ходя в базу.
+		let cancelled = false;
 		const refresh = () => {
 			if (document.visibilityState === 'visible' && !chat.busy) {
 				loadConversations({ consistency: 'eventual' });
 			}
 		};
-		document.addEventListener('visibilitychange', refresh);
-		return () => document.removeEventListener('visibilitychange', refresh);
+		start().then(() => {
+			if (cancelled) return;
+			document.addEventListener('visibilitychange', refresh);
+		});
+		return () => {
+			cancelled = true;
+			document.removeEventListener('visibilitychange', refresh);
+		};
 	});
 
 	/** @type {string | null} */

@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from ragkb.core.config import LLMConfig
+from ragkb.features.models.labels import model_label
 from ragkb.features.models.schemas import ModelInfo
 from ragkb.features.models.static import StaticCatalog
 
@@ -45,11 +46,12 @@ class OpenAICatalog:
         for item in source:
             if allowed and item["id"] not in allowed:
                 continue
+            mid = item["id"]
             out.append(
                 ModelInfo(
-                    id=item["id"],
-                    display_name=titles.get(item["id"]) or item["id"],
-                    is_default=item["id"] == self.cfg.model,
+                    id=mid,
+                    display_name=model_label(mid, titles.get(mid)),
+                    is_default=mid == self.cfg.model,
                 )
             )
         if not out:

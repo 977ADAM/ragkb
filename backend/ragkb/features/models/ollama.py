@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from ragkb.core.config import LLMConfig
+from ragkb.features.models.labels import model_label
 from ragkb.features.models.schemas import ModelInfo
 
 
@@ -59,13 +60,14 @@ class OllamaCatalog:
         for item in source:
             if allowed and item["id"] not in allowed:
                 continue
+            mid = item["id"]
             out.append(
                 ModelInfo(
-                    id=item["id"],
-                    display_name=titles.get(item["id"]) or item["id"],
+                    id=mid,
+                    display_name=model_label(mid, titles.get(mid)),
                     context_window=item["context_window"],
                     supports_tools=item["supports_tools"],
-                    is_default=item["id"] == self.cfg.model,
+                    is_default=mid == self.cfg.model,
                 )
             )
         if out and not any(item.is_default for item in out):
