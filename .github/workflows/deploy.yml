@@ -18,10 +18,5 @@ jobs:
           script: |
             set -euo pipefail
             cd /opt/ragkb
-            git fetch --tags --force --prune origin
-            if git rev-parse "refs/tags/${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-              git reset --hard "refs/tags/${GITHUB_REF_NAME}"
-            else
-              git reset --hard origin/main
-            fi
+            git pull origin main
             bash deploy.sh
