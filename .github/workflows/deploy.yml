@@ -6,17 +6,12 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ragkb]
+    timeout-minutes: 30
     steps:
-      - name: SSH Deploy
-        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.0
-        with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.KEY }}
-          command_timeout: 15m
-          script: |
-            set -euo pipefail
-            cd /opt/ragkb
-            git pull origin main
-            bash deploy.sh
+      - name: Pull and compose
+        run: |
+          set -euo pipefail
+          cd /opt/ragkb
+          git pull origin main
+          docker compose up -d --build migrate rag frontend
