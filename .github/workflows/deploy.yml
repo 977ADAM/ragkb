@@ -16,7 +16,6 @@ jobs:
           key: ${{ secrets.KEY }}
           port: ${{ secrets.PORT }}
           command_timeout: 15m
-          envs: GITHUB_REF_NAME
           script: |
             set -euo pipefail
             cd /opt/ragkb
