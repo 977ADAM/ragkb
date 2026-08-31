@@ -1,49 +1,29 @@
-# Выкладка на сервер при пуше тега (v1.0.0, v2026.08.31, …).
-#
-# Секрет репозитория:
-#   DEPLOY_SSH_KEY — приватный ключ (как ~/.ssh/ai_server), целиком включая
-#   строки BEGIN/END. Хост по умолчанию adminai@10.10.1.114, каталог /opt/ragkb.
-#
-#   git tag v0.1.0 && git push origin v0.1.0
-
-name: deploy
-
+name: Deploy
 on:
   push:
-    tags:
-      - "v*"
-
-permissions:
-  contents: read
-
-concurrency:
-  group: deploy-production
-  cancel-in-progress: false
+    tags: ["v*"]
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-    env:
-      RAGKB_DEPLOY_HOST: ${{ vars.DEPLOY_HOST || 'adminai@10.10.1.114' }}
-      RAGKB_DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/opt/ragkb' }}
-      RAGKB_DEPLOY_KEY: ${{ github.workspace }}/.deploy_key
     steps:
-      - uses: actions/checkout@v4
-
-      - name: SSH key and known_hosts
-        env:
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-        run: |
-          set -euo pipefail
-          test -n "${DEPLOY_SSH_KEY}" || { echo "Задайте секрет DEPLOY_SSH_KEY"; exit 1; }
-          umask 077
-          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RAGKB_DEPLOY_KEY"
-          host="${RAGKB_DEPLOY_HOST#*@}"
-          mkdir -p ~/.ssh
-          ssh-keyscan -H "$host" >> ~/.ssh/known_hosts
-
-      - name: Deploy
-        run: |
-          chmod +x ./deploy.sh
-          ./deploy.sh
+      - name: SSH Deploy
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.0
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.KEY }}
+          port: ${{ secrets.PORT }}
+          command_timeout: 15m
+          envs: GITHUB_REF_NAME
+          script: |
+            set -euo pipefail
+            cd /opt/ragkb
+            git fetch --tags --force --prune origin
+            if git rev-parse "refs/tags/${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+              git reset --hard "refs/tags/${GITHUB_REF_NAME}"
+            else
+              git reset --hard origin/main
+            fi
+            bash deploy.sh
