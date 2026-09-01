@@ -57,3 +57,5 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
 aiserver.md
+
+.pytest_cache/
