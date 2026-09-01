@@ -35,8 +35,9 @@ CLI (`ragkb serve` / `index` / `ask`) нет. Индекс — `POST /index/rebu
 - Не возвращать HTML из FastAPI и не заводить второй UI рядом с `frontend/`.
 - Не импортировать `sqlalchemy`/`alembic` вне `backend/migrations/`.
 - Не ходить из браузера в FastAPI напрямую: только BFF `frontend/src/routes/api/`.
-- В боевом compose не задавать `RAGKB_DEV_USER` (вход — Angie, заголовки
-  `X-Forwarded-*`). oauth2-proxy в стеке нет.
+- Compose: `RAGKB_AUTH_MODE=session`, вход формами (`/login`, `/register`).
+  `RAGKB_DEV_USER` сессию не заменяет. На сервере Angie не должен требовать
+  OIDC на `/login`, `/register`, `/api/auth`. oauth2-proxy и Keycloak в стеке нет.
 - LLM не поднимать в compose: OpenAI-совместимый HTTP (`RAGKB_LLM_URL`).
   Эмбеддинги в контейнере `rag` — HuggingFace (`sentence-transformers`,
   модель `BAAI/bge-m3`). Ollama в стеке нет.

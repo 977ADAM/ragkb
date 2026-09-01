@@ -78,15 +78,19 @@ uv sync --extra migrations --extra dev
 alembic upgrade head
 
 # индекс — POST /index/rebuild (кнопка в интерфейсе у администратора)
-# локально, без прокси:
+# локально без форм (make backend):
 export RAGKB_AUTH_MODE=disabled
 uv run uvicorn ragkb.platform.app:build --factory --host 127.0.0.1 --port 8000
 
 # в другом терминале — интерфейс
 cd ../frontend
 bun install
-RAGKB_BACKEND_URL=http://127.0.0.1:8000 RAGKB_DEV_USER=dev bun run dev
+RAGKB_BACKEND_URL=http://127.0.0.1:8000 bun run dev
 ```
+
+Compose (`docker compose up` / `make up`): `RAGKB_AUTH_MODE=session` —
+зарегистрируйтесь на `/register`, затем `/login`. `RAGKB_DEV_USER` сессию
+не заменяет.
 
 Из коробки работает без единой нейросети: эмбеддинги TF-IDF, ответ собирается
 экстрактивно из найденных фрагментов. Это baseline — проверить, что документы
@@ -113,19 +117,16 @@ RAGKB_EMBEDDING_MODEL=BAAI/bge-m3
 Смена эмбеддера: `POST /index/rebuild` (админ в интерфейсе).
 
 Или целиком в Docker: `docker compose up -d` (см. `docker-compose.yml`).
-oauth2-proxy в стеке нет: на сервере TLS и вход делает **Angie** (вне compose),
-он проксирует на `frontend:3000` и ставит `X-Forwarded-*`. Compose поднимает
-Keycloak для OIDC на стороне Angie.
+oauth2-proxy и **Keycloak в стеке нет**. На сервере TLS делает **Angie**
+(вне compose): он проксирует на `frontend:3000`. Личность — сессионная кука
+после форм `/login` и `/register`. Angie **не должен** требовать корпоративный
+OIDC на `/login`, `/register`, `/api/auth`. Keycloak/Angie OIDC для ragkb
+больше не источник личности. `RAGKB_DEV_USER` при `session` не подменяет вход.
 
-- нужен `.env` из `.env.example`: пароли Keycloak **и адрес LLM**
-  (`RAGKB_LLM_URL`) — без URL compose поднимет rag, но генерация не заработает;
-  эмбеддинги качаются с HuggingFace при первой индексации;
-- локально без Angie: `RAGKB_DEV_USER` (и при необходимости `RAGKB_DEV_GROUPS`);
-  в бою эти переменные не задавать;
-- нужны сертификаты в `./certs/` для Keycloak — `tls.crt`, `tls.key`, `ca.crt`
-  (см. комментарии в `.env.example`);
-- нужен настроенный realm Keycloak (клиент для Angie, группы `ragkb-users` и
-  `ragkb-admins`) — в эту работу не входит, настраивается отдельно.
+- нужен `.env` из `.env.example` с адресом LLM (`RAGKB_LLM_URL`) — без URL
+  compose поднимет rag, но генерация не заработает; эмбеддинги качаются
+  с HuggingFace при первой индексации;
+- `make backend` остаётся на `RAGKB_AUTH_MODE=disabled` (anonymous, без форм).
 
 ### Что выбрать
 
@@ -165,8 +166,9 @@ Keycloak для OIDC на стороне Angie.
 | `POST /events` | телеметрия пачкой (до 100 событий) |
 | `POST /index/rebuild` | переиндексация, только `ragkb-admins` |
 
-Все эндпоинты, кроме `/health`, требуют аутентификации (заголовок
-`X-Forwarded-*` от Angie или от BFF) и без неё отвечают `401`.
+При `RAGKB_AUTH_MODE=session` (compose) все эндпоинты, кроме `/health`,
+`POST /auth/register` и `POST /auth/login`, требуют сессионную куку и без
+неё отвечают `401`. Режим `proxy` по-прежнему читает `X-Forwarded-*`.
 Встроенной страницы `GET /` нет.
 
 При `RAGKB_AUTH_MODE=disabled` все запросы идут от имени `anonymous`.
@@ -262,9 +264,9 @@ python examples/bench_store.py
 - **BM25 пересобирается целиком** при каждом изменении корпуса в коде
   `update`/`delete`. На миллионах чанков это заметно; тогда лексический поиск
   стоит вынести в OpenSearch.
-- **Разграничение доступа грубое.** Аутентификация внешняя (Angie и Keycloak),
-  доступ к сервису ограничивается группой на стороне прокси. Разграничения
-  по отдельным документам нет: метаданные
+- **Разграничение доступа грубое.** В compose личность — локальная сессия
+  (формы). `RAGKB_DEV_USER` при `session` не действует. Разграничения по
+  отдельным документам нет: метаданные
   в Chroma для этого есть (`doc_id`, `source`, `section`), не хватает фильтра
   `where` в запросе и модели прав.
 
