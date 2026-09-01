@@ -117,3 +117,20 @@ def test_expected_revision_matches_alembic_head():
 
     script = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
     assert script.get_current_head() == EXPECTED_REVISION
+
+
+def test_each_alembic_revision_creates_one_table() -> None:
+    import re
+
+    found: list[str] = []
+    for path in sorted((MIGRATIONS / "versions").glob("*.py")):
+        names = set(re.findall(r"CREATE TABLE (\w+)", path.read_text(), re.I))
+        assert len(names) == 1, f"{path.name} создаёт {sorted(names)}"
+        found.append(names.pop())
+    assert found == [
+        "conversations",
+        "messages",
+        "cleanup_state",
+        "users",
+        "sessions",
+    ]

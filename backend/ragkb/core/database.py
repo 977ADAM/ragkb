@@ -12,7 +12,7 @@ from sqlalchemy.orm import DeclarativeBase
 
 from ragkb.core.config import Config
 
-EXPECTED_REVISION = "0001_postgres_history_auth"
+EXPECTED_REVISION = "0005_sessions"
 
 
 class Base(DeclarativeBase):
