@@ -74,7 +74,7 @@ chroma, HNSW ef=400       2.9 мс/запрос,  recall@10 100%
 cd backend
 uv sync --extra migrations --extra dev
 
-# схема истории
+# схема истории (нужен Postgres и RAGKB_DATABASE_URL)
 alembic upgrade head
 
 # индекс — POST /index/rebuild (кнопка в интерфейсе у администратора)
@@ -123,9 +123,9 @@ oauth2-proxy и **Keycloak в стеке нет**. На сервере TLS де�
 OIDC на `/login`, `/register`, `/api/auth`. Keycloak/Angie OIDC для ragkb
 больше не источник личности. `RAGKB_DEV_USER` при `session` не подменяет вход.
 
-- нужен `.env` из `.env.example` с адресом LLM (`RAGKB_LLM_URL`) — без URL
-  compose поднимет rag, но генерация не заработает; эмбеддинги качаются
-  с HuggingFace при первой индексации;
+- нужен `.env` из `.env.example` с паролем Postgres (`POSTGRES_PASSWORD`) и
+  адресом LLM (`RAGKB_LLM_URL`) — без URL compose поднимет rag, но генерация
+  не заработает; эмбеддинги качаются с HuggingFace при первой индексации;
 - `make backend` остаётся на `RAGKB_AUTH_MODE=disabled` (anonymous, без форм).
 
 ### Что выбрать
@@ -174,9 +174,10 @@ OIDC на `/login`, `/register`, `/api/auth`. Keycloak/Angie OIDC для ragkb
 При `RAGKB_AUTH_MODE=disabled` все запросы идут от имени `anonymous`.
 Приватности в этом режиме нет.
 
-Диалоги привязаны к пользователю. Срок — `history.retention_days` в
-`backend/config.yaml`, по умолчанию 90 дней. `history.enabled: false`
-не ломает ответ: история эфемерная, файла базы нет.
+Диалоги привязаны к пользователю и лежат в Postgres (`RAGKB_DATABASE_URL`).
+Срок — `history.retention_days` в `backend/config.yaml`, по умолчанию 90 дней.
+`history.enabled: false` не ломает ответ: история эфемерная, Postgres не нужен,
+если ещё и `RAGKB_AUTH_MODE=disabled`.
 
 Поток сообщения — NDJSON, `application/x-ndjson`. Терминальное событие
 всегда `done`; поле `truncated` истинно, если генерация оборвалась после
@@ -285,5 +286,5 @@ frontend/       SvelteKit, BFF
 ```bash
 cd backend
 uv sync --extra migrations --extra dev
-uv run pytest
+RAGKB_TEST_DATABASE_URL=postgresql+asyncpg://ragkb:test@127.0.0.1:5432/ragkb_test uv run pytest
 ```

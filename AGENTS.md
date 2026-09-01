@@ -8,8 +8,9 @@
 - Ядро поиска: `backend/ragkb/core/` — не импортирует `features/` и `platform/`.
 - HTTP: вертикальные слайсы в `backend/ragkb/features/`; сборка приложения —
   `backend/ragkb/platform/app.py` (`create_app`, `build`).
-- История диалогов: SQLite-запросы в слайсе, схема — Alembic в
-  `backend/migrations/`. Приложение схему не накатывает.
+- История диалогов и локальные аккаунты: Postgres (SQLAlchemy async в
+  `features/` и `platform/`). Схема — Alembic в `backend/migrations/`.
+  Приложение схему не накатывает. URL: `RAGKB_DATABASE_URL`.
 - Конфиг: `backend/config.yaml`, перекрывается `RAGKB_*`.
 - Документы корпуса: `data/docs/` в корне репозитория.
 - Контракт API и раскладка каталогов:
@@ -28,12 +29,14 @@ cd ../frontend && bun run dev
 ```
 
 CLI (`ragkb serve` / `index` / `ask`) нет. Индекс — `POST /index/rebuild`.
-Тесты: `cd backend && uv run pytest`.
+Тесты: `RAGKB_TEST_DATABASE_URL=… cd backend && uv run pytest`.
 
 ## Чего не делать
 
 - Не возвращать HTML из FastAPI и не заводить второй UI рядом с `frontend/`.
-- Не импортировать `sqlalchemy`/`alembic` вне `backend/migrations/`.
+- Не импортировать `sqlalchemy`/`alembic` в `backend/ragkb/core/`.
+  SQLAlchemy можно в `features/` и `platform/`; Alembic — только
+  `backend/migrations/`.
 - Не ходить из браузера в FastAPI напрямую: только BFF `frontend/src/routes/api/`.
 - Compose: `RAGKB_AUTH_MODE=session`, вход формами (`/login`, `/register`).
   `RAGKB_DEV_USER` сессию не заменяет. На сервере Angie не должен требовать

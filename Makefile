@@ -9,11 +9,11 @@ help:
 	@echo "migrate         alembic upgrade head"
 	@echo "backend         uvicorn :8000, RAGKB_AUTH_MODE=disabled"
 	@echo "frontend        bun run dev, BFF → 127.0.0.1:8000"
-	@echo "test            pytest (backend)"
+	@echo "test            pytest (backend); нужна RAGKB_TEST_DATABASE_URL"
 	@echo "check           svelte-check (frontend)"
-	@echo "up              docker compose up migrate rag frontend"
+	@echo "up              docker compose up postgres migrate rag frontend"
 	@echo "down            docker compose down"
-	@echo "logs            docker compose logs -f migrate rag frontend"
+	@echo "logs            docker compose logs -f postgres migrate rag frontend"
 	@echo "deploy          ./deploy.sh (LAN rsync; .env на сервере не трогает)"
 
 sync:
@@ -38,13 +38,13 @@ check:
 	cd frontend && bun run check
 
 up:
-	docker compose up -d --build migrate rag frontend
+	docker compose up -d --build postgres migrate rag frontend
 
 down:
 	docker compose down
 
 logs:
-	docker compose logs -f migrate rag frontend
+	docker compose logs -f postgres migrate rag frontend
 
 deploy:
 	./deploy.sh

@@ -9,7 +9,8 @@ alwaysApply: true
 - Интерфейс только в `frontend/` (SvelteKit + BFF). FastAPI не отдаёт HTML.
 - Точка входа: `uvicorn ragkb.platform.app:build --factory`. Конфиг:
   `backend/config.yaml`.
-- Миграции истории: `backend/migrations/`, команда `alembic upgrade head`.
+- Миграции истории и аккаунтов: Postgres, `backend/migrations/`,
+  `alembic upgrade head`. URL: `RAGKB_DATABASE_URL`.
 - В compose нет Ollama и нет oauth2-proxy. LLM — OpenAI-совместимый HTTP
   (`RAGKB_LLM_URL`). Эмбеддинги — HuggingFace в контейнере `rag`
   (`sentence-transformers`, `BAAI/bge-m3`). На сервере TLS и вход — Angie;

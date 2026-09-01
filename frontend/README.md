@@ -7,6 +7,7 @@ SvelteKit-чат. Браузер к FastAPI не ходит: запросы ид
 ```
 cd backend
 uv sync --extra migrations --extra dev
+# нужен Postgres и RAGKB_DATABASE_URL
 alembic upgrade head
 export RAGKB_AUTH_MODE=disabled   # make backend: без форм, anonymous
 uv run uvicorn ragkb.platform.app:build --factory --port 8000

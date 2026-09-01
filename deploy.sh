@@ -10,4 +10,4 @@ SSH="ssh -i $KEY -o BatchMode=yes"
 
 rsync -az --delete --exclude .git --exclude .env --exclude .venv --exclude node_modules \
   -e "$SSH" ./ "$HOST:$REMOTE/"
-$SSH "$HOST" "cd $REMOTE && docker compose up -d --build migrate rag frontend"
+$SSH "$HOST" "cd $REMOTE && docker compose up -d --build postgres migrate rag frontend"
