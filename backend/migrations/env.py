@@ -14,12 +14,12 @@ if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
 
 from ragkb.core.config import DEFAULT_CONFIG, Config
-from ragkb.features.auth import models as auth_models
+from ragkb.db.models import UserRow
 from ragkb.features.chat_conversations.models import ConversationRow
 
 config = context.config
 target_metadata = ConversationRow.metadata
-assert auth_models.UserRow.metadata is target_metadata
+assert UserRow.metadata is target_metadata
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 

@@ -4,16 +4,16 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from ragkb.core.config import Config
+from ragkb.core.database import make_engine, make_session_factory, needs_database
 from ragkb.core.pipeline import RAGPipeline
 from ragkb.core.ports import AnswerEngine
-from ragkb.features.auth.postgres import PostgresAccounts
+from ragkb.db.repos.auth import PostgresAccounts
 from ragkb.features.chat_conversations.ephemeral import EphemeralHistory
 from ragkb.features.chat_conversations.postgres import PostgresHistory
 from ragkb.features.models.ollama import OllamaCatalog
 from ragkb.features.models.openai import OpenAICatalog
 from ragkb.features.models.static import StaticCatalog
 from ragkb.features.telemetry.stdout import StdoutSink
-from ragkb.platform.db import make_engine, make_session_factory, needs_database
 from ragkb.platform.errors import EngineUnavailable
 
 

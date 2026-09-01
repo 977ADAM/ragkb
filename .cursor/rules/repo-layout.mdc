@@ -5,7 +5,8 @@ alwaysApply: true
 
 # Раскладка репозитория
 
-- Код сервиса только в `backend/` (пакет `ragkb`: `core`, `platform`, `features`).
+- Код сервиса только в `backend/` (пакет `ragkb`: `core`, `domain`, `services`,
+  `db`, `api`, `platform`, `features`).
 - Интерфейс только в `frontend/` (SvelteKit + BFF). FastAPI не отдаёт HTML.
 - Точка входа: `uvicorn ragkb.platform.app:build --factory`. Конфиг:
   `backend/config.yaml`.

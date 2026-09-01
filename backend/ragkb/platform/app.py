@@ -5,9 +5,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from ragkb.api.router import api_router
 from ragkb.core.config import DEFAULT_CONFIG, Config
 from ragkb.core.logging_config import get_logger, setup_logging
-from ragkb.features.auth.router import router as auth_router
 from ragkb.features.bootstrap.router import router as bootstrap_router
 from ragkb.features.chat_conversations.router import router as chats_router
 from ragkb.features.index.router import router as index_router
@@ -66,7 +66,7 @@ def create_app(cfg: Config) -> FastAPI:
             return {"status": "no_index"}
         return {"status": "ok"}
 
-    app.include_router(auth_router)
+    app.include_router(api_router)
     app.include_router(models_router)
     app.include_router(search_router)
     app.include_router(organization_router)

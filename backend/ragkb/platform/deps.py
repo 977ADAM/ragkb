@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from fastapi import Request
 
-from ragkb.features.auth.service import AuthService
 from ragkb.features.bootstrap.service import BootstrapService
 from ragkb.features.chat_conversations.service import ChatConversationsService
 from ragkb.features.chat_conversations.sources import IndexSources
@@ -17,16 +16,6 @@ from ragkb.platform.container import Container
 
 def container(request: Request) -> Container:
     return request.app.state.container
-
-
-def auth_service(request: Request) -> AuthService:
-    c = container(request)
-    c._ensure_postgres()
-    if c.accounts is None:
-        raise RuntimeError(
-            "Хранилище учёток недоступно: Postgres не подключён"
-        )
-    return AuthService(c.accounts)
 
 
 def _chats(c: Container) -> ChatConversationsService:

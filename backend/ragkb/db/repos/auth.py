@@ -1,15 +1,16 @@
-"""Postgres-адаптер аккаунтов и сессий. Схемой владеет Alembic."""
+"""Postgres-адаптер аккаунтов и сессий."""
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ragkb.features.auth.models import SessionRow, UserRow
-from ragkb.features.auth.passwords import utcnow
-from ragkb.platform.db import assert_revision
+from ragkb.core.database import assert_revision
+from ragkb.db.models import SessionRow, UserRow
+from ragkb.platform.errors import Conflict
 
 
 class PostgresAccounts:
@@ -28,10 +29,13 @@ class PostgresAccounts:
                     id=user_id,
                     username=username,
                     password_hash=password_hash,
-                    created_at=utcnow(),
+                    created_at=datetime.now(timezone.utc),
                 )
             )
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError as exc:
+                raise Conflict("Такой логин уже занят") from exc
         return user_id
 
     async def get_by_username(self, username: str) -> tuple[str, str, str] | None:
@@ -65,7 +69,7 @@ class PostgresAccounts:
             await session.commit()
 
     async def user_for_token_hash(self, token_hash: str) -> tuple[str, str] | None:
-        now = utcnow()
+        now = datetime.now(timezone.utc)
         async with self.session_factory() as session:
             row = await session.scalar(
                 select(UserRow)

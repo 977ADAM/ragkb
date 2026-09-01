@@ -1,43 +1,52 @@
-"""Подключение к БД + Base + Unit-of-Work зависимость (зеркало монолита/auth)."""
+"""Подключение к Postgres + DeclarativeBase. Схему накатывает Alembic."""
+from __future__ import annotations
 
-from collections.abc import AsyncGenerator
-from typing import Any
-
-from sqlalchemy.engine import make_url
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.orm import DeclarativeBase
 
-from app.core.config import get_settings
+from ragkb.core.config import Config
+
+EXPECTED_REVISION = "0001_postgres_history_auth"
 
 
 class Base(DeclarativeBase):
     pass
 
 
-_settings = get_settings()
-_engine_kwargs: dict[str, Any] = {"echo": False}
-# Диалект берём у разобранного URL, а не подстрокой по всему DSN: «sqlite» может
-# оказаться в имени БД или в пароле.
-if make_url(_settings.db_url).get_backend_name() != "sqlite":
-    _engine_kwargs["pool_size"] = 5
-    # Этот engine живёт весь процесс FastAPI, а MariaDB рвёт простаивающие
-    # соединения по wait_timeout (8 ч). Трафик у сервиса редкий, healthcheck'и
-    # в compose сняты (LXC) — без пинга первый утренний запрос получал бы
-    # «server has gone away». Цена — лёгкий SELECT 1 при выдаче соединения.
-    # Движкам UoW/visits/sync это не нужно: они создаются под вызов.
-    _engine_kwargs["pool_pre_ping"] = True
-    _engine_kwargs["pool_recycle"] = 1800
-
-engine = create_async_engine(_settings.db_url, **_engine_kwargs)
-SessionFactory = async_sessionmaker(engine, expire_on_commit=False)
+def needs_database(cfg: Config) -> bool:
+    return cfg.history.enabled or cfg.auth.mode == "session"
 
 
-async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """Сессия на запрос: commit на успех, rollback на любую ошибку."""
-    async with SessionFactory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
+def alembic_sync_url(url: str) -> str:
+    return url.replace("+asyncpg", "+psycopg", 1)
+
+
+def make_engine(url: str) -> AsyncEngine:
+    return create_async_engine(url, pool_pre_ping=True)
+
+
+def make_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(engine, expire_on_commit=False)
+
+
+async def assert_revision(session: AsyncSession) -> None:
+    try:
+        result = await session.execute(text("SELECT version_num FROM alembic_version"))
+        found = [row[0] for row in result.all()]
+    except Exception as exc:
+        raise RuntimeError(
+            f"Код ждёт ревизию {EXPECTED_REVISION}. "
+            "Выполните: alembic upgrade head"
+        ) from exc
+    if len(found) != 1 or found[0] != EXPECTED_REVISION:
+        raise RuntimeError(
+            f"Ревизия базы: {found!r}, "
+            f"код ждёт {EXPECTED_REVISION}. "
+            "Выполните alembic upgrade head или откатитесь на нужный образ."
+        )

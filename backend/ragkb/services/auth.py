@@ -1,19 +1,35 @@
+"""Регистрация, вход, сессия. Пароль — Argon2, кука непрозрачная."""
 from __future__ import annotations
 
 import hashlib
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy.exc import IntegrityError
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
-from ragkb.features.auth.passwords import (
-    SESSION_DAYS,
-    hash_password,
-    utcnow,
-    verify_password,
-)
-from ragkb.features.auth.ports import AccountStore
-from ragkb.platform.errors import Conflict, Unauthenticated
+from ragkb.domain.ports import AccountStore
+from ragkb.platform.errors import Unauthenticated
+
+COOKIE_NAME = "ragkb_session"
+SESSION_DAYS = 7
+
+_hasher = PasswordHasher()
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def hash_password(plain: str) -> str:
+    return _hasher.hash(plain)
+
+
+def verify_password(plain: str, password_hash: str) -> bool:
+    try:
+        return _hasher.verify(password_hash, plain)
+    except (VerifyMismatchError, InvalidHashError):
+        return False
 
 
 def _token_hash(raw: str) -> str:
@@ -31,10 +47,7 @@ class AuthService:
         return raw
 
     async def register(self, username: str, password: str) -> tuple[str, str]:
-        try:
-            user_id = await self._store.create_user(username, hash_password(password))
-        except IntegrityError as exc:
-            raise Conflict("Такой логин уже занят") from exc
+        user_id = await self._store.create_user(username, hash_password(password))
         return username, await self._new_session(user_id)
 
     async def login(self, username: str, password: str) -> tuple[str, str]:

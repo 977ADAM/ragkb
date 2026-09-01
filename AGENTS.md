@@ -6,8 +6,9 @@
 ## Где что лежит
 
 - Ядро поиска: `backend/ragkb/core/` — не импортирует `features/` и `platform/`.
-- HTTP: вертикальные слайсы в `backend/ragkb/features/`; сборка приложения —
-  `backend/ragkb/platform/app.py` (`create_app`, `build`).
+- HTTP: вертикальные слайсы в `backend/ragkb/features/` (поиск, чат, индекс);
+  auth уже в раскладке как в clustering: `domain/`, `services/`, `db/`, `api/`.
+  Сборка — `backend/ragkb/platform/app.py` (`create_app`, `build`).
 - История диалогов и локальные аккаунты: Postgres (SQLAlchemy async в
   `features/` и `platform/`). Схема — Alembic в `backend/migrations/`.
   Приложение схему не накатывает. URL: `RAGKB_DATABASE_URL`.

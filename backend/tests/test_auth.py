@@ -50,7 +50,7 @@ def test_admin_forbidden(indexed):
 
 
 def test_auth_service_rejects_missing_accounts():
-    from ragkb.platform import deps
+    from ragkb.api.deps.auth import get_auth_service
 
     request = SimpleNamespace(
         app=SimpleNamespace(
@@ -62,4 +62,4 @@ def test_auth_service_rejects_missing_accounts():
         )
     )
     with pytest.raises(RuntimeError, match="Postgres не подключён"):
-        deps.auth_service(request)
+        get_auth_service(request)

@@ -8,11 +8,11 @@ from fastapi.testclient import TestClient
 from helpers import alembic_sync_url, database_url, migrate
 from sqlalchemy import create_engine, select, text
 
-from ragkb.features.auth.models import UserRow
-from ragkb.features.auth.passwords import hash_password, verify_password
-from ragkb.features.auth.postgres import PostgresAccounts
+from ragkb.db.models import UserRow
+from ragkb.db.repos.auth import PostgresAccounts
 from ragkb.platform.app import create_app
 from ragkb.platform.db import EXPECTED_REVISION, make_engine, make_session_factory
+from ragkb.services.auth import hash_password, verify_password
 
 
 @pytest.mark.asyncio

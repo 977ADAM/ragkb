@@ -13,8 +13,8 @@ from fastapi import Request
 from starlette.datastructures import Headers
 
 from ragkb.core.config import AuthConfig
-from ragkb.features.auth.passwords import COOKIE_NAME
 from ragkb.platform.errors import Forbidden, Unauthenticated
+from ragkb.services.auth import COOKIE_NAME
 
 ANONYMOUS = "anonymous"
 
