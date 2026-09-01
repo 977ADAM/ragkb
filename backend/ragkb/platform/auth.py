@@ -50,7 +50,7 @@ def user_from_headers(headers: Headers, cfg: AuthConfig) -> User | None:
     )
 
 
-def current_user(request: Request) -> User:
+async def current_user(request: Request) -> User:
     cfg: AuthConfig = request.app.state.auth
     if cfg.mode == "disabled":
         return User(name=ANONYMOUS)
@@ -59,7 +59,10 @@ def current_user(request: Request) -> User:
         if not raw:
             raise Unauthenticated("Не аутентифицирован")
         digest = hashlib.sha256(raw.encode()).hexdigest()
-        row = request.app.state.container.accounts.user_for_token_hash(digest)
+        accounts = request.app.state.container.accounts
+        if accounts is None:
+            raise Unauthenticated("Не аутентифицирован")
+        row = await accounts.user_for_token_hash(digest)
         if row is None:
             raise Unauthenticated("Не аутентифицирован")
         return User(name=row[1])
@@ -69,16 +72,16 @@ def current_user(request: Request) -> User:
     return user
 
 
-def optional_user(request: Request) -> User | None:
+async def optional_user(request: Request) -> User | None:
     try:
-        return current_user(request)
+        return await current_user(request)
     except Unauthenticated:
         return None
 
 
-def require_admin(request: Request) -> User:
+async def require_admin(request: Request) -> User:
     cfg: AuthConfig = request.app.state.auth
-    user = current_user(request)
+    user = await current_user(request)
     if cfg.mode == "disabled":
         return user
     if not user.in_group(cfg.admin_group):

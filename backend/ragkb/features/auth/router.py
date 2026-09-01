@@ -85,4 +85,4 @@ async def me(
 ) -> dict[str, str]:
     if request.app.state.auth.mode == "session":
         return {"username": await svc.me(_raw_cookie(request))}
-    return {"username": current_user(request).name}
+    return {"username": (await current_user(request)).name}

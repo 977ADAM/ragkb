@@ -22,7 +22,7 @@ router = APIRouter()
     "/organization/{organization_id}/chat_conversations",
     response_model=OrgConversationsResponse,
 )
-def list_conversations(
+async def list_conversations(
     organization_id: str,
     user: User = Depends(current_user),
     svc: ChatConversationsService = Depends(chat_conversations_service),
@@ -31,54 +31,54 @@ def list_conversations(
     consistency: Literal["strong", "eventual"] = "strong",
 ) -> OrgConversationsResponse:
     return OrgConversationsResponse(
-        **svc.list_page(
+        **await svc.list_page(
             user, organization_id, limit=limit, offset=offset, consistency=consistency
         )
     )
 
 
 @router.post("/organization/{organization_id}/chat_conversations")
-def create_conversation(
+async def create_conversation(
     organization_id: str,
     user: User = Depends(current_user),
     svc: ChatConversationsService = Depends(chat_conversations_service),
 ) -> dict[str, str]:
-    return svc.create(user, organization_id)
+    return await svc.create(user, organization_id)
 
 
 @router.get("/organization/{organization_id}/chat_conversations/{cid}")
-def get_conversation(
+async def get_conversation(
     organization_id: str,
     cid: str,
     user: User = Depends(current_user),
     svc: ChatConversationsService = Depends(chat_conversations_service),
 ) -> dict:
-    return svc.get(user, organization_id, cid)
+    return await svc.get(user, organization_id, cid)
 
 
 @router.patch("/organization/{organization_id}/chat_conversations/{cid}")
-def rename_conversation(
+async def rename_conversation(
     organization_id: str,
     cid: str,
     req: RenameRequest,
     user: User = Depends(current_user),
     svc: ChatConversationsService = Depends(chat_conversations_service),
 ) -> dict[str, str]:
-    return svc.rename(user, organization_id, cid, req.title)
+    return await svc.rename(user, organization_id, cid, req.title)
 
 
 @router.delete("/organization/{organization_id}/chat_conversations/{cid}")
-def delete_conversation(
+async def delete_conversation(
     organization_id: str,
     cid: str,
     user: User = Depends(current_user),
     svc: ChatConversationsService = Depends(chat_conversations_service),
 ) -> dict[str, bool]:
-    return svc.delete(user, organization_id, cid)
+    return await svc.delete(user, organization_id, cid)
 
 
 @router.post("/organization/{organization_id}/chat_conversations/{cid}/messages")
-def post_message(
+async def post_message(
     organization_id: str,
     cid: str,
     req: MessageRequest,

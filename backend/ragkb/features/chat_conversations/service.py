@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any, Literal
 
 from ragkb.core.config import LLMConfig
@@ -45,12 +45,12 @@ class ChatConversationsService:
         self.llm_cfg = llm_cfg
         self.cache = EventualCache()
 
-    def create(self, user: User, organization_id: str) -> dict[str, str]:
+    async def create(self, user: User, organization_id: str) -> dict[str, str]:
         self.require_org(organization_id)
-        cid = self.history.create(user.name)
+        cid = await self.history.create(user.name)
         return {"conversation_id": cid, "title": ""}
 
-    def list_page(
+    async def list_page(
         self,
         user: User,
         organization_id: str,
@@ -71,15 +71,15 @@ class ChatConversationsService:
                     **cached,
                 }
         if consistency == "strong":
-            self.conversations.cleanup()
+            await self.conversations.cleanup()
         payload = {
             "conversations": [
                 c.to_dict()
-                for c in self.conversations.list_conversations(
+                for c in await self.conversations.list_conversations(
                     user.name, limit=limit, offset=offset
                 )
             ],
-            "total": self.conversations.count_conversations(user.name),
+            "total": await self.conversations.count_conversations(user.name),
             "limit": limit,
             "offset": offset,
         }
@@ -92,9 +92,9 @@ class ChatConversationsService:
             **payload,
         }
 
-    def get(self, user: User, organization_id: str, cid: str) -> dict[str, Any]:
+    async def get(self, user: User, organization_id: str, cid: str) -> dict[str, Any]:
         self.require_org(organization_id)
-        messages = self.conversations.get_messages(cid, user.name)
+        messages = await self.conversations.get_messages(cid, user.name)
         if messages is None:
             raise NotFound("Диалог не найден")
         return {
@@ -102,21 +102,21 @@ class ChatConversationsService:
             "messages": self._mark_availability([m.to_dict() for m in messages]),
         }
 
-    def rename(
+    async def rename(
         self, user: User, organization_id: str, cid: str, title: str
     ) -> dict[str, str]:
         self.require_org(organization_id)
-        if not self.conversations.rename(cid, user.name, title):
+        if not await self.conversations.rename(cid, user.name, title):
             raise NotFound("Диалог не найден")
         return {"id": cid, "title": title}
 
-    def delete(self, user: User, organization_id: str, cid: str) -> dict[str, bool]:
+    async def delete(self, user: User, organization_id: str, cid: str) -> dict[str, bool]:
         self.require_org(organization_id)
-        if not self.conversations.delete(cid, user.name):
+        if not await self.conversations.delete(cid, user.name):
             raise NotFound("Диалог не найден")
         return {"deleted": True}
 
-    def stream_message(
+    async def stream_message(
         self,
         user: User,
         organization_id: str,
@@ -126,9 +126,9 @@ class ChatConversationsService:
         top_k: int | None,
         expand: bool,
         model: str | None,
-    ) -> Iterator[str]:
+    ) -> AsyncIterator[str]:
         self.require_org(organization_id)
-        if not self.history.owns(cid, user.name):
+        if not await self.history.owns(cid, user.name):
             raise NotFound("Диалог не найден")
         try:
             resolved = self.resolve_model(model)
@@ -136,10 +136,10 @@ class ChatConversationsService:
             raise InvalidRequest(str(exc)) from exc
 
         engine = self._engine()
-        turns = self.history.recent_turns(cid, user.name, self.window)
+        turns = await self.history.recent_turns(cid, user.name, self.window)
         try:
-            self.history.append(cid, user.name, "user", question)
-            self.history.set_title_if_empty(cid, user.name, make_title(question))
+            await self.history.append(cid, user.name, "user", question)
+            await self.history.set_title_if_empty(cid, user.name, make_title(question))
         except Exception:
             pass
 
@@ -147,11 +147,12 @@ class ChatConversationsService:
         hits, tokens = engine.stream_answer(
             question, top_k=top_k, history=turns or None, expand=expand, model=resolved
         )
-        return self._generate(
+        async for chunk in self._generate(
             tokens, hits, cid, user.name, question, resolved, started, engine
-        )
+        ):
+            yield chunk
 
-    def _generate(
+    async def _generate(
         self,
         tokens: Iterator[str],
         hits,
@@ -161,7 +162,7 @@ class ChatConversationsService:
         model: str,
         started: float,
         engine: AnswerEngine,
-    ) -> Iterator[str]:
+    ) -> AsyncIterator[str]:
         collected: list[str] = []
         warnings: list[str] = []
         truncated = False
@@ -193,7 +194,7 @@ class ChatConversationsService:
                 "Модель не проставила ссылки на источники — ответ стоит проверить"
             )
         try:
-            saved = self.history.append(
+            saved = await self.history.append(
                 cid, user, "assistant", text, sources, model=model
             )
             if not saved:

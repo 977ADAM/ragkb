@@ -57,7 +57,7 @@ class BootstrapService:
         self.index = index
         self.history_enabled = history_enabled
 
-    def app_start(self, user: User, session_id: UUID) -> BootstrapResponse:
+    async def app_start(self, user: User, session_id: UUID) -> BootstrapResponse:
         is_admin = self.cfg.auth.mode == "disabled" or user.in_group(
             self.cfg.auth.admin_group
         )
@@ -68,7 +68,7 @@ class BootstrapService:
         conversations: list[dict[str, Any]] = []
         total = 0
         if organization is not None:
-            page = self.chats.list_page(
+            page = await self.chats.list_page(
                 user,
                 organization["id"],
                 limit=50,

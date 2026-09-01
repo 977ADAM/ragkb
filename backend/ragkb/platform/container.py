@@ -1,10 +1,14 @@
 """Композиционный корень: собирает адаптеры слайсов."""
 from __future__ import annotations
 
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 from ragkb.core.config import Config
 from ragkb.core.pipeline import RAGPipeline
 from ragkb.core.ports import AnswerEngine
+from ragkb.features.auth.postgres import PostgresAccounts
 from ragkb.features.chat_conversations.ephemeral import EphemeralHistory
+from ragkb.features.chat_conversations.postgres import PostgresHistory
 from ragkb.features.models.ollama import OllamaCatalog
 from ragkb.features.models.openai import OpenAICatalog
 from ragkb.features.models.static import StaticCatalog
@@ -13,14 +17,25 @@ from ragkb.platform.errors import EngineUnavailable
 
 
 class Container:
-    def __init__(self, cfg: Config):
+    def __init__(
+        self,
+        cfg: Config,
+        session_factory: async_sessionmaker[AsyncSession] | None = None,
+    ):
         self.cfg = cfg
-        self.accounts = None  # Task 6: PostgresAccounts via session factory
         self._engine: AnswerEngine | None = None
-        # Task 6 wires PostgresHistory via session factory; EphemeralHistory until then.
-        ephemeral = EphemeralHistory()
-        self.conversations = ephemeral
-        self.answer_history = ephemeral
+        if session_factory is None:
+            ephemeral = EphemeralHistory()
+            self.conversations = ephemeral
+            self.answer_history = ephemeral
+            self.accounts = None
+        else:
+            history = PostgresHistory(
+                session_factory, retention_days=cfg.history.retention_days
+            )
+            self.conversations = history
+            self.answer_history = history
+            self.accounts = PostgresAccounts(session_factory)
         kind = cfg.llm.backend.lower()
         if kind in {"openai", "vllm", "openai-compatible"}:
             self.models = OpenAICatalog(cfg.llm)

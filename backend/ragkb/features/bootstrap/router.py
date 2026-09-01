@@ -10,9 +10,9 @@ router = APIRouter()
 
 
 @router.get("/bootstrap", response_model=BootstrapResponse)
-def bootstrap(
+async def bootstrap(
     session_id: UUID = Query(...),
     user: User = Depends(current_user),
     svc: BootstrapService = Depends(bootstrap_service),
 ) -> BootstrapResponse:
-    return svc.app_start(user, session_id)
+    return await svc.app_start(user, session_id)
