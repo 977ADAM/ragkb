@@ -7,6 +7,24 @@ from ragkb.platform.container import Container
 from ragkb.services.auth import COOKIE_NAME, SESSION_DAYS, AuthService
 
 
+async def get_current_user():
+    """Возвращает текущего пользователя, если он авторизован, иначе None."""
+    from ragkb.api.deps import AuthSvc
+    from ragkb.platform.auth import current_user
+
+    async def _get_current_user(
+        request: Request,
+        svc: AuthSvc,
+    ):
+        token = request.cookies.get(COOKIE_NAME)
+        if not token:
+            return None
+        return await current_user(svc, token)
+
+    return _get_current_user    
+    
+    
+
 def get_auth_service(request: Request) -> AuthService:
     c: Container = request.app.state.container
     c._ensure_postgres()
