@@ -6,6 +6,23 @@ from ragkb.core.config import Config
 from ragkb.platform.app import create_app
 
 
+def test_history_enabled_env_false_zero_no(monkeypatch: pytest.MonkeyPatch) -> None:
+    for raw in ("false", "0", "no", "FALSE"):
+        cfg = Config()
+        cfg.history.enabled = True
+        monkeypatch.setenv("RAGKB_HISTORY_ENABLED", raw)
+        cfg._apply_env()
+        assert cfg.history.enabled is False, raw
+
+
+def test_history_enabled_env_true_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = Config()
+    cfg.history.enabled = False
+    monkeypatch.setenv("RAGKB_HISTORY_ENABLED", "true")
+    cfg._apply_env()
+    assert cfg.history.enabled is True
+
+
 def test_create_app_requires_database_url_when_history_enabled() -> None:
     cfg = Config()
     cfg.auth.mode = "disabled"

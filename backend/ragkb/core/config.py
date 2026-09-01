@@ -124,8 +124,7 @@ class OrganizationConfig:
 
 @dataclass
 class HistoryConfig:
-    # Хранение переписки пользователей. Выключается только через config.yaml —
-    # см. комментарий о переменных окружения ниже.
+    # Хранение переписки. YAML или RAGKB_HISTORY_ENABLED (false/0/no → False).
     enabled: bool = True
     # Срок хранения диалогов. Сервис хранит персональные данные: журнал
     # вопросов сотрудника есть сведения о нём.
@@ -232,6 +231,13 @@ class Config:
             val = os.environ.get(env)
             if val:
                 setattr(target, attr, val)
+        raw_history = os.environ.get("RAGKB_HISTORY_ENABLED")
+        if raw_history is not None and raw_history != "":
+            self.history.enabled = raw_history.strip().lower() not in {
+                "false",
+                "0",
+                "no",
+            }
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

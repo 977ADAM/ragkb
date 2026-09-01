@@ -9,7 +9,8 @@ cd backend
 uv sync --extra migrations --extra dev
 # нужен Postgres и RAGKB_DATABASE_URL
 alembic upgrade head
-export RAGKB_AUTH_MODE=disabled   # make backend: без форм, anonymous
+export RAGKB_AUTH_MODE=disabled
+export RAGKB_HISTORY_ENABLED=false   # make backend: без форм и без Postgres
 uv run uvicorn ragkb.platform.app:build --factory --port 8000
 
 cd frontend

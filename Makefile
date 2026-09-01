@@ -7,7 +7,7 @@ help:
 	@echo "sync            uv sync (backend, migrations + dev)"
 	@echo "sync-frontend   bun install (frontend)"
 	@echo "migrate         alembic upgrade head"
-	@echo "backend         uvicorn :8000, RAGKB_AUTH_MODE=disabled"
+	@echo "backend         uvicorn :8000, auth disabled + history off (без Postgres)"
 	@echo "frontend        bun run dev, BFF → 127.0.0.1:8000"
 	@echo "test            pytest (backend); нужна RAGKB_TEST_DATABASE_URL"
 	@echo "check           svelte-check (frontend)"
@@ -26,7 +26,7 @@ migrate:
 	cd backend && uv run alembic upgrade head
 
 backend:
-	cd backend && RAGKB_AUTH_MODE=disabled uv run uvicorn ragkb.platform.app:build --factory --host 127.0.0.1 --port 8000
+	cd backend && RAGKB_AUTH_MODE=disabled RAGKB_HISTORY_ENABLED=false uv run uvicorn ragkb.platform.app:build --factory --host 127.0.0.1 --port 8000
 
 frontend:
 	cd frontend && RAGKB_BACKEND_URL=http://127.0.0.1:8000 RAGKB_DEV_USER=dev bun run dev

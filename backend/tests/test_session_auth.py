@@ -205,3 +205,27 @@ def test_me_disabled_is_anonymous(indexed):
     indexed.auth.mode = "disabled"
     with TestClient(create_app(indexed)) as client:
         assert client.get("/auth/me").json() == {"username": "anonymous"}
+
+
+def test_session_history_disabled_does_not_persist_chats(indexed):
+    indexed.database_url = database_url()
+    indexed.auth.mode = "session"
+    indexed.history.enabled = False
+    with TestClient(create_app(indexed)) as client:
+        assert (
+            client.post(
+                "/auth/register",
+                json={"username": "ada", "password": "password1"},
+            ).status_code
+            == 200
+        )
+        created = client.post("/organization/acme/chat_conversations")
+        assert created.status_code == 200
+        assert created.json().get("conversation_id")
+    engine = create_engine(alembic_sync_url(database_url()))
+    with engine.connect() as conn:
+        n = conn.execute(text("SELECT COUNT(*) FROM conversations")).scalar()
+        users = conn.execute(text("SELECT COUNT(*) FROM users")).scalar()
+    engine.dispose()
+    assert n == 0
+    assert users == 1

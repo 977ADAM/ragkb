@@ -78,8 +78,9 @@ uv sync --extra migrations --extra dev
 alembic upgrade head
 
 # индекс — POST /index/rebuild (кнопка в интерфейсе у администратора)
-# локально без форм (make backend):
+# локально без форм и без Postgres (make backend):
 export RAGKB_AUTH_MODE=disabled
+export RAGKB_HISTORY_ENABLED=false
 uv run uvicorn ragkb.platform.app:build --factory --host 127.0.0.1 --port 8000
 
 # в другом терминале — интерфейс
@@ -126,7 +127,8 @@ OIDC на `/login`, `/register`, `/api/auth`. Keycloak/Angie OIDC для ragkb
 - нужен `.env` из `.env.example` с паролем Postgres (`POSTGRES_PASSWORD`) и
   адресом LLM (`RAGKB_LLM_URL`) — без URL compose поднимет rag, но генерация
   не заработает; эмбеддинги качаются с HuggingFace при первой индексации;
-- `make backend` остаётся на `RAGKB_AUTH_MODE=disabled` (anonymous, без форм).
+- `make backend` — `RAGKB_AUTH_MODE=disabled` и `RAGKB_HISTORY_ENABLED=false`
+  (anonymous, без форм и без Postgres).
 
 ### Что выбрать
 

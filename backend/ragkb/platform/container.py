@@ -53,11 +53,16 @@ class Container:
         self.history_enabled = cfg.history.enabled
 
     def _bind_postgres(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
-        history = PostgresHistory(
-            session_factory, retention_days=self.cfg.history.retention_days
-        )
-        self.conversations = history
-        self.answer_history = history
+        if self.cfg.history.enabled:
+            history = PostgresHistory(
+                session_factory, retention_days=self.cfg.history.retention_days
+            )
+            self.conversations = history
+            self.answer_history = history
+        else:
+            ephemeral = EphemeralHistory()
+            self.conversations = ephemeral
+            self.answer_history = ephemeral
         self.accounts = PostgresAccounts(session_factory)
 
     def _ensure_postgres(self) -> None:
