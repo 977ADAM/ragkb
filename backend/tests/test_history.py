@@ -1,84 +1,63 @@
 """История диалогов и усыновление схемы."""
 from __future__ import annotations
 
-import sqlite3
-from pathlib import Path
+import pytest
+from helpers import alembic_sync_url, database_url, migrate
+from sqlalchemy import create_engine, text
 
 from ragkb.features.chat_conversations.ephemeral import EphemeralHistory
 from ragkb.features.chat_conversations.ports import make_title
-from ragkb.features.chat_conversations.sqlite import SqliteHistory, connect
-from helpers import migrate
+from ragkb.features.chat_conversations.postgres import PostgresHistory
+from ragkb.platform.db import EXPECTED_REVISION, make_engine, make_session_factory
 
 
 def test_make_title_trims():
     assert len(make_title("  " + "ж" * 80)) == 60
 
 
-def test_sqlite_crud(tmp_path: Path):
-    db = tmp_path / "h.sqlite3"
-    migrate(db)
-    store = SqliteHistory(db)
-    cid = store.create("ada")
-    assert store.owns(cid, "ada")
-    assert not store.owns(cid, "bob")
-    assert store.append(cid, "ada", "user", "вопрос")
-    assert store.set_title_if_empty(cid, "ada", "вопрос")
-    assert store.get_messages(cid, "bob") is None
-    msgs = store.get_messages(cid, "ada")
+@pytest.mark.asyncio
+async def test_postgres_crud() -> None:
+    migrate()
+    engine = make_engine(database_url())
+    store = PostgresHistory(make_session_factory(engine))
+    await store.ready()
+    cid = await store.create("ada")
+    assert await store.owns(cid, "ada")
+    assert not await store.owns(cid, "bob")
+    assert await store.append(cid, "ada", "user", "вопрос")
+    assert await store.set_title_if_empty(cid, "ada", "вопрос")
+    assert await store.get_messages(cid, "bob") is None
+    msgs = await store.get_messages(cid, "ada")
     assert msgs and msgs[0].text == "вопрос"
+    await engine.dispose()
 
 
-def test_ephemeral_create_is_uuid():
+@pytest.mark.asyncio
+async def test_ephemeral_create_is_uuid():
     store = EphemeralHistory()
-    cid = store.create("x")
-    assert store.owns(cid, "anyone")
-    assert store.get_messages(cid, "x") == []
+    cid = await store.create("x")
+    assert await store.owns(cid, "anyone")
+    assert await store.get_messages(cid, "x") == []
 
 
-def test_alembic_fresh_db(tmp_path: Path):
-    db = tmp_path / "fresh.sqlite3"
-    migrate(db)
-    with sqlite3.connect(db) as conn:
-        rev = conn.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-        assert rev == "0004_users_sessions"
-        cols = {
-            r[1]
-            for r in conn.execute("PRAGMA table_info(messages)").fetchall()
+def test_alembic_fresh_db() -> None:
+    migrate()
+    engine = create_engine(alembic_sync_url(database_url()))
+    with engine.connect() as conn:
+        names = {
+            r[0]
+            for r in conn.execute(
+                text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+            )
         }
-        assert "model" in cols
-
-
-def test_adopt_user_version_3(tmp_path: Path):
-    db = tmp_path / "old.sqlite3"
-    conn = sqlite3.connect(db)
-    conn.executescript(
-        """
-        CREATE TABLE conversations (
-            id TEXT PRIMARY KEY, user TEXT, title TEXT DEFAULT '',
-            created_at TEXT, updated_at TEXT
-        );
-        CREATE TABLE messages (
-            id INTEGER PRIMARY KEY, conversation_id TEXT, role TEXT,
-            text TEXT, sources_json TEXT DEFAULT '[]', created_at TEXT,
-            model TEXT NOT NULL DEFAULT ''
-        );
-        CREATE TABLE cleanup_state (id INTEGER PRIMARY KEY, last_run TEXT);
-        INSERT INTO cleanup_state VALUES (1, '1970-01-01T00:00:00+00:00');
-        PRAGMA user_version = 3;
-        """
-    )
-    conn.commit()
-    conn.close()
-    migrate(db)
-    with sqlite3.connect(db) as conn:
-        assert conn.execute("SELECT version_num FROM alembic_version").fetchone()[0] == (
-            "0004_users_sessions"
-        )
-    SqliteHistory(db)
-
-
-def test_connect_creates_600(tmp_path: Path):
-    db = tmp_path / "p.sqlite3"
-    migrate(db)
-    mode = oct(db.stat().st_mode & 0o777)
-    assert mode in {"0o600", "0o400", "0o640"} or db.exists()
+        assert "conversations" in names
+        assert "messages" in names
+        rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+        assert rev == EXPECTED_REVISION
+        model = conn.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'messages' AND column_name = 'model'"
+            )
+        ).scalar()
+        assert model == "model"

@@ -6,7 +6,6 @@ from ragkb.core.pipeline import RAGPipeline
 from ragkb.core.ports import AnswerEngine
 from ragkb.features.auth.sqlite import SqliteAccounts
 from ragkb.features.chat_conversations.ephemeral import EphemeralHistory
-from ragkb.features.chat_conversations.sqlite import SqliteHistory
 from ragkb.features.models.ollama import OllamaCatalog
 from ragkb.features.models.openai import OpenAICatalog
 from ragkb.features.models.static import StaticCatalog
@@ -19,14 +18,10 @@ class Container:
         self.cfg = cfg
         self.accounts = SqliteAccounts(cfg.history.path)
         self._engine: AnswerEngine | None = None
-        if cfg.history.enabled:
-            store = SqliteHistory(cfg.history.path, retention_days=cfg.history.retention_days)
-            self.conversations = store
-            self.answer_history = store
-        else:
-            ephemeral = EphemeralHistory()
-            self.conversations = ephemeral
-            self.answer_history = ephemeral
+        # Task 6 wires PostgresHistory via session factory; EphemeralHistory until then.
+        ephemeral = EphemeralHistory()
+        self.conversations = ephemeral
+        self.answer_history = ephemeral
         kind = cfg.llm.backend.lower()
         if kind in {"openai", "vllm", "openai-compatible"}:
             self.models = OpenAICatalog(cfg.llm)

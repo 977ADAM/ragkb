@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ragkb.features.chat_conversations.sqlite import EXPECTED_REVISION
+from ragkb.platform.db import EXPECTED_REVISION
 
 COOKIE_NAME = "ragkb_session"
 SESSION_DAYS = 7

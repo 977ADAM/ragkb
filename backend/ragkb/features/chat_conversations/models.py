@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Text, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, Text, func
 from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -28,7 +28,7 @@ class ConversationRow(Base):
 class MessageRow(Base):
     __tablename__ = "messages"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     conversation_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
         ForeignKey("conversations.id", ondelete="CASCADE"),

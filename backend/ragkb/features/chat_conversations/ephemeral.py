@@ -8,28 +8,28 @@ from ragkb.features.chat_conversations.ports import Conversation, Message
 
 
 class EphemeralHistory:
-    def create(self, user: str) -> str:
+    async def create(self, user: str) -> str:
         return str(uuid.uuid4())
 
-    def owns(self, conversation_id: str, user: str) -> bool:
+    async def owns(self, conversation_id: str, user: str) -> bool:
         try:
             uuid.UUID(conversation_id)
         except ValueError:
             return False
         return True
 
-    def list_conversations(
+    async def list_conversations(
         self, user: str, limit: int = 50, offset: int = 0
     ) -> list[Conversation]:
         return []
 
-    def count_conversations(self, user: str) -> int:
+    async def count_conversations(self, user: str) -> int:
         return 0
 
-    def get_messages(self, conversation_id: str, user: str) -> list[Message]:
+    async def get_messages(self, conversation_id: str, user: str) -> list[Message]:
         return []
 
-    def append(
+    async def append(
         self,
         conversation_id: str,
         user: str,
@@ -40,19 +40,19 @@ class EphemeralHistory:
     ) -> bool:
         return True
 
-    def set_title_if_empty(self, conversation_id: str, user: str, title: str) -> bool:
+    async def set_title_if_empty(self, conversation_id: str, user: str, title: str) -> bool:
         return True
 
-    def rename(self, conversation_id: str, user: str, title: str) -> bool:
+    async def rename(self, conversation_id: str, user: str, title: str) -> bool:
         return True
 
-    def delete(self, conversation_id: str, user: str) -> bool:
+    async def delete(self, conversation_id: str, user: str) -> bool:
         return True
 
-    def cleanup(self, now=None, batch: int = 500) -> int:
+    async def cleanup(self, now=None, batch: int = 500) -> int:
         return 0
 
-    def recent_turns(
+    async def recent_turns(
         self, conversation_id: str, user: str, window: int
     ) -> list[tuple[str, str]]:
         return []
