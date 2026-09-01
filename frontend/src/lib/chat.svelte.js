@@ -66,7 +66,9 @@ export async function start() {
 	const session = sessionId();
 	initEvents(session);
 	try {
-		const response = await fetch(`/api/bootstrap?session_id=${session}`);
+		const response = await fetch(`/api/bootstrap?session_id=${session}`, {
+			credentials: 'include'
+		});
 		const body = await response.json();
 		if (!response.ok) {
 			chat.fatal = body.detail || 'Не удалось получить стартовые сведения';
@@ -113,7 +115,7 @@ export async function loadConversations(options = {}) {
 	});
 	if (chat.organization?.id) query.set('org', chat.organization.id);
 	try {
-		const response = await fetch(`/api/conversations?${query}`);
+		const response = await fetch(`/api/conversations?${query}`, { credentials: 'include' });
 		if (response.status === 404) {
 			chat.historyEnabled = false;
 			return;
@@ -148,7 +150,10 @@ export async function openConversation(id) {
 		return false;
 	}
 	try {
-		const response = await fetch(`/api/conversations/${encodeURIComponent(id)}?org=${encodeURIComponent(chat.organization.id)}`);
+		const response = await fetch(
+			`/api/conversations/${encodeURIComponent(id)}?org=${encodeURIComponent(chat.organization.id)}`,
+			{ credentials: 'include' }
+		);
 		const body = await response.json();
 		if (!response.ok) {
 			chat.fatal = response.status === 404 ? 'Диалог не найден' : body.detail || 'Ошибка';
@@ -194,10 +199,11 @@ export async function renameConversation(id, title) {
 		const response = await fetch(
 			`/api/conversations/${encodeURIComponent(id)}?org=${encodeURIComponent(chat.organization.id)}`,
 			{
-			method: 'PATCH',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ title })
-		}
+				method: 'PATCH',
+				credentials: 'include',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ title })
+			}
 		);
 		const body = await response.json().catch(() => ({}));
 		if (!response.ok) {
@@ -223,9 +229,13 @@ export async function renameConversation(id, title) {
 export async function removeConversation(id) {
 	if (!chat.organization?.id) return false;
 	try {
-		const response = await fetch(`/api/conversations/${encodeURIComponent(id)}?org=${encodeURIComponent(chat.organization.id)}`, {
-			method: 'DELETE'
-		});
+		const response = await fetch(
+			`/api/conversations/${encodeURIComponent(id)}?org=${encodeURIComponent(chat.organization.id)}`,
+			{
+				method: 'DELETE',
+				credentials: 'include'
+			}
+		);
 		if (!response.ok) {
 			const body = await response.json().catch(() => ({}));
 			chat.fatal = body.detail || 'Не удалось удалить диалог';
@@ -268,6 +278,7 @@ export async function ask(onCreated) {
 	try {
 		const response = await fetch('/api/ask', {
 			method: 'POST',
+			credentials: 'include',
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({
 				question: text,
@@ -352,7 +363,7 @@ async function consume(body, index) {
 
 export async function rebuildIndex() {
 	try {
-		const response = await fetch('/api/index/rebuild', { method: 'POST' });
+		const response = await fetch('/api/index/rebuild', { method: 'POST', credentials: 'include' });
 		const body = await response.json().catch(() => ({}));
 		if (!response.ok) {
 			chat.fatal = body.detail || 'Не удалось перестроить индекс';

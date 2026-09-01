@@ -51,6 +51,7 @@ export function flush() {
 	queue = [];
 	fetch('/api/events', {
 		method: 'POST',
+		credentials: 'include',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify({ session_id: session, events }),
 		keepalive: true

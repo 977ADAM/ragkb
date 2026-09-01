@@ -7,6 +7,7 @@
 	 */
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import favicon from '$lib/assets/favicon.svg';
 	import {
 		chat,
@@ -21,24 +22,32 @@
 
 	let { children } = $props();
 
-	// onMount, а не $effect: start() читает состояние, которое сам же
-	// присваивает, и эффект перезапускался бы от собственной работы.
+	const authPage = $derived(page.url.pathname === '/login' || page.url.pathname === '/register');
+
+	// start() не зовём на /login и /register. После goto('/new') раскладка
+	// не перемонтируется — поэтому следим за путём, а не только onMount.
+	// chat.started не даёт эффекту зациклиться от собственного присвоения.
+	$effect(() => {
+		if (authPage) return;
+		start();
+	});
+
 	onMount(() => {
-		let cancelled = false;
 		const refresh = () => {
-			if (document.visibilityState === 'visible' && !chat.busy) {
+			if (document.visibilityState === 'visible' && !chat.busy && !authPage) {
 				loadConversations({ consistency: 'eventual' });
 			}
 		};
-		start().then(() => {
-			if (cancelled) return;
-			document.addEventListener('visibilitychange', refresh);
-		});
+		document.addEventListener('visibilitychange', refresh);
 		return () => {
-			cancelled = true;
 			document.removeEventListener('visibilitychange', refresh);
 		};
 	});
+
+	async function logout() {
+		await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+		location.href = '/login';
+	}
 
 	/** @type {string | null} */
 	let renaming = $state(null);
@@ -92,6 +101,9 @@
 	<title>База знаний</title>
 </svelte:head>
 
+{#if authPage}
+	{@render children()}
+{:else}
 <div class="app">
 	{#if chat.historyEnabled}
 		<aside>
@@ -166,6 +178,10 @@
 					{/each}
 				</select>
 			</label>
+			{#if chat.user?.name}
+				<span>{chat.user.name}</span>
+				<button type="button" onclick={logout}>Выйти</button>
+			{/if}
 			{#if chat.canReindex}
 				<button onclick={rebuildIndex} disabled={chat.busy}>Перестроить индекс</button>
 			{/if}
@@ -179,6 +195,7 @@
 		{@render children()}
 	</main>
 </div>
+{/if}
 
 <style>
 	/* Собственные цвета и тема: без них страница берёт фон браузера,
