@@ -22,8 +22,9 @@ HTTP входа и UI не перепроектируем.
 
 **В работе:** сервис `postgres` в compose; `RAGKB_DATABASE_URL`; новая цепочка
 Alembic с нуля (без `PRAGMA`); модели SQLAlchemy в слайсах `chat_conversations`
-и `auth`; `AsyncEngine` / `async_sessionmaker` в `platform`; порты и ручки
-этих слайсов — `async def`; `EphemeralHistory` тоже async; lifespan
+и `auth`; `AsyncEngine` / `async_sessionmaker` в `platform`; порты истории и
+аккаунтов, ручки `auth` / `chat_conversations` / `bootstrap`, `current_user`
+и `require_admin` — `async def`; `EphemeralHistory` тоже async; lifespan
 (создать engine, `dispose` на стопе); сессия на запрос; тесты на живом
 Postgres; правки README / AGENTS / `.env.example` / Makefile / deploy
 (`postgres` в `compose up`); снять `history.path` / том `rag_history` /
@@ -95,12 +96,22 @@ Declarative-модели рядом со слайсом (`features/chat_conversa
 
 `platform` отдаёт `async_sessionmaker`. Адаптеры принимают фабрику сессий,
 не открывают свой engine. На HTTP-запрос: `async with Session() as session`.
-Ручки `auth` и `chat_conversations` — `async def`; `current_user` в режиме
-`session` читает куку через async-запрос к `sessions`. Остальные слайсы
-могут остаться `def`.
 
-Порты истории и аккаунтов — `async def`. HTTP-тела и пути не меняются.
-NDJSON на `…/messages` — async-генератор.
+Порты истории и аккаунтов — `async def`. Поэтому:
+
+- `ChatConversationsService` (в т.ч. `list_page`) и `AuthService` — async;
+- `GET /bootstrap` зовёт список диалогов — `BootstrapService.app_start` и
+  ручка bootstrap тоже `async def` (без `asyncio.run` и без синхронной
+  обёртки);
+- `current_user` / `optional_user` / `require_admin` — `async def`: в режиме
+  `session` читают `sessions` через ORM. В `disabled` / `proxy` в БД не
+  ходят, сигнатура всё равно async.
+
+Слайсы search, models, organization, index, telemetry остаются `def`.
+FastAPI сначала await у async-Depends (`current_user`), потом вызывает
+синхронную ручку.
+
+HTTP-тела и пути не меняются. NDJSON на `…/messages` — async-генератор.
 
 Зависимости пакета: `sqlalchemy[asyncio]`, `asyncpg`; extra `migrations` —
 `alembic` и `psycopg` (v3). `argon2-cffi` остаётся (хеш пароля).
