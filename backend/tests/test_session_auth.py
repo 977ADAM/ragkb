@@ -1,31 +1,41 @@
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
-from helpers import migrate
-
 from fastapi.testclient import TestClient
+from helpers import alembic_sync_url, database_url, migrate
+from sqlalchemy import create_engine, text
 
 from ragkb.features.auth.passwords import hash_password, verify_password
 from ragkb.features.auth.sqlite import SqliteAccounts
 from ragkb.platform.app import create_app
 
 
-def test_migrate_creates_users_and_sessions(tmp_path: Path) -> None:
-    db = tmp_path / "h.sqlite3"
-    migrate(db)
-    conn = sqlite3.connect(str(db))
-    names = {
-        r[0]
-        for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        )
-    }
-    assert "users" in names
-    assert "sessions" in names
-    rev = conn.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-    assert rev == "0004_users_sessions"
+def test_migrate_creates_postgres_tables() -> None:
+    migrate()
+    engine = create_engine(alembic_sync_url(database_url()))
+    with engine.connect() as conn:
+        names = {
+            r[0]
+            for r in conn.execute(
+                text(
+                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+                )
+            )
+        }
+        assert "users" in names
+        assert "sessions" in names
+        assert "conversations" in names
+        assert "messages" in names
+        rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+        assert rev == "0001_postgres_history_auth"
+        owner = conn.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'conversations' AND column_name = 'owner'"
+            )
+        ).scalar()
+        assert owner == "owner"
 
 
 def test_password_roundtrip() -> None:

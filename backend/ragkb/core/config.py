@@ -127,7 +127,6 @@ class HistoryConfig:
     # Хранение переписки пользователей. Выключается только через config.yaml —
     # см. комментарий о переменных окружения ниже.
     enabled: bool = True
-    path: str = "data/history.sqlite3"
     # Срок хранения диалогов. Сервис хранит персональные данные: журнал
     # вопросов сотрудника есть сведения о нём.
     retention_days: int = 90
@@ -148,6 +147,7 @@ class Config:
     docs_dir: str = "data/docs"
     index_dir: str = "data/index"
     language: str = "ru"
+    database_url: str = ""
     chunking: ChunkConfig = field(default_factory=ChunkConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     store: StoreConfig = field(default_factory=StoreConfig)
@@ -222,10 +222,7 @@ class Config:
             "RAGKB_AUTH_GROUPS_HEADER": ("groups_header", self.auth),
             "RAGKB_AUTH_EMAIL_HEADER": ("email_header", self.auth),
             "RAGKB_AUTH_ADMIN_GROUP": ("admin_group", self.auth),
-            # Только путь: _apply_env присваивает значение строкой, поэтому
-            # булево enabled и числовые retention_days/window сюда добавлять
-            # нельзя — "false" истинна, а число станет строкой.
-            "RAGKB_HISTORY_PATH": ("path", self.history),
+            "RAGKB_DATABASE_URL": ("database_url", self),
             "RAGKB_ORG_NAME": ("name", self.organization),
             "RAGKB_ORG_ID": ("id", self.organization),
             "RAGKB_LOG_LEVEL": ("level", self.logging),

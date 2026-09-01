@@ -52,15 +52,17 @@ def test_feature_services_do_not_import_other_features():
                 pytest.fail(f"{path} импортирует чужой слайс {name}")
 
 
-def test_sqlalchemy_only_in_migrations():
+def test_sqlalchemy_not_in_core():
     forbidden = ("sqlalchemy", "alembic")
-    for path in _py_files(PKG):
+    for path in _py_files(PKG / "core"):
         for name in _imports(path):
             root = name.split(".")[0]
             assert root not in forbidden, path
     for path in _py_files(MIGRATIONS):
         for name in _imports(path):
-            if name.startswith("ragkb.") and not name.startswith("ragkb.core.config"):
+            if name.startswith("ragkb.") and not name.startswith(
+                ("ragkb.core.config", "ragkb.features.")
+            ):
                 pytest.fail(f"{path} импортирует {name}")
 
 
@@ -68,7 +70,5 @@ def test_expected_revision_matches_alembic_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
-    from ragkb.features.chat_conversations.sqlite import EXPECTED_REVISION
-
     script = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
-    assert script.get_current_head() == EXPECTED_REVISION
+    assert script.get_current_head() == "0001_postgres_history_auth"
