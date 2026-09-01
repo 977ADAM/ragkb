@@ -95,6 +95,38 @@ def test_bad_login_same_message(indexed):
     assert a.json()["detail"] == b.json()["detail"]
 
 
+def test_failed_login_keeps_existing_session(indexed):
+    client = _session_client(indexed)
+    assert (
+        client.post(
+            "/auth/register",
+            json={"username": "ada", "password": "password1"},
+        ).status_code
+        == 200
+    )
+    unknown = client.post(
+        "/auth/login",
+        json={"username": "nobody", "password": "password1"},
+    )
+    assert unknown.status_code == 401
+    assert client.get("/auth/me").status_code == 200
+    assert client.get("/auth/me").json() == {"username": "ada"}
+    wrong = client.post(
+        "/auth/login",
+        json={"username": "bob", "password": "wrongpass"},
+    )
+    assert wrong.status_code == 401
+    assert client.get("/auth/me").json() == {"username": "ada"}
+
+
+def test_duplicate_register_keeps_existing_session(indexed):
+    client = _session_client(indexed)
+    body = {"username": "ada", "password": "password1"}
+    assert client.post("/auth/register", json=body).status_code == 200
+    assert client.post("/auth/register", json=body).status_code == 409
+    assert client.get("/auth/me").json() == {"username": "ada"}
+
+
 def test_short_password_rejected(indexed):
     client = _session_client(indexed)
     r = client.post("/auth/register", json={"username": "sam", "password": "short"})

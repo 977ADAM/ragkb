@@ -11,17 +11,30 @@ from ragkb.platform.deps import auth_service
 router = APIRouter()
 
 
-def set_session_cookie(response: Response, request: Request, token: str) -> None:
+def _cookie_secure(request: Request) -> bool:
     forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
-    secure = request.url.scheme == "https" or forwarded == "https"
+    return request.url.scheme == "https" or forwarded == "https"
+
+
+def set_session_cookie(response: Response, request: Request, token: str) -> None:
     response.set_cookie(
         COOKIE_NAME,
         token,
         httponly=True,
-        secure=secure,
+        secure=_cookie_secure(request),
         samesite="lax",
         path="/",
         max_age=SESSION_DAYS * 24 * 60 * 60,
+    )
+
+
+def clear_session_cookie(response: Response, request: Request) -> None:
+    response.delete_cookie(
+        COOKIE_NAME,
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=_cookie_secure(request),
     )
 
 
@@ -36,8 +49,8 @@ def register(
     response: Response,
     svc: AuthService = Depends(auth_service),
 ) -> dict[str, str]:
-    svc.logout(_raw_cookie(request))
     username, token = svc.register(body.username, body.password)
+    svc.logout(_raw_cookie(request))
     set_session_cookie(response, request, token)
     return {"username": username}
 
@@ -49,8 +62,8 @@ def login(
     response: Response,
     svc: AuthService = Depends(auth_service),
 ) -> dict[str, str]:
-    svc.logout(_raw_cookie(request))
     username, token = svc.login(body.username, body.password)
+    svc.logout(_raw_cookie(request))
     set_session_cookie(response, request, token)
     return {"username": username}
 
@@ -62,7 +75,7 @@ def logout(
     svc: AuthService = Depends(auth_service),
 ) -> None:
     svc.logout(_raw_cookie(request))
-    response.delete_cookie(COOKIE_NAME, path="/")
+    clear_session_cookie(response, request)
 
 
 @router.get("/auth/me")
