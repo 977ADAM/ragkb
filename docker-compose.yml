@@ -25,6 +25,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./data/docs:/app/data/docs:ro
+      - ./data/logs:/app/data/logs
       - rag_index:/app/data/index
       - rag_history:/app/data/history
       - rag_hf:/app/data/hf
@@ -43,6 +44,7 @@ services:
       RAGKB_LLM_API_KEY: ${RAGKB_LLM_API_KEY:-}
       RAGKB_HISTORY_PATH: /app/data/history/history.sqlite3
       RAGKB_STORE_BACKEND: chroma
+      RAGKB_LOG_DIR: /app/data/logs
 
   frontend:
     build: ./frontend

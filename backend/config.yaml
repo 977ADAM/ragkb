@@ -5,6 +5,10 @@ docs_dir: data/docs
 index_dir: data/index
 language: ru
 
+logging:
+  level: INFO
+  dir: data/logs   # пусто — только stdout; в compose том data/logs
+
 # Чья это база знаний. Одна установка обслуживает одну организацию —
 # разные организации разводятся разными развёртываниями, а не фильтрами
 # внутри сервиса. Пустое name означает «не настроено»: /organizations

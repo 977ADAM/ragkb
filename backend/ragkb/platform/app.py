@@ -1,11 +1,10 @@
 """Вход uvicorn: create_app(cfg) и build()."""
 from __future__ import annotations
 
-import logging
-
 from fastapi import FastAPI
 
 from ragkb.core.config import DEFAULT_CONFIG, Config
+from ragkb.core.logging_config import get_logger, setup_logging
 from ragkb.features.bootstrap.router import router as bootstrap_router
 from ragkb.features.chat_conversations.router import router as chats_router
 from ragkb.features.index.router import router as index_router
@@ -16,11 +15,11 @@ from ragkb.features.telemetry.router import router as telemetry_router
 from ragkb.platform.container import Container
 from ragkb.platform.errors import EngineUnavailable, RagkbError, ragkb_error_handler
 
-log = logging.getLogger("ragkb")
+log = get_logger("ragkb")
 
 
 def create_app(cfg: Config) -> FastAPI:
-    logging.basicConfig(level=logging.INFO)
+    setup_logging(level=cfg.logging.level, log_dir=cfg.logging.dir or None)
     app = FastAPI(
         title="RAG База знаний",
         version="1.1.0",

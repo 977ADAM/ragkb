@@ -135,6 +135,13 @@ class HistoryConfig:
 
 
 @dataclass
+class LoggingConfig:
+    # Пустой dir — только stdout (удобно в тестах и если том не смонтирован).
+    level: str = "INFO"
+    dir: str = "data/logs"
+
+
+@dataclass
 class Config:
     # Где лежат исходные документы и где хранится индекс.
     docs_dir: str = "data/docs"
@@ -148,6 +155,7 @@ class Config:
     auth: AuthConfig = field(default_factory=AuthConfig)
     organization: OrganizationConfig = field(default_factory=OrganizationConfig)
     history: HistoryConfig = field(default_factory=HistoryConfig)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
 
     @classmethod
     def load(cls, path: str | os.PathLike | None = None) -> Config:
@@ -175,6 +183,7 @@ class Config:
             "auth": AuthConfig,
             "history": HistoryConfig,
             "organization": OrganizationConfig,
+            "logging": LoggingConfig,
         }
         # Известные скалярные поля верхнего уровня (docs_dir, index_dir, ...).
         known_top_level = {f.name for f in fields(cls)}
@@ -218,6 +227,8 @@ class Config:
             "RAGKB_HISTORY_PATH": ("path", self.history),
             "RAGKB_ORG_NAME": ("name", self.organization),
             "RAGKB_ORG_ID": ("id", self.organization),
+            "RAGKB_LOG_LEVEL": ("level", self.logging),
+            "RAGKB_LOG_DIR": ("dir", self.logging),
         }
         for env, (attr, target) in mapping.items():
             val = os.environ.get(env)

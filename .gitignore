@@ -11,6 +11,11 @@ data/index/
 data/*.sqlite3*
 data/history/
 
+# Журналы приложения (rotate в data/logs)
+data/logs/
+backend/logs/
+backend/data/
+
 .mypy_cache/
 .ruff_cache/
 __pycache__/

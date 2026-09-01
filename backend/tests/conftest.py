@@ -34,6 +34,7 @@ def cfg(tmp_path: Path) -> Config:
     cfg.store.backend = "numpy"
     cfg.history.path = str(history)
     cfg.auth.mode = "disabled"
+    cfg.logging.dir = str(tmp_path / "logs")
     return cfg
 
 
