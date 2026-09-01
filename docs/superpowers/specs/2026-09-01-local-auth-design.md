@@ -43,8 +43,8 @@ OIDC с путей фронта, иначе до форм не дойти); JWT;
 | `disabled` | Как сейчас: пользователь `anonymous`. Тесты и `make backend` |
 | `proxy` | Как сейчас: заголовки `X-Forwarded-*`. В этом заходе прод на него не переводим |
 
-Исключения без сессии в режиме `session`: `GET /health`, `POST /auth/register`,
-`POST /auth/login`. Остальное, включая `GET /bootstrap` и `GET /auth/me`, —
+Исключения без сессии в режиме `session`: `GET /health`, `POST /auth/signup`,
+`POST /auth/signin`. Остальное, включая `GET /bootstrap` и `GET /auth/me`, —
 с сессией (me без куки — 401).
 
 Локальный compose: `RAGKB_AUTH_MODE=session` у `rag`; `RAGKB_DEV_USER` для
@@ -82,9 +82,9 @@ NULL REFERENCES `users(id)` ON DELETE CASCADE, `expires_at` TEXT NOT NULL.
 
 | Метод и путь | Тело | Успех |
 |---|---|---|
-| `POST /auth/register` | `{username, password}` | 200 `{username}` и `Set-Cookie`; сразу сессия |
-| `POST /auth/login` | `{username, password}` | то же |
-| `POST /auth/logout` | нет | 204, снять куку, удалить сессию |
+| `POST /auth/signup` | `{username, password}` | 200 `{username}` и `Set-Cookie`; сразу сессия |
+| `POST /auth/signin` | `{username, password}` | то же |
+| `POST /auth/signout` | нет | 204, снять куку, удалить сессию |
 | `GET /auth/me` | нет | 200 `{username}` |
 
 Кука: имя `ragkb_session`, `HttpOnly`, `Path=/`, `SameSite=Lax`. `Secure` —
@@ -106,7 +106,7 @@ NULL REFERENCES `users(id)` ON DELETE CASCADE, `expires_at` TEXT NOT NULL.
 
 ## BFF и интерфейс
 
-Маршруты: `frontend/src/routes/api/auth/register`, `login`, `logout`, `me` —
+Маршруты: `frontend/src/routes/api/auth/signup`, `signin`, `signout`, `me` —
 прокси на бэкенд с пробросом `Cookie` и `Set-Cookie`. Браузер к FastAPI не
 ходит.
 
@@ -114,8 +114,8 @@ NULL REFERENCES `users(id)` ON DELETE CASCADE, `expires_at` TEXT NOT NULL.
 
 Страницы `/login` и `/register`: по форме на страницу, ссылка на соседнюю.
 Без сессии любой другой UI-маршрут (кроме этих двух) — редирект на `/login`.
-После успешного register/login — `/new`. В шапке: `username` и кнопка
-«Выйти» (`POST /api/auth/logout`, затем `/login`).
+После успешного signup/signin — `/new`. В шапке: `username` и кнопка
+«Выйти» (`POST /api/auth/signout`, затем `/login`).
 
 Проверка сессии для раскладки: `GET /api/auth/me` (или поле `user` из
 bootstrap после me). Не смешивать с `RAGKB_DEV_USER`.

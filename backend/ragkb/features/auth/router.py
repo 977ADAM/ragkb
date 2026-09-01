@@ -8,7 +8,7 @@ from ragkb.features.auth.service import AuthService
 from ragkb.platform.auth import current_user
 from ragkb.platform.deps import auth_service
 
-router = APIRouter()
+router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _cookie_secure(request: Request) -> bool:
@@ -42,7 +42,7 @@ def _raw_cookie(request: Request) -> str | None:
     return request.cookies.get(COOKIE_NAME)
 
 
-@router.post("/auth/register")
+@router.post("/signup")
 async def register(
     body: Credentials,
     request: Request,
@@ -55,7 +55,7 @@ async def register(
     return {"username": username}
 
 
-@router.post("/auth/login")
+@router.post("/signin")
 async def login(
     body: Credentials,
     request: Request,
@@ -68,7 +68,7 @@ async def login(
     return {"username": username}
 
 
-@router.post("/auth/logout", status_code=204)
+@router.post("/signout", status_code=204)
 async def logout(
     request: Request,
     response: Response,
@@ -78,7 +78,7 @@ async def logout(
     clear_session_cookie(response, request)
 
 
-@router.get("/auth/me")
+@router.get("/me")
 async def me(
     request: Request,
     svc: AuthService = Depends(auth_service),

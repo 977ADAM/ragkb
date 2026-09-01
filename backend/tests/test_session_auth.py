@@ -116,7 +116,7 @@ def _session_client(cfg):
 def test_register_login_me_logout_bootstrap(indexed):
     with _session_client(indexed) as client:
         r = client.post(
-            "/auth/register",
+            "/auth/signup",
             json={"username": "Ada", "password": "password1"},
         )
         assert r.status_code == 200
@@ -129,7 +129,7 @@ def test_register_login_me_logout_bootstrap(indexed):
         )
         assert boot.status_code == 200
         assert boot.json()["user"]["name"] == "ada"
-        client.post("/auth/logout")
+        client.post("/auth/signout")
         assert client.get("/auth/me").status_code == 401
         assert client.get("/health").status_code == 200
 
@@ -137,19 +137,19 @@ def test_register_login_me_logout_bootstrap(indexed):
 def test_duplicate_username(indexed):
     with _session_client(indexed) as client:
         body = {"username": "bob", "password": "password1"}
-        assert client.post("/auth/register", json=body).status_code == 200
-        client.post("/auth/logout")
-        assert client.post("/auth/register", json=body).status_code == 409
+        assert client.post("/auth/signup", json=body).status_code == 200
+        client.post("/auth/signout")
+        assert client.post("/auth/signup", json=body).status_code == 409
 
 
 def test_bad_login_same_message(indexed):
     with _session_client(indexed) as client:
         a = client.post(
-            "/auth/login", json={"username": "nobody", "password": "password1"}
+            "/auth/signin", json={"username": "nobody", "password": "password1"}
         )
-        client.post("/auth/register", json={"username": "eve", "password": "password1"})
-        client.post("/auth/logout")
-        b = client.post("/auth/login", json={"username": "eve", "password": "wrongpass"})
+        client.post("/auth/signup", json={"username": "eve", "password": "password1"})
+        client.post("/auth/signout")
+        b = client.post("/auth/signin", json={"username": "eve", "password": "wrongpass"})
         assert a.status_code == b.status_code == 401
         assert a.json()["detail"] == b.json()["detail"]
 
@@ -158,20 +158,20 @@ def test_failed_login_keeps_existing_session(indexed):
     with _session_client(indexed) as client:
         assert (
             client.post(
-                "/auth/register",
+                "/auth/signup",
                 json={"username": "ada", "password": "password1"},
             ).status_code
             == 200
         )
         unknown = client.post(
-            "/auth/login",
+            "/auth/signin",
             json={"username": "nobody", "password": "password1"},
         )
         assert unknown.status_code == 401
         assert client.get("/auth/me").status_code == 200
         assert client.get("/auth/me").json() == {"username": "ada"}
         wrong = client.post(
-            "/auth/login",
+            "/auth/signin",
             json={"username": "bob", "password": "wrongpass"},
         )
         assert wrong.status_code == 401
@@ -181,14 +181,14 @@ def test_failed_login_keeps_existing_session(indexed):
 def test_duplicate_register_keeps_existing_session(indexed):
     with _session_client(indexed) as client:
         body = {"username": "ada", "password": "password1"}
-        assert client.post("/auth/register", json=body).status_code == 200
-        assert client.post("/auth/register", json=body).status_code == 409
+        assert client.post("/auth/signup", json=body).status_code == 200
+        assert client.post("/auth/signup", json=body).status_code == 409
         assert client.get("/auth/me").json() == {"username": "ada"}
 
 
 def test_short_password_rejected(indexed):
     with _session_client(indexed) as client:
-        r = client.post("/auth/register", json={"username": "sam", "password": "short"})
+        r = client.post("/auth/signup", json={"username": "sam", "password": "short"})
         assert r.status_code == 422
 
 
@@ -214,7 +214,7 @@ def test_session_history_disabled_does_not_persist_chats(indexed):
     with TestClient(create_app(indexed)) as client:
         assert (
             client.post(
-                "/auth/register",
+                "/auth/signup",
                 json={"username": "ada", "password": "password1"},
             ).status_code
             == 200

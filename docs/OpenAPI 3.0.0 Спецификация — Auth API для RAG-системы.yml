@@ -114,7 +114,7 @@ components:
     SetSessionCookie:
       description: |
         Новая сессия. Имя ragkb_session. Старую куку при успешном
-        register/login сервер гасит после выдачи новой.
+        signup/signin сервер гасит после выдачи новой.
       schema:
         type: string
         example: ragkb_session=AbCd123; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800
@@ -126,14 +126,14 @@ components:
         example: ragkb_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0
 
 paths:
-  /auth/register:
+  /auth/signup:
     post:
       tags: [auth]
       summary: Регистрация
       description: |
         Открытая регистрация. Сразу выдаёт сессию (Set-Cookie) и
         `{username}`. Занятый логин — 409. Невалидное тело — 422.
-      operationId: register
+      operationId: signup
       security: []
       requestBody:
         required: true
@@ -173,14 +173,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/ValidationError'
 
-  /auth/login:
+  /auth/signin:
     post:
       tags: [auth]
       summary: Вход
       description: |
         Один и тот же 401 для «нет пользователя» и «плохой пароль».
         Успех — новая сессия, прежняя гасится.
-      operationId: login
+      operationId: signin
       security: []
       requestBody:
         required: true
@@ -220,14 +220,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/ValidationError'
 
-  /auth/logout:
+  /auth/signout:
     post:
       tags: [auth]
       summary: Выход
       description: |
         Удаляет сессию по куке, если она была, и снимает куку. Без куки
         всё равно 204.
-      operationId: logout
+      operationId: signout
       security: []
       responses:
         '204':

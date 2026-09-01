@@ -169,7 +169,7 @@ OIDC на `/login`, `/register`, `/api/auth`. Keycloak/Angie OIDC для ragkb
 | `POST /index/rebuild` | переиндексация, только `ragkb-admins` |
 
 При `RAGKB_AUTH_MODE=session` (compose) все эндпоинты, кроме `/health`,
-`POST /auth/register` и `POST /auth/login`, требуют сессионную куку и без
+`POST /auth/signup` и `POST /auth/signin`, требуют сессионную куку и без
 неё отвечают `401`. Режим `proxy` по-прежнему читает `X-Forwarded-*`.
 Встроенной страницы `GET /` нет.
 
