@@ -20,7 +20,9 @@ def container(request: Request) -> Container:
 
 
 def auth_service(request: Request) -> AuthService:
-    return AuthService(container(request).accounts)
+    c = container(request)
+    c._ensure_postgres()
+    return AuthService(c.accounts)
 
 
 def _chats(c: Container) -> ChatConversationsService:
@@ -38,7 +40,9 @@ def _chats(c: Container) -> ChatConversationsService:
 
 
 def chat_conversations_service(request: Request) -> ChatConversationsService:
-    return _chats(container(request))
+    c = container(request)
+    c._ensure_postgres()
+    return _chats(c)
 
 
 def search_service(request: Request) -> SearchService:
@@ -64,6 +68,7 @@ def index_service(request: Request) -> IndexService:
 
 def bootstrap_service(request: Request) -> BootstrapService:
     c = container(request)
+    c._ensure_postgres()
     org = OrganizationService(c.cfg)
     return BootstrapService(
         cfg=c.cfg,

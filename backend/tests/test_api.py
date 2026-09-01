@@ -17,7 +17,8 @@ def test_unauthenticated_when_proxy_mode(indexed):
     from ragkb.platform.app import create_app
 
     indexed.auth.mode = "proxy"
-    res = TestClient(create_app(indexed)).get("/models")
+    with TestClient(create_app(indexed)) as client:
+        res = client.get("/models")
     assert res.status_code == 401
 
 

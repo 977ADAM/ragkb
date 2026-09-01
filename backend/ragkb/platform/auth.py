@@ -61,6 +61,9 @@ async def current_user(request: Request) -> User:
         digest = hashlib.sha256(raw.encode()).hexdigest()
         accounts = request.app.state.container.accounts
         if accounts is None:
+            request.app.state.container._ensure_postgres()
+            accounts = request.app.state.container.accounts
+        if accounts is None:
             raise Unauthenticated("Не аутентифицирован")
         row = await accounts.user_for_token_hash(digest)
         if row is None:

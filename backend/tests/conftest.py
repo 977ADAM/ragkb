@@ -4,11 +4,36 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from helpers import alembic_sync_url, database_url, migrate
+from sqlalchemy import create_engine, text
 
-from helpers import migrate
 from ragkb.core.config import Config, OrganizationConfig
 from ragkb.core.pipeline import build_index
 from ragkb.platform.app import create_app
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _migrate_once() -> None:
+    migrate()
+
+
+@pytest.fixture(autouse=True)
+def _truncate() -> None:
+    engine = create_engine(alembic_sync_url(database_url()))
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "TRUNCATE messages, conversations, sessions, users "
+                "RESTART IDENTITY CASCADE"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE cleanup_state SET last_run = "
+                "TIMESTAMPTZ '1970-01-01 00:00:00+00'"
+            )
+        )
+    engine.dispose()
 
 
 @pytest.fixture
@@ -24,16 +49,15 @@ def cfg(tmp_path: Path) -> Config:
         "# Политика\n\n## Отпуск\n\nЕжегодный отпуск составляет 28 календарных дней.\n",
         encoding="utf-8",
     )
-    history = tmp_path / "history.sqlite3"
-    migrate(history)
     cfg = Config(
         docs_dir=str(docs),
         index_dir=str(tmp_path / "index"),
         organization=OrganizationConfig(name="Acme", id="acme"),
     )
     cfg.store.backend = "numpy"
-    cfg.history.path = str(history)
+    cfg.database_url = database_url()
     cfg.auth.mode = "disabled"
+    cfg.history.enabled = True
     cfg.logging.dir = str(tmp_path / "logs")
     return cfg
 
@@ -45,5 +69,6 @@ def indexed(cfg: Config) -> Config:
 
 
 @pytest.fixture
-def client(indexed: Config) -> TestClient:
-    return TestClient(create_app(indexed))
+def client(indexed: Config):
+    with TestClient(create_app(indexed)) as test_client:
+        yield test_client

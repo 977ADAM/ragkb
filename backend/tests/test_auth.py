@@ -39,9 +39,8 @@ def test_admin_forbidden(indexed):
     from ragkb.platform.app import create_app
 
     indexed.auth.mode = "proxy"
-    app = create_app(indexed)
-    client = TestClient(app)
-    headers = {"X-Forwarded-Preferred-Username": "bob"}
-    assert client.post("/index/rebuild", headers=headers).status_code == 403
+    with TestClient(create_app(indexed)) as client:
+        headers = {"X-Forwarded-Preferred-Username": "bob"}
+        assert client.post("/index/rebuild", headers=headers).status_code == 403
     assert isinstance(Forbidden("x"), Exception)
     assert isinstance(Unauthenticated("x"), Exception)

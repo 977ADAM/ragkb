@@ -1,6 +1,8 @@
 """Вход uvicorn: create_app(cfg) и build()."""
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from ragkb.core.config import DEFAULT_CONFIG, Config
@@ -19,6 +21,14 @@ from ragkb.platform.errors import EngineUnavailable, RagkbError, ragkb_error_han
 log = get_logger("ragkb")
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    c = app.state.container
+    await c.ready()
+    yield
+    await c.dispose()
+
+
 def create_app(cfg: Config) -> FastAPI:
     setup_logging(level=cfg.logging.level, log_dir=cfg.logging.dir or None)
     app = FastAPI(
@@ -27,7 +37,9 @@ def create_app(cfg: Config) -> FastAPI:
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        lifespan=lifespan,
     )
+    app.state.cfg = cfg
     app.state.auth = cfg.auth
     app.state.container = Container(cfg)
     app.add_exception_handler(RagkbError, ragkb_error_handler)

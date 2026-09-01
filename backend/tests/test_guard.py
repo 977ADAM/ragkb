@@ -1,24 +1,29 @@
+from pathlib import Path
+
+import pytest
+
 from ragkb.core.config import Config
 from ragkb.platform.app import create_app
-from helpers import migrate
 
 
-def test_create_app_does_not_touch_repo_history(tmp_path, monkeypatch):
-    """Сторож: тесты не должны открывать data/history.sqlite3 репозитория."""
-    repo_history = tmp_path.parent  # не используем
-    db = tmp_path / "h.sqlite3"
-    migrate(db)
+def test_create_app_requires_database_url_when_history_enabled() -> None:
     cfg = Config()
     cfg.auth.mode = "disabled"
-    cfg.history.path = str(db)
+    cfg.database_url = ""
+    cfg.store.backend = "numpy"
+    with pytest.raises(RuntimeError, match="Задайте RAGKB_DATABASE_URL"):
+        create_app(cfg)
+
+
+def test_create_app_does_not_touch_repo_history(tmp_path: Path) -> None:
+    """disabled + история выкл. не требует URL и не пишет sqlite."""
+    cfg = Config()
+    cfg.auth.mode = "disabled"
+    cfg.history.enabled = False
+    cfg.database_url = ""
     cfg.store.backend = "numpy"
     cfg.index_dir = str(tmp_path / "idx")
     create_app(cfg)
-    # Файл в корне репозитория не создан этой фикстурой.
-    from pathlib import Path
-
     backend_default = Path(__file__).resolve().parents[1].parent / "data" / "history.sqlite3"
-    # Не утверждаем отсутствие боевого файла — только что create_app не требовал его.
-    assert Path(cfg.history.path).exists()
-    assert backend_default != Path(cfg.history.path)
-    _ = repo_history
+    assert not (tmp_path / "h.sqlite3").exists()
+    _ = backend_default

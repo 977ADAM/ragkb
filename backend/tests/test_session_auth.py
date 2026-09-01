@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from contextlib import contextmanager
 
 import pytest
 from fastapi.testclient import TestClient
@@ -103,98 +104,104 @@ async def test_accounts_user_and_session() -> None:
     await engine.dispose()
 
 
+@contextmanager
 def _session_client(cfg):
+    cfg.database_url = database_url()
     cfg.auth.mode = "session"
-    return TestClient(create_app(cfg))
+    cfg.history.enabled = True
+    with TestClient(create_app(cfg)) as client:
+        yield client
 
 
 def test_register_login_me_logout_bootstrap(indexed):
-    client = _session_client(indexed)
-    r = client.post(
-        "/auth/register",
-        json={"username": "Ada", "password": "password1"},
-    )
-    assert r.status_code == 200
-    assert r.json() == {"username": "ada"}
-    assert r.cookies.get("ragkb_session")
-    assert client.get("/auth/me").json() == {"username": "ada"}
-    boot = client.get(
-        "/bootstrap",
-        params={"session_id": "00000000-0000-4000-8000-000000000002"},
-    )
-    assert boot.status_code == 200
-    assert boot.json()["user"]["name"] == "ada"
-    client.post("/auth/logout")
-    assert client.get("/auth/me").status_code == 401
-    assert client.get("/health").status_code == 200
+    with _session_client(indexed) as client:
+        r = client.post(
+            "/auth/register",
+            json={"username": "Ada", "password": "password1"},
+        )
+        assert r.status_code == 200
+        assert r.json() == {"username": "ada"}
+        assert r.cookies.get("ragkb_session")
+        assert client.get("/auth/me").json() == {"username": "ada"}
+        boot = client.get(
+            "/bootstrap",
+            params={"session_id": "00000000-0000-4000-8000-000000000002"},
+        )
+        assert boot.status_code == 200
+        assert boot.json()["user"]["name"] == "ada"
+        client.post("/auth/logout")
+        assert client.get("/auth/me").status_code == 401
+        assert client.get("/health").status_code == 200
 
 
 def test_duplicate_username(indexed):
-    client = _session_client(indexed)
-    body = {"username": "bob", "password": "password1"}
-    assert client.post("/auth/register", json=body).status_code == 200
-    client.post("/auth/logout")
-    assert client.post("/auth/register", json=body).status_code == 409
+    with _session_client(indexed) as client:
+        body = {"username": "bob", "password": "password1"}
+        assert client.post("/auth/register", json=body).status_code == 200
+        client.post("/auth/logout")
+        assert client.post("/auth/register", json=body).status_code == 409
 
 
 def test_bad_login_same_message(indexed):
-    client = _session_client(indexed)
-    a = client.post("/auth/login", json={"username": "nobody", "password": "password1"})
-    client.post("/auth/register", json={"username": "eve", "password": "password1"})
-    client.post("/auth/logout")
-    b = client.post("/auth/login", json={"username": "eve", "password": "wrongpass"})
-    assert a.status_code == b.status_code == 401
-    assert a.json()["detail"] == b.json()["detail"]
+    with _session_client(indexed) as client:
+        a = client.post(
+            "/auth/login", json={"username": "nobody", "password": "password1"}
+        )
+        client.post("/auth/register", json={"username": "eve", "password": "password1"})
+        client.post("/auth/logout")
+        b = client.post("/auth/login", json={"username": "eve", "password": "wrongpass"})
+        assert a.status_code == b.status_code == 401
+        assert a.json()["detail"] == b.json()["detail"]
 
 
 def test_failed_login_keeps_existing_session(indexed):
-    client = _session_client(indexed)
-    assert (
-        client.post(
-            "/auth/register",
-            json={"username": "ada", "password": "password1"},
-        ).status_code
-        == 200
-    )
-    unknown = client.post(
-        "/auth/login",
-        json={"username": "nobody", "password": "password1"},
-    )
-    assert unknown.status_code == 401
-    assert client.get("/auth/me").status_code == 200
-    assert client.get("/auth/me").json() == {"username": "ada"}
-    wrong = client.post(
-        "/auth/login",
-        json={"username": "bob", "password": "wrongpass"},
-    )
-    assert wrong.status_code == 401
-    assert client.get("/auth/me").json() == {"username": "ada"}
+    with _session_client(indexed) as client:
+        assert (
+            client.post(
+                "/auth/register",
+                json={"username": "ada", "password": "password1"},
+            ).status_code
+            == 200
+        )
+        unknown = client.post(
+            "/auth/login",
+            json={"username": "nobody", "password": "password1"},
+        )
+        assert unknown.status_code == 401
+        assert client.get("/auth/me").status_code == 200
+        assert client.get("/auth/me").json() == {"username": "ada"}
+        wrong = client.post(
+            "/auth/login",
+            json={"username": "bob", "password": "wrongpass"},
+        )
+        assert wrong.status_code == 401
+        assert client.get("/auth/me").json() == {"username": "ada"}
 
 
 def test_duplicate_register_keeps_existing_session(indexed):
-    client = _session_client(indexed)
-    body = {"username": "ada", "password": "password1"}
-    assert client.post("/auth/register", json=body).status_code == 200
-    assert client.post("/auth/register", json=body).status_code == 409
-    assert client.get("/auth/me").json() == {"username": "ada"}
+    with _session_client(indexed) as client:
+        body = {"username": "ada", "password": "password1"}
+        assert client.post("/auth/register", json=body).status_code == 200
+        assert client.post("/auth/register", json=body).status_code == 409
+        assert client.get("/auth/me").json() == {"username": "ada"}
 
 
 def test_short_password_rejected(indexed):
-    client = _session_client(indexed)
-    r = client.post("/auth/register", json={"username": "sam", "password": "short"})
-    assert r.status_code == 422
+    with _session_client(indexed) as client:
+        r = client.post("/auth/register", json={"username": "sam", "password": "short"})
+        assert r.status_code == 422
 
 
 def test_bootstrap_unauthorized_without_cookie(indexed):
-    client = _session_client(indexed)
-    r = client.get(
-        "/bootstrap",
-        params={"session_id": "00000000-0000-4000-8000-000000000002"},
-    )
-    assert r.status_code == 401
+    with _session_client(indexed) as client:
+        r = client.get(
+            "/bootstrap",
+            params={"session_id": "00000000-0000-4000-8000-000000000002"},
+        )
+        assert r.status_code == 401
 
 
 def test_me_disabled_is_anonymous(indexed):
     indexed.auth.mode = "disabled"
-    client = TestClient(create_app(indexed))
-    assert client.get("/auth/me").json() == {"username": "anonymous"}
+    with TestClient(create_app(indexed)) as client:
+        assert client.get("/auth/me").json() == {"username": "anonymous"}
