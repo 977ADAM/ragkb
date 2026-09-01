@@ -2,13 +2,49 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from helpers import alembic_sync_url, database_url, migrate
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text
 
+from ragkb.features.auth.models import UserRow
 from ragkb.features.auth.passwords import hash_password, verify_password
 from ragkb.features.auth.sqlite import SqliteAccounts
 from ragkb.platform.app import create_app
+from ragkb.platform.db import EXPECTED_REVISION, make_engine, make_session_factory
+
+
+@pytest.mark.asyncio
+async def test_models_roundtrip_user() -> None:
+    migrate()
+    engine = make_engine(database_url())
+    factory = make_session_factory(engine)
+    async with factory() as session:
+        prior = (
+            await session.execute(
+                select(UserRow).where(
+                    (UserRow.id == "11111111-1111-4111-8111-111111111111")
+                    | (UserRow.username == "ada")
+                )
+            )
+        ).scalars().all()
+        for row in prior:
+            await session.delete(row)
+        if prior:
+            await session.commit()
+        session.add(
+            UserRow(
+                id="11111111-1111-4111-8111-111111111111",
+                username="ada",
+                password_hash="x",
+            )
+        )
+        await session.commit()
+        row = (
+            await session.execute(select(UserRow).where(UserRow.username == "ada"))
+        ).scalar_one()
+        assert row.username == "ada"
+    await engine.dispose()
 
 
 def test_migrate_creates_postgres_tables() -> None:
@@ -28,7 +64,7 @@ def test_migrate_creates_postgres_tables() -> None:
         assert "conversations" in names
         assert "messages" in names
         rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert rev == "0001_postgres_history_auth"
+        assert rev == EXPECTED_REVISION
         owner = conn.execute(
             text(
                 "SELECT column_name FROM information_schema.columns "

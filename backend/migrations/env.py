@@ -14,8 +14,12 @@ if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
 
 from ragkb.core.config import DEFAULT_CONFIG, Config
+from ragkb.features.auth import models as auth_models
+from ragkb.features.chat_conversations.models import ConversationRow
 
 config = context.config
+target_metadata = ConversationRow.metadata
+assert auth_models.UserRow.metadata is target_metadata
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
@@ -44,7 +48,7 @@ def run_migrations_online() -> None:
     url = _sync_url(_async_url())
     engine = create_engine(url, poolclass=pool.NullPool)
     with engine.connect() as conn:
-        context.configure(connection=conn, target_metadata=None)
+        context.configure(connection=conn, target_metadata=target_metadata)
         with context.begin_transaction():
             context.run_migrations()
 

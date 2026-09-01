@@ -70,5 +70,7 @@ def test_expected_revision_matches_alembic_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
+    from ragkb.platform.db import EXPECTED_REVISION
+
     script = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
-    assert script.get_current_head() == "0001_postgres_history_auth"
+    assert script.get_current_head() == EXPECTED_REVISION
