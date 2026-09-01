@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from typing import ClassVar
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 _USERNAME = re.compile(r"^[a-z0-9._-]+$")
 
@@ -21,3 +23,18 @@ class Credentials(BaseModel):
         if not (3 <= len(value) <= 32):
             raise ValueError("некорректный логин")
         return value
+
+
+
+class UserRresponse(BaseModel):
+    """Ответ с данными пользователя."""    
+    id: int
+    email: str
+    username: str
+    created_at: datetime
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(from_attributes=True)
+
+class MessageResponse(BaseModel):
+    """Ответ с сообщением."""
+    message: str
