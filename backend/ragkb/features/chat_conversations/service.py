@@ -147,10 +147,9 @@ class ChatConversationsService:
         hits, tokens = engine.stream_answer(
             question, top_k=top_k, history=turns or None, expand=expand, model=resolved
         )
-        async for chunk in self._generate(
+        return self._generate(
             tokens, hits, cid, user.name, question, resolved, started, engine
-        ):
-            yield chunk
+        )
 
     async def _generate(
         self,

@@ -85,7 +85,7 @@ async def post_message(
     user: User = Depends(current_user),
     svc: ChatConversationsService = Depends(chat_conversations_service),
 ) -> StreamingResponse:
-    stream = svc.stream_message(
+    stream = await svc.stream_message(
         user,
         organization_id,
         cid,
