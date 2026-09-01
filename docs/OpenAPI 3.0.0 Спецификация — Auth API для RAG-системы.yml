@@ -1,0 +1,295 @@
+openapi: 3.0.0
+info:
+  title: ragkb Auth API
+  description: |
+    Регистрация и вход ragkb. Личность — сессионная кука `ragkb_session`
+    (не JWT). Браузер в FastAPI не ходит: SvelteKit BFF (`/api/auth/…`)
+    проксирует те же пути без префикса `/api` на сервис `rag`.
+
+    FastAPI сам OpenAPI не отдаёт (`openapi_url: null`). Этот файл — контракт
+    слайса `features/auth` и `GET /health`.
+
+    Режим `auth.mode: session` (compose). `disabled` — `GET /auth/me` без куки
+    отдаёт `anonymous`. `proxy` — личность из `X-Forwarded-*`, не из этой
+    куки.
+
+    Нет почты, подтверждения, сброса пароля, JWT refresh, админки пользователей.
+  version: "1.1.0"
+
+servers:
+  - url: http://127.0.0.1:8000
+    description: uvicorn ragkb.platform.app:build (локально)
+  - url: http://rag:8000
+    description: сервис rag в compose (BFF ходит сюда)
+  - url: http://127.0.0.1:3000/api
+    description: BFF SvelteKit; те же пути, что ниже, плюс префикс /api
+
+tags:
+  - name: auth
+    description: Регистрация, вход, выход, текущий пользователь
+  - name: health
+    description: Живость без аутентификации
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: ragkb_session
+      description: |
+        Непрозрачный секрет (не JWT), HttpOnly, Path=/, SameSite=Lax.
+        Secure при HTTPS или X-Forwarded-Proto=https. Срок 7 суток.
+        В базе хранится SHA-256, не сырое значение.
+
+  schemas:
+    Credentials:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 32
+          description: |
+            Логин. Сервер делает trim и lower; после этого только [a-z0-9._-].
+          example: ada
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 128
+          example: password1
+
+    UsernameResponse:
+      type: object
+      required:
+        - username
+      properties:
+        username:
+          type: string
+          description: Канонический логин (нижний регистр)
+          example: ada
+
+    ErrorResponse:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
+          description: Текст ошибки
+          example: Неверный логин или пароль
+
+    ValidationError:
+      type: object
+      properties:
+        detail:
+          type: array
+          description: Тело 422 от pydantic/FastAPI
+          items:
+            type: object
+            properties:
+              loc:
+                type: array
+                items: {}
+              msg:
+                type: string
+              type:
+                type: string
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [ok, no_index]
+          description: ok — индекс поднимается; no_index — пайплайн недоступен
+          example: ok
+
+  headers:
+    SetSessionCookie:
+      description: |
+        Новая сессия. Имя ragkb_session. Старую куку при успешном
+        register/login сервер гасит после выдачи новой.
+      schema:
+        type: string
+        example: ragkb_session=AbCd123; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800
+
+    ClearSessionCookie:
+      description: Снятие куки (те же Path/SameSite/Secure/HttpOnly, что при установке)
+      schema:
+        type: string
+        example: ragkb_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0
+
+paths:
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Регистрация
+      description: |
+        Открытая регистрация. Сразу выдаёт сессию (Set-Cookie) и
+        `{username}`. Занятый логин — 409. Невалидное тело — 422.
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+            examples:
+              valid:
+                value:
+                  username: Ada
+                  password: password1
+      responses:
+        '200':
+          description: Пользователь создан, сессия выставлена
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetSessionCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsernameResponse'
+              example:
+                username: ada
+        '409':
+          description: Логин занят
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: Такой логин уже занят
+        '422':
+          description: Невалидное тело
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Вход
+      description: |
+        Один и тот же 401 для «нет пользователя» и «плохой пароль».
+        Успех — новая сессия, прежняя гасится.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+            examples:
+              valid:
+                value:
+                  username: ada
+                  password: password1
+      responses:
+        '200':
+          description: Сессия выставлена
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetSessionCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsernameResponse'
+              example:
+                username: ada
+        '401':
+          description: Неверный логин или пароль
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: Неверный логин или пароль
+        '422':
+          description: Невалидное тело
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Выход
+      description: |
+        Удаляет сессию по куке, если она была, и снимает куку. Без куки
+        всё равно 204.
+      operationId: logout
+      security: []
+      responses:
+        '204':
+          description: Нет тела
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/ClearSessionCookie'
+
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Текущий пользователь
+      description: |
+        `session` — логин из куки, иначе 401 «Не аутентифицирован».
+        `disabled` — `anonymous` без куки.
+        `proxy` — имя из заголовков идентификации.
+      operationId: me
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Канонический логин
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsernameResponse'
+              examples:
+                session:
+                  value:
+                    username: ada
+                disabled:
+                  value:
+                    username: anonymous
+        '401':
+          description: Нет или просрочена сессия (режим session)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: Не аутентифицирован
+
+  /health:
+    get:
+      tags: [health]
+      summary: Живость
+      description: Без аутентификации. Не раскрывает состав индекса.
+      operationId: health
+      security: []
+      responses:
+        '200':
+          description: Процесс отвечает
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                ok:
+                  value:
+                    status: ok
+                no_index:
+                  value:
+                    status: no_index
+
+security: []
