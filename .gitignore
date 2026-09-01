@@ -16,6 +16,8 @@ data/logs/
 backend/logs/
 backend/data/
 
+.worktrees/
+
 .mypy_cache/
 .ruff_cache/
 __pycache__/
