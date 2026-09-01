@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, select, text
 
 from ragkb.features.auth.models import UserRow
 from ragkb.features.auth.passwords import hash_password, verify_password
-from ragkb.features.auth.sqlite import SqliteAccounts
+from ragkb.features.auth.postgres import PostgresAccounts
 from ragkb.platform.app import create_app
 from ragkb.platform.db import EXPECTED_REVISION, make_engine, make_session_factory
 
@@ -81,20 +81,26 @@ def test_password_roundtrip() -> None:
     assert not verify_password("wrong", hashed)
 
 
-def test_accounts_user_and_session(tmp_path: Path) -> None:
-    db = tmp_path / "h.sqlite3"
-    migrate(db)
-    store = SqliteAccounts(db)
-    uid = store.create_user("ada", hash_password("password1"))
-    row = store.get_by_username("ada")
+@pytest.mark.asyncio
+async def test_accounts_user_and_session() -> None:
+    migrate()
+    engine = make_engine(database_url())
+    store = PostgresAccounts(make_session_factory(engine))
+    await store.ready()
+    username = f"acct-ada-{uuid.uuid4().hex[:12]}"
+    uid = await store.create_user(username, hash_password("password1"))
+    row = await store.get_by_username(username)
     assert row is not None
     assert row[0] == uid
-    store.create_session(uid, "hash1", "2099-01-01T00:00:00+00:00")
-    assert store.user_for_token_hash("hash1") == (uid, "ada")
-    store.create_session(uid, "old", "2000-01-01T00:00:00+00:00")
-    assert store.user_for_token_hash("old") is None
-    store.delete_session("hash1")
-    assert store.user_for_token_hash("hash1") is None
+    live_hash = f"hash1-{uuid.uuid4().hex}"
+    expired_hash = f"old-{uuid.uuid4().hex}"
+    await store.create_session(uid, live_hash, "2099-01-01T00:00:00+00:00")
+    assert await store.user_for_token_hash(live_hash) == (uid, username)
+    await store.create_session(uid, expired_hash, "2000-01-01T00:00:00+00:00")
+    assert await store.user_for_token_hash(expired_hash) is None
+    await store.delete_session(live_hash)
+    assert await store.user_for_token_hash(live_hash) is None
+    await engine.dispose()
 
 
 def _session_client(cfg):

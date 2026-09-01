@@ -1,7 +1,16 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
+
+COOKIE_NAME = "ragkb_session"
+SESSION_DAYS = 7
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 _hasher = PasswordHasher()
 

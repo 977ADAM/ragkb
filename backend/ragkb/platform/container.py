@@ -4,7 +4,6 @@ from __future__ import annotations
 from ragkb.core.config import Config
 from ragkb.core.pipeline import RAGPipeline
 from ragkb.core.ports import AnswerEngine
-from ragkb.features.auth.sqlite import SqliteAccounts
 from ragkb.features.chat_conversations.ephemeral import EphemeralHistory
 from ragkb.features.models.ollama import OllamaCatalog
 from ragkb.features.models.openai import OpenAICatalog
@@ -16,7 +15,7 @@ from ragkb.platform.errors import EngineUnavailable
 class Container:
     def __init__(self, cfg: Config):
         self.cfg = cfg
-        self.accounts = SqliteAccounts(cfg.history.path)
+        self.accounts = None  # Task 6: PostgresAccounts via session factory
         self._engine: AnswerEngine | None = None
         # Task 6 wires PostgresHistory via session factory; EphemeralHistory until then.
         ephemeral = EphemeralHistory()

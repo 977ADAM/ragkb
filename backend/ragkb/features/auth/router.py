@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request, Response
 
+from ragkb.features.auth.passwords import COOKIE_NAME, SESSION_DAYS
 from ragkb.features.auth.schemas import Credentials
 from ragkb.features.auth.service import AuthService
-from ragkb.features.auth.sqlite import COOKIE_NAME, SESSION_DAYS
 from ragkb.platform.auth import current_user
 from ragkb.platform.deps import auth_service
 
@@ -43,46 +43,46 @@ def _raw_cookie(request: Request) -> str | None:
 
 
 @router.post("/auth/register")
-def register(
+async def register(
     body: Credentials,
     request: Request,
     response: Response,
     svc: AuthService = Depends(auth_service),
 ) -> dict[str, str]:
-    username, token = svc.register(body.username, body.password)
-    svc.logout(_raw_cookie(request))
+    username, token = await svc.register(body.username, body.password)
+    await svc.logout(_raw_cookie(request))
     set_session_cookie(response, request, token)
     return {"username": username}
 
 
 @router.post("/auth/login")
-def login(
+async def login(
     body: Credentials,
     request: Request,
     response: Response,
     svc: AuthService = Depends(auth_service),
 ) -> dict[str, str]:
-    username, token = svc.login(body.username, body.password)
-    svc.logout(_raw_cookie(request))
+    username, token = await svc.login(body.username, body.password)
+    await svc.logout(_raw_cookie(request))
     set_session_cookie(response, request, token)
     return {"username": username}
 
 
 @router.post("/auth/logout", status_code=204)
-def logout(
+async def logout(
     request: Request,
     response: Response,
     svc: AuthService = Depends(auth_service),
 ) -> None:
-    svc.logout(_raw_cookie(request))
+    await svc.logout(_raw_cookie(request))
     clear_session_cookie(response, request)
 
 
 @router.get("/auth/me")
-def me(
+async def me(
     request: Request,
     svc: AuthService = Depends(auth_service),
 ) -> dict[str, str]:
     if request.app.state.auth.mode == "session":
-        return {"username": svc.me(_raw_cookie(request))}
+        return {"username": await svc.me(_raw_cookie(request))}
     return {"username": current_user(request).name}
