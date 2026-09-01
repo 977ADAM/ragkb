@@ -363,6 +363,23 @@ def test_loaders_read_all_formats():
 
 # ------------------------------------------------------------- загрузка .env
 
+def test_dotenv_repo_root_is_loaded_when_config_is_nested():
+    import os
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / ".env").write_text(
+            "RAGKB_LLM_URL=http://10.0.0.2:1/v1\n", encoding="utf-8"
+        )
+        nested = root / "backend"
+        nested.mkdir()
+        try:
+            cfg = Config.load(nested / "config.yaml")
+            assert cfg.llm.base_url == "http://10.0.0.2:1/v1"
+        finally:
+            os.environ.pop("RAGKB_LLM_URL", None)
+
+
 def test_dotenv_next_to_config_is_loaded():
     import os
 

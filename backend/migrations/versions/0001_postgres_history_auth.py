@@ -7,6 +7,9 @@ depends_on = None
 
 
 def upgrade() -> None:
+    if op.get_bind().dialect.name == "sqlite":
+        _upgrade_sqlite()
+        return
     op.execute(
         """
         CREATE TABLE conversations (
@@ -64,6 +67,68 @@ def upgrade() -> None:
             token_hash TEXT PRIMARY KEY,
             user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             expires_at TIMESTAMPTZ NOT NULL
+        )
+        """
+    )
+
+
+def _upgrade_sqlite() -> None:
+    op.execute(
+        """
+        CREATE TABLE conversations (
+            id TEXT PRIMARY KEY,
+            owner TEXT NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    op.execute(
+        "CREATE INDEX idx_conv_owner ON conversations (owner, updated_at DESC)"
+    )
+    op.execute("CREATE INDEX idx_conv_updated ON conversations (updated_at)")
+    op.execute(
+        """
+        CREATE TABLE messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+            text TEXT NOT NULL,
+            sources TEXT NOT NULL DEFAULT '[]',
+            model TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    op.execute("CREATE INDEX idx_msg_conv ON messages (conversation_id, id)")
+    op.execute(
+        """
+        CREATE TABLE cleanup_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            last_run TEXT NOT NULL
+        )
+        """
+    )
+    op.execute(
+        "INSERT INTO cleanup_state (id, last_run) VALUES (1, '1970-01-01 00:00:00+00')"
+    )
+    op.execute(
+        """
+        CREATE TABLE users (
+            id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE sessions (
+            token_hash TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            expires_at TEXT NOT NULL
         )
         """
     )

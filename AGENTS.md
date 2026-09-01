@@ -22,8 +22,8 @@
 ## Как запускать
 
 Для `auth.mode: session` или включённой истории нужен `RAGKB_DATABASE_URL`
-и `alembic upgrade head`. `make backend` — `RAGKB_AUTH_MODE=disabled` и
-`RAGKB_HISTORY_ENABLED=false` (Postgres не нужен).
+и `alembic upgrade head`. `make backend` — SQLite `data/ragkb.sqlite3`,
+`auth.mode: session` (Postgres не нужен). Compose остаётся на Postgres.
 
 ```
 cd backend

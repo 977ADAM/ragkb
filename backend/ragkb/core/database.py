@@ -1,7 +1,7 @@
 """Подключение к Postgres + DeclarativeBase. Схему накатывает Alembic."""
 from __future__ import annotations
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -24,10 +24,21 @@ def needs_database(cfg: Config) -> bool:
 
 
 def alembic_sync_url(url: str) -> str:
+    if url.startswith("sqlite+aiosqlite:"):
+        return "sqlite:" + url.removeprefix("sqlite+aiosqlite:")
     return url.replace("+asyncpg", "+psycopg", 1)
 
 
 def make_engine(url: str) -> AsyncEngine:
+    if url.startswith("sqlite"):
+        engine = create_async_engine(url)
+        @event.listens_for(engine.sync_engine, "connect")
+        def _sqlite_fk(dbapi_connection, _connection_record) -> None:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
+        return engine
     return create_async_engine(url, pool_pre_ping=True)
 
 

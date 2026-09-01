@@ -7,13 +7,14 @@ from logging.config import fileConfig
 from pathlib import Path
 
 from alembic import context
-from sqlalchemy import create_engine, pool
+from sqlalchemy import create_engine, event, pool
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
 
 from ragkb.core.config import DEFAULT_CONFIG, Config
+from ragkb.core.database import alembic_sync_url
 from ragkb.db.models import UserRow
 from ragkb.features.chat_conversations.models import ConversationRow
 
@@ -37,7 +38,7 @@ def _async_url() -> str:
 def _sync_url(url: str) -> str:
     if not url:
         raise RuntimeError("Задайте RAGKB_DATABASE_URL")
-    return url.replace("+asyncpg", "+psycopg", 1)
+    return alembic_sync_url(url)
 
 
 def run_migrations_offline() -> None:
@@ -47,6 +48,14 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     url = _sync_url(_async_url())
     engine = create_engine(url, poolclass=pool.NullPool)
+    if url.startswith("sqlite"):
+
+        @event.listens_for(engine, "connect")
+        def _sqlite_fk(dbapi_connection, _connection_record) -> None:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
     with engine.connect() as conn:
         context.configure(connection=conn, target_metadata=target_metadata)
         with context.begin_transaction():

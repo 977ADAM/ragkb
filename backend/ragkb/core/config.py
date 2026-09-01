@@ -255,24 +255,27 @@ def _load_dotenv(path: str | os.PathLike | None) -> None:
     """
     if not path:
         return
-    env_path = Path(path).resolve().parent / ".env"
-    if not env_path.exists():
-        return
-    for raw in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
+    config_dir = Path(path).resolve().parent
+    preset = set(os.environ)
+    # Сначала корневой .env репозитория, затем рядом с YAML — ближний файл важнее.
+    for env_path in (config_dir.parent / ".env", config_dir / ".env"):
+        if not env_path.is_file():
             continue
-        if line.startswith("export "):
-            line = line[len("export "):].lstrip()
-        key, sep, value = line.partition("=")
-        key = key.strip()
-        if not sep or not key:
-            continue
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-            value = value[1:-1]
-        if key not in os.environ:
-            os.environ[key] = value
+        for raw in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):].lstrip()
+            key, sep, value = line.partition("=")
+            key = key.strip()
+            if not sep or not key:
+                continue
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+                value = value[1:-1]
+            if key not in preset:
+                os.environ[key] = value
 
 
 def _load_yaml(text: str) -> dict[str, Any]:

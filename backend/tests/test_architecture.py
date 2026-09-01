@@ -63,7 +63,7 @@ def test_sqlalchemy_not_in_core():
     for path in _py_files(MIGRATIONS):
         for name in _imports(path):
             if name.startswith("ragkb.") and not name.startswith(
-                ("ragkb.core.config", "ragkb.features.", "ragkb.db")
+                ("ragkb.core.config", "ragkb.core.database", "ragkb.features.", "ragkb.db")
             ):
                 pytest.fail(f"{path} импортирует {name}")
 

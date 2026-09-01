@@ -6,6 +6,8 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config as AlembicConfig
 
+from ragkb.core.database import alembic_sync_url as alembic_sync_url
+
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -19,10 +21,6 @@ def database_url() -> str:
             "или RAGKB_DATABASE_URL (postgresql+asyncpg://…)."
         )
     return url
-
-
-def alembic_sync_url(url: str) -> str:
-    return url.replace("+asyncpg", "+psycopg", 1)
 
 
 def migrate() -> None:

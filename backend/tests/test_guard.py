@@ -44,3 +44,50 @@ def test_create_app_does_not_touch_repo_history(tmp_path: Path) -> None:
     backend_default = Path(__file__).resolve().parents[1].parent / "data" / "history.sqlite3"
     assert not (tmp_path / "h.sqlite3").exists()
     _ = backend_default
+
+
+def test_me_disabled_without_database(tmp_path: Path) -> None:
+    from fastapi.testclient import TestClient
+
+    cfg = Config()
+    cfg.auth.mode = "disabled"
+    cfg.history.enabled = False
+    cfg.database_url = ""
+    cfg.store.backend = "numpy"
+    cfg.index_dir = str(tmp_path / "idx")
+    with TestClient(create_app(cfg)) as client:
+        assert client.get("/auth/me").json() == {"username": "anonymous"}
+        assert client.get("/health").status_code == 200
+
+
+def test_alembic_sync_url_sqlite_and_postgres() -> None:
+    from ragkb.core.database import alembic_sync_url
+
+    assert alembic_sync_url("sqlite+aiosqlite:////tmp/x.db") == "sqlite:////tmp/x.db"
+    assert (
+        alembic_sync_url("postgresql+asyncpg://u:p@h/db")
+        == "postgresql+psycopg://u:p@h/db"
+    )
+
+
+def test_session_auth_on_sqlite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+    from helpers import migrate
+
+    db = tmp_path / "ragkb.sqlite3"
+    url = f"sqlite+aiosqlite:///{db}"
+    monkeypatch.setenv("RAGKB_DATABASE_URL", url)
+    migrate()
+    cfg = Config()
+    cfg.database_url = url
+    cfg.auth.mode = "session"
+    cfg.history.enabled = True
+    cfg.store.backend = "numpy"
+    cfg.index_dir = str(tmp_path / "idx")
+    with TestClient(create_app(cfg)) as client:
+        r = client.post(
+            "/auth/signup", json={"username": "ada", "password": "password1"}
+        )
+        assert r.status_code == 200
+        assert r.json() == {"username": "ada"}
+        assert client.get("/auth/me").json() == {"username": "ada"}
