@@ -14,7 +14,7 @@ from typing import Any
 
 from ragkb.features.chat_conversations.ports import Conversation, Message
 
-EXPECTED_REVISION = "0003_message_model"
+EXPECTED_REVISION = "0004_users_sessions"
 
 
 def utcnow() -> datetime:

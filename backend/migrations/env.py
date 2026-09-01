@@ -23,6 +23,7 @@ USER_VERSION_TO_REVISION = {
     1: "0001_base",
     2: "0002_conv_updated_index",
     3: "0003_message_model",
+    4: "0004_users_sessions",
 }
 
 
@@ -34,8 +35,6 @@ def _db_path() -> Path | None:
     if env_path:
         return Path(env_path).resolve()
     cfg = Config.load(DEFAULT_CONFIG)
-    if not cfg.history.enabled:
-        return None
     return Path(cfg.history.path).resolve()
 
 
