@@ -31,8 +31,7 @@ class Container:
         self.answer_history: EphemeralHistory | PostgresHistory | None = None
         self.accounts: PostgresAccounts | None = None
         if session_factory is None and needs_database(cfg):
-            if not cfg.database_url:
-                raise RuntimeError("Задайте RAGKB_DATABASE_URL")
+            
             # Engine — в ready() / первом запросе, на цикле TestClient.
             self._database_url = cfg.database_url
         elif session_factory is None:
