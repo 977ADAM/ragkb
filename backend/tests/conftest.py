@@ -15,6 +15,11 @@ from ragkb.platform.app import create_app
 
 @pytest.fixture(scope="session", autouse=True)
 def _migrate_once() -> None:
+    url = os.environ.get("RAGKB_TEST_DATABASE_URL") or os.environ.get(
+        "RAGKB_DATABASE_URL", ""
+    )
+    if not url:
+        return
     migrate()
 
 
