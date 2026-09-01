@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Дата | 2026-09-01 |
-| Версия | 1 |
+| Версия | 2 |
 | Статус | в работе |
 | Автор | Cursor Grok 4.6 |
 
@@ -35,8 +35,9 @@ Postgres; правки README / AGENTS / `.env.example` / Makefile / deploy
 Postgres пустой: старые чаты и локальные учётки пропадают, регистрация
 заново); вход как фича (формы, кука, правила пароля — уже есть);
 Keycloak/MariaDB; смена контракта `/organization/…/chat_conversations`;
-async для search/index/models/bootstrap; Chroma; разграничение документов;
-SQLAlchemy в `ragkb.core`.
+async для search / index / models / organization / telemetry (они остаются
+`def`; FastAPI умеет await у `current_user` и затем вызвать синхронную
+ручку); Chroma; разграничение документов; SQLAlchemy в `ragkb.core`.
 
 Ветка/план `2026-09-01-local-auth` для SQLite-адаптера не продолжаем:
 хранилище меняется здесь. Спека входа по HTTP остаётся источником правды
@@ -66,7 +67,7 @@ Compose: `postgres` (официальный образ 16, healthcheck, том �
 ## Схема
 
 Старые ревизии SQLite (`0001`…`0004`, `user_version`) удаляем. Новая
-единственная ревизия (имя вроде `0001_postgres_history_auth`) создаёт:
+единственная ревизия `0001_postgres_history_auth` создаёт:
 
 `conversations`: `id` UUID PK, `owner` TEXT NOT NULL (не `user` — слово
 зарезервировано), `title` TEXT NOT NULL DEFAULT '', `created_at` /
