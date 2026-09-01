@@ -5,7 +5,11 @@ const PUBLIC = new Set(['/login', '/register']);
 
 export async function handle({ event, resolve }) {
 	const path = event.url.pathname;
-	if (path.startsWith('/api/') || path === '/health') {
+	if (
+		path.startsWith('/api/') ||
+		path === '/health' ||
+		path.startsWith('/_app')
+	) {
 		return resolve(event);
 	}
 	let me = 401;
