@@ -40,7 +40,7 @@ def test_alembic_fresh_db(tmp_path: Path):
     migrate(db)
     with sqlite3.connect(db) as conn:
         rev = conn.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-        assert rev == "0003_message_model"
+        assert rev == "0004_users_sessions"
         cols = {
             r[1]
             for r in conn.execute("PRAGMA table_info(messages)").fetchall()
@@ -72,7 +72,7 @@ def test_adopt_user_version_3(tmp_path: Path):
     migrate(db)
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT version_num FROM alembic_version").fetchone()[0] == (
-            "0003_message_model"
+            "0004_users_sessions"
         )
     SqliteHistory(db)
 

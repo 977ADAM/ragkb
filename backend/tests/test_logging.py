@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 
+from helpers import migrate
 from ragkb.core.config import Config, LoggingConfig, OrganizationConfig
 from ragkb.core.logging_config import get_logger, setup_logging
 from ragkb.platform.app import create_app
@@ -45,6 +46,9 @@ def test_create_app_logs_disabled_auth_to_configured_dir(tmp_path: Path) -> None
     )
     cfg.auth.mode = "disabled"
     cfg.history.enabled = False
+    history = tmp_path / "history.sqlite3"
+    migrate(history)
+    cfg.history.path = str(history)
     create_app(cfg)
     _flush()
     text = (log_dir / "app.log").read_text(encoding="utf-8")

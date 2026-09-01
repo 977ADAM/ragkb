@@ -1,10 +1,11 @@
 """Идентификация пользователя.
 
-Аутентификацию ведёт внешний reverse proxy (на сервере — Angie); сюда
-приходит готовый заголовок с логином.
+В режиме proxy аутентификацию ведёт reverse proxy (на сервере — Angie).
+В режиме session личность берётся только из куки, не из заголовков.
 """
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -12,6 +13,7 @@ from fastapi import Request
 from starlette.datastructures import Headers
 
 from ragkb.core.config import AuthConfig
+from ragkb.features.auth.sqlite import COOKIE_NAME
 from ragkb.platform.errors import Forbidden, Unauthenticated
 
 ANONYMOUS = "anonymous"
@@ -52,6 +54,15 @@ def current_user(request: Request) -> User:
     cfg: AuthConfig = request.app.state.auth
     if cfg.mode == "disabled":
         return User(name=ANONYMOUS)
+    if cfg.mode == "session":
+        raw = request.cookies.get(COOKIE_NAME)
+        if not raw:
+            raise Unauthenticated("Не аутентифицирован")
+        digest = hashlib.sha256(raw.encode()).hexdigest()
+        row = request.app.state.container.accounts.user_for_token_hash(digest)
+        if row is None:
+            raise Unauthenticated("Не аутентифицирован")
+        return User(name=row[1])
     user = user_from_headers(request.headers, cfg)
     if user is None:
         raise Unauthenticated("Не аутентифицирован")

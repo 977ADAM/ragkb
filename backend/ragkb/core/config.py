@@ -92,6 +92,7 @@ class LLMConfig:
 class AuthConfig:
     # mode: "proxy" — логин приходит заголовком от reverse proxy (Angie)
     #       "disabled" — аутентификации нет, всё работает от имени anonymous
+    #       "session" — локальный логин/пароль, кука ragkb_session
     # По умолчанию закрыто: забытая настройка должна давать отказ,
     # а не открытый наружу сервис.
     mode: str = "proxy"

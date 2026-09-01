@@ -31,6 +31,10 @@ class InvalidRequest(RagkbError):
     pass
 
 
+class Conflict(RagkbError):
+    pass
+
+
 class EngineUnavailable(RagkbError):
     pass
 
@@ -40,6 +44,7 @@ _STATUS = {
     Unauthenticated: 401,
     Forbidden: 403,
     InvalidRequest: 400,
+    Conflict: 409,
     EngineUnavailable: 503,
 }
 

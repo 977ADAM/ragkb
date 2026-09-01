@@ -4,6 +4,7 @@ from __future__ import annotations
 from ragkb.core.config import Config
 from ragkb.core.pipeline import RAGPipeline
 from ragkb.core.ports import AnswerEngine
+from ragkb.features.auth.sqlite import SqliteAccounts
 from ragkb.features.chat_conversations.ephemeral import EphemeralHistory
 from ragkb.features.chat_conversations.sqlite import SqliteHistory
 from ragkb.features.models.ollama import OllamaCatalog
@@ -16,6 +17,7 @@ from ragkb.platform.errors import EngineUnavailable
 class Container:
     def __init__(self, cfg: Config):
         self.cfg = cfg
+        self.accounts = SqliteAccounts(cfg.history.path)
         self._engine: AnswerEngine | None = None
         if cfg.history.enabled:
             store = SqliteHistory(cfg.history.path, retention_days=cfg.history.retention_days)
