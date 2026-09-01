@@ -1,5 +1,7 @@
 """HTTP-слой auth: signup, signin, signout, me."""
-from fastapi import APIRouter, Request, Response
+from this import s
+
+from fastapi import APIRouter, Request, Response, status
 
 from ragkb.api.deps import AuthSvc
 from ragkb.api.deps.auth import clear_session_cookie, raw_cookie, set_session_cookie
@@ -9,7 +11,7 @@ from ragkb.platform.auth import current_user
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post("/signup")
+@router.post("/signup", response_model=dict[str, str], status_code=status.HTTP_201_CREATED)
 async def signup(
     body: Credentials,
     request: Request,
