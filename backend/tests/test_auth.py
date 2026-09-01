@@ -1,6 +1,9 @@
 """Аутентификация."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
 from starlette.datastructures import Headers
 
 from ragkb.core.config import AuthConfig
@@ -44,3 +47,19 @@ def test_admin_forbidden(indexed):
         assert client.post("/index/rebuild", headers=headers).status_code == 403
     assert isinstance(Forbidden("x"), Exception)
     assert isinstance(Unauthenticated("x"), Exception)
+
+
+def test_auth_service_rejects_missing_accounts():
+    from ragkb.platform import deps
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                container=SimpleNamespace(
+                    accounts=None, _ensure_postgres=lambda: None
+                )
+            )
+        )
+    )
+    with pytest.raises(RuntimeError, match="Postgres не подключён"):
+        deps.auth_service(request)

@@ -22,6 +22,10 @@ def container(request: Request) -> Container:
 def auth_service(request: Request) -> AuthService:
     c = container(request)
     c._ensure_postgres()
+    if c.accounts is None:
+        raise RuntimeError(
+            "Хранилище учёток недоступно: Postgres не подключён"
+        )
     return AuthService(c.accounts)
 
 

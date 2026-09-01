@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -19,7 +20,12 @@ def _migrate_once() -> None:
 
 @pytest.fixture(autouse=True)
 def _truncate() -> None:
-    engine = create_engine(alembic_sync_url(database_url()))
+    url = os.environ.get("RAGKB_TEST_DATABASE_URL") or os.environ.get(
+        "RAGKB_DATABASE_URL", ""
+    )
+    if not url:
+        return
+    engine = create_engine(alembic_sync_url(url))
     with engine.begin() as conn:
         conn.execute(
             text(
