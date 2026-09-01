@@ -49,6 +49,8 @@ function identity(request) {
 		headers['x-forwarded-preferred-username'] = env.RAGKB_DEV_USER;
 		if (env.RAGKB_DEV_GROUPS) headers['x-forwarded-groups'] = env.RAGKB_DEV_GROUPS;
 	}
+	const cookie = request.headers.get('cookie');
+	if (cookie) headers.cookie = cookie;
 	return headers;
 }
 
@@ -115,6 +117,30 @@ export async function proxyJson(path, request, init = {}) {
 		return json({ detail: await failureText(upstream) }, { status: upstream.status });
 	}
 	return json(await upstream.json());
+}
+
+/**
+ * @param {string} path
+ * @param {Request} request
+ * @param {RequestInit} [init]
+ */
+export async function proxyAuth(path, request, init = {}) {
+	let upstream;
+	try {
+		upstream = await backend(path, request, init);
+	} catch (error) {
+		return json({ detail: unreachable(error) }, { status: 502 });
+	}
+	const headers = new Headers();
+	headers.set('content-type', upstream.headers.get('content-type') || 'application/json');
+	for (const cookie of upstream.headers.getSetCookie?.() ?? []) {
+		headers.append('set-cookie', cookie);
+	}
+	if (upstream.status === 204) {
+		return new Response(null, { status: 204, headers });
+	}
+	const body = await upstream.arrayBuffer();
+	return new Response(body, { status: upstream.status, headers });
 }
 
 /** @param {unknown} error */
