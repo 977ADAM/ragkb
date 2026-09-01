@@ -26,7 +26,7 @@ migrate:
 	cd backend && uv run alembic upgrade head
 
 backend:
-	cd backend && RAGKB_AUTH_MODE=disabled RAGKB_HISTORY_ENABLED=false uv run uvicorn ragkb.platform.app:build --factory --host 127.0.0.1 --port 8000
+	cd backend && uv run uvicorn ragkb.platform.app:build --factory --host 127.0.0.1 --port 8000
 
 frontend:
 	cd frontend && RAGKB_BACKEND_URL=http://127.0.0.1:8000 RAGKB_DEV_USER=dev bun run dev
