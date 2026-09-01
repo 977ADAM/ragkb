@@ -42,7 +42,7 @@ async def signin(
     return {"username": username}
 
 
-@router.post("/signout", response_description=MessageResponse, status_code=204)
+@router.post("/signout", response_model=MessageResponse, status_code=status.HTTP_200_OK)
 async def signout(
     request: Request,
     response: Response,
