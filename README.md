@@ -78,10 +78,8 @@ uv sync --extra migrations --extra dev
 alembic upgrade head
 
 # индекс — POST /index/rebuild (кнопка в интерфейсе у администратора)
-# локально без форм и без Postgres (make backend):
-export RAGKB_AUTH_MODE=disabled
-export RAGKB_HISTORY_ENABLED=false
-uv run uvicorn ragkb.platform.app:build --factory --host 127.0.0.1 --port 8000
+# локально с формами и SQLite (без Postgres):
+make backend
 
 # в другом терминале — интерфейс
 cd ../frontend
@@ -121,6 +119,13 @@ ADMIN_PASSWORD=…
 `ensure-admin` после migrate создаёт или обновляет админа. Оба пустые — сидер
 пропускается.
 
+Чеклист оператора (сервер, не часть `make backend`):
+
+- в `.env` на сервере задать оба `ADMIN_LOGIN` и `ADMIN_PASSWORD`;
+- `docker compose up` / `make up` должен запускать сервис `ensure-admin` после `migrate`;
+- оба значения пустые — сидер выходит 0, пользователя-админа нет;
+- после подъёма войти этим логином и открыть `/admin`.
+
 Смена эмбеддера: `POST /index/rebuild` (админ в интерфейсе).
 
 Или целиком в Docker: `docker compose up -d` (см. `docker-compose.yml`).
@@ -133,8 +138,8 @@ OIDC на `/login`, `/register`, `/api/auth`. Keycloak/Angie OIDC для ragkb
 - нужен `.env` из `.env.example` с паролем Postgres (`POSTGRES_PASSWORD`) и
   адресом LLM (`RAGKB_LLM_URL`) — без URL compose поднимет rag, но генерация
   не заработает; эмбеддинги качаются с HuggingFace при первой индексации;
-- `make backend` — `RAGKB_AUTH_MODE=disabled` и `RAGKB_HISTORY_ENABLED=false`
-  (anonymous, без форм и без Postgres).
+- `make backend` — `RAGKB_AUTH_MODE=session` и SQLite `data/ragkb.sqlite3`
+  (формы `/login` и `/register`, Postgres не нужен).
 
 ### Что выбрать
 
@@ -172,7 +177,7 @@ OIDC на `/login`, `/register`, `/api/auth`. Keycloak/Angie OIDC для ragkb
 | `GET/PATCH/DELETE .../chat_conversations/{cid}` | сообщения, имя, удаление |
 | `POST .../chat_conversations/{cid}/messages` | вопрос, поток NDJSON |
 | `POST /events` | телеметрия пачкой (до 100 событий) |
-| `POST /index/rebuild` | переиндексация, только `ragkb-admins` |
+| `POST /index/rebuild` | переиндексация: в `session` роль `admin`; в `proxy` группа `auth.admin_group` (по умолчанию `ragkb-admins`) |
 
 При `RAGKB_AUTH_MODE=session` (compose) все эндпоинты, кроме `/health`,
 `POST /auth/signup` и `POST /auth/signin`, требуют сессионную куку и без
