@@ -50,6 +50,16 @@ class PostgresAccounts:
             return None
         return (row.id, row.username, row.password_hash, row.role)
 
+    async def update_password(self, username: str, password_hash: str) -> None:
+        async with self.session_factory() as session:
+            row = await session.scalar(
+                select(UserRow).where(UserRow.username == username)
+            )
+            if row is None:
+                return
+            row.password_hash = password_hash
+            await session.commit()
+
     async def create_session(
         self, user_id: str, token_hash: str, expires_at: str
     ) -> None:
