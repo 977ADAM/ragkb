@@ -37,8 +37,9 @@ class EphemeralHistory:
         text: str,
         sources: list[dict[str, Any]] | None = None,
         model: str = "",
-    ) -> bool:
-        return True
+    ) -> int | None:
+        # История выключена: сообщения нигде не хранятся, оценивать нечего.
+        return None
 
     async def set_title_if_empty(self, conversation_id: str, user: str, title: str) -> bool:
         return True

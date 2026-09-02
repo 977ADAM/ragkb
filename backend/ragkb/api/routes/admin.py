@@ -7,15 +7,20 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from ragkb.api.deps.auth import require_admin
-from ragkb.api.deps.services import organization_service
+from ragkb.api.deps.services import feedback_service, organization_service
 from ragkb.core.errors import NotFound
 from ragkb.domain.entities import User
 from ragkb.services.admin_users import AdminUsersService
+from ragkb.services.feedback import FeedbackService
 from ragkb.services.organization import OrganizationService
 
 router = APIRouter(dependencies=[Depends(require_admin)])
 
-_LINKS = {"users": "/admin/users", "reports": "/admin/reports"}
+_LINKS = {
+    "users": "/admin/users",
+    "reports": "/admin/reports",
+    "feedback": "/admin/feedback",
+}
 
 
 class RoleBody(BaseModel):
@@ -66,3 +71,10 @@ def admin_organization(
 @router.get("/reports")
 def admin_reports() -> dict[str, str]:
     return {"status": "unavailable"}
+
+
+@router.get("/feedback")
+async def admin_feedback(
+    svc: FeedbackService = Depends(feedback_service),
+) -> dict:
+    return await svc.summary()

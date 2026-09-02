@@ -33,6 +33,7 @@ class ChatConversationsService:
         require_org: Callable[[str], None],
         window: int,
         llm_cfg: LLMConfig,
+        persist: bool = True,
     ):
         self.conversations = conversations
         self.history = history
@@ -42,6 +43,7 @@ class ChatConversationsService:
         self.require_org = require_org
         self.window = window
         self.llm_cfg = llm_cfg
+        self.persist = persist
         self.cache = EventualCache()
 
     async def create(self, user: User, organization_id: str) -> dict[str, str]:
@@ -195,15 +197,18 @@ class ChatConversationsService:
             saved = await self.history.append(
                 cid, user, "assistant", text, sources, model=model
             )
-            if not saved:
+            if saved is None and self.persist:
                 warnings.append("Ответ не сохранён в историю диалога")
         except Exception:
-            warnings.append("Ответ не сохранён в историю диалога")
+            saved = None
+            if self.persist:
+                warnings.append("Ответ не сохранён в историю диалога")
 
         yield json.dumps(
             {
                 "type": "done",
                 "conversation_id": cid,
+                "message_id": saved if self.persist else None,
                 "sources": sources,
                 "warnings": warnings,
                 "elapsed_sec": round(time.time() - started, 2),

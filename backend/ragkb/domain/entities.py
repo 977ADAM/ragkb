@@ -54,6 +54,27 @@ class User:
 # --- Диалоги ---
 
 
+# --- Оценки ответов ---
+
+RATING_UP = "up"
+RATING_DOWN = "down"
+FEEDBACK_COMMENT_LIMIT = 500
+FEEDBACK_ANSWER_SNIPPET = 200
+
+
+@dataclass(frozen=True)
+class Feedback:
+    id: int
+    message_id: int
+    rating: str
+    comment: str
+    created_at: str
+    updated_at: str
+
+
+# --- Диалоги ---
+
+
 @dataclass(frozen=True)
 class Conversation:
     id: str
@@ -77,12 +98,16 @@ class Message:
     created_at: str
     sources: list[dict[str, Any]] = field(default_factory=list)
     model: str = ""
+    id: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "role": self.role,
             "text": self.text,
             "created_at": self.created_at,
             "sources": self.sources,
             "model": self.model,
         }
+        if self.id is not None:
+            out["id"] = self.id
+        return out

@@ -33,6 +33,8 @@
 	<p>
 		<a href="/admin/users">Пользователи</a>
 		·
+		<a href="/admin/feedback">Оценки ответов</a>
+		·
 		<a href="/admin/reports">Отчёты</a>
 	</p>
 {:else}

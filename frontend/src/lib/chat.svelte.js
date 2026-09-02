@@ -9,8 +9,9 @@
 
 /**
  * @typedef {{source?: string, title?: string, available?: boolean}} Source
- * @typedef {{role: 'user' | 'assistant', text: string, sources?: Source[],
- *   warnings?: string[], elapsed?: number | null, model?: string, error?: string}} Message
+ * @typedef {{id?: number, role: 'user' | 'assistant', text: string,
+ *   sources?: Source[], warnings?: string[], elapsed?: number | null,
+ *   model?: string, error?: string, feedback?: 'up' | 'down' | null}} Message
  * @typedef {{id: string, title: string, updated_at?: string}} Conversation
  */
 
@@ -168,12 +169,14 @@ export async function openConversation(id) {
 		// разу, когда ответ рождался. Источники и модель хранятся и нужны.
 		chat.messages = (body.messages ?? []).map(
 			/** @param {any} m */ (m) => ({
+				id: m.id ?? undefined,
 				role: m.role,
 				text: m.text,
 				sources: m.sources ?? [],
 				warnings: [],
 				elapsed: null,
-				model: m.model
+				model: m.model,
+				feedback: null
 			})
 		);
 		return true;
@@ -270,11 +273,19 @@ export async function ask(onCreated) {
 	chat.busy = true;
 	chat.fatal = '';
 	const before = chat.conversationId;
-	chat.messages = [...chat.messages, { role: 'user', text }];
+	chat.messages = [...chat.messages, { role: 'user', text, feedback: null }];
 	// Пустой ответ добавляем сразу: в него дописываются токены потока.
 	chat.messages = [
 		...chat.messages,
-		{ role: 'assistant', text: '', sources: [], warnings: [], elapsed: null, model: chat.model }
+		{
+			role: 'assistant',
+			text: '',
+			sources: [],
+			warnings: [],
+			elapsed: null,
+			model: chat.model,
+			feedback: null
+		}
 	];
 	const index = chat.messages.length - 1;
 
@@ -350,6 +361,7 @@ async function consume(body, index) {
 				chat.messages[index].warnings = event.warnings ?? [];
 				chat.messages[index].elapsed = event.elapsed_sec ?? null;
 				chat.messages[index].model = event.model ?? chat.messages[index].model;
+				chat.messages[index].id = event.message_id ?? chat.messages[index].id;
 				if (event.truncated) {
 					chat.messages[index].warnings = [
 						...(chat.messages[index].warnings ?? []),
@@ -375,5 +387,34 @@ export async function rebuildIndex() {
 		chat.fatal = '';
 	} catch (error) {
 		chat.fatal = String(error);
+	}
+}
+
+/**
+ * Оценивает ответ: 👍 / 👎, повторный вызов меняет оценку.
+ *
+ * @param {number} messageId
+ * @param {'up' | 'down'} rating
+ * @param {string} [comment]
+ * @returns {Promise<boolean>}
+ */
+export async function rateMessage(messageId, rating, comment = '') {
+	if (!chat.organization?.id || !chat.conversationId) return false;
+	try {
+		const response = await fetch(
+			`/api/conversations/${encodeURIComponent(chat.conversationId)}/messages/${messageId}/feedback?org=${encodeURIComponent(chat.organization.id)}`,
+			{
+				method: 'PATCH',
+				credentials: 'include',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ rating, comment })
+			}
+		);
+		if (!response.ok) return false;
+		const message = chat.messages.find((m) => m.id === messageId);
+		if (message) message.feedback = rating;
+		return true;
+	} catch {
+		return false;
 	}
 }

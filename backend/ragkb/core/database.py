@@ -12,7 +12,7 @@ from sqlalchemy.orm import DeclarativeBase
 
 from ragkb.core.config import Config
 
-EXPECTED_REVISION = "0006_user_role"
+EXPECTED_REVISION = "0007_message_feedback"
 
 
 class Base(DeclarativeBase):

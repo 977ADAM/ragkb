@@ -7,6 +7,7 @@ from ragkb.container import Container
 from ragkb.services.bootstrap import BootstrapService
 from ragkb.services.chat_conversations import ChatConversationsService
 from ragkb.services.chat_sources import IndexSources
+from ragkb.services.feedback import FeedbackService
 from ragkb.services.index import IndexService
 from ragkb.services.models import ModelsService
 from ragkb.services.organization import OrganizationService
@@ -29,6 +30,7 @@ def _chats(c: Container) -> ChatConversationsService:
         require_org=org.require_id,
         window=c.history_window,
         llm_cfg=c.cfg.llm,
+        persist=c.history_enabled,
     )
 
 
@@ -52,6 +54,14 @@ def organization_service(request: Request) -> OrganizationService:
 
 def telemetry_service(request: Request) -> TelemetryService:
     return TelemetryService(container(request).events)
+
+
+def feedback_service(request: Request) -> FeedbackService:
+    c = container(request)
+    c._ensure_postgres()
+    if c.feedback is None:
+        raise RuntimeError("Оценки недоступны: Postgres не подключён")
+    return FeedbackService(c.feedback)
 
 
 def index_service(request: Request) -> IndexService:

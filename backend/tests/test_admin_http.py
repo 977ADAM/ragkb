@@ -135,6 +135,7 @@ def test_organization_hub_from_config(tmp_path: Path, sqlite_url: str) -> None:
         assert body["links"] == {
             "users": "/admin/users",
             "reports": "/admin/reports",
+            "feedback": "/admin/feedback",
         }
 
 
@@ -157,4 +158,5 @@ def test_organization_hub_empty_when_unconfigured(
         assert body["links"] == {
             "users": "/admin/users",
             "reports": "/admin/reports",
+            "feedback": "/admin/feedback",
         }

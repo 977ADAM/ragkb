@@ -1,13 +1,29 @@
 <script>
+	import { rateMessage } from '$lib/chat.svelte.js';
+
 	/**
 	 * Одна реплика: текст, ошибка потока, предупреждения, источники, мета.
 	 *
 	 * @typedef {{source?: string, title?: string, available?: boolean}} Source
-	 * @typedef {{role: 'user' | 'assistant', text: string, sources?: Source[],
-	 *   warnings?: string[], elapsed?: number | null, model?: string, error?: string}} Message
+	 * @typedef {{id?: number, role: 'user' | 'assistant', text: string,
+	 *   sources?: Source[], warnings?: string[], elapsed?: number | null,
+	 *   model?: string, error?: string, feedback?: 'up' | 'down' | null}} Message
 	 * @type {{ message: Message, streaming?: boolean }}
 	 */
 	let { message, streaming = false } = $props();
+
+	let ratingBusy = $state(false);
+	let ratingError = $state('');
+
+	/** @param {'up' | 'down'} rating */
+	async function rate(rating) {
+		if (ratingBusy || message.id === undefined || streaming) return;
+		ratingBusy = true;
+		ratingError = '';
+		const ok = await rateMessage(message.id, rating);
+		if (!ok) ratingError = 'Не удалось сохранить оценку';
+		ratingBusy = false;
+	}
 </script>
 
 <article class={message.role}>
@@ -32,6 +48,25 @@
 	{/if}
 	{#if message.elapsed !== null && message.elapsed !== undefined}
 		<p class="meta">{message.model} · {message.elapsed} с</p>
+	{/if}
+	{#if message.role === 'assistant' && message.id !== undefined && !streaming}
+		<div class="rating" role="group" aria-label="Оценить ответ">
+			<button
+				class:active={message.feedback === 'up'}
+				disabled={ratingBusy}
+				onclick={() => rate('up')}
+				title="Полезный ответ"
+			>👍</button>
+			<button
+				class:active={message.feedback === 'down'}
+				disabled={ratingBusy}
+				onclick={() => rate('down')}
+				title="Ответ не помог"
+			>👎</button>
+			{#if ratingError}
+				<span class="rating-error">{ratingError}</span>
+			{/if}
+		</div>
 	{/if}
 </article>
 
@@ -86,5 +121,36 @@
 		margin: 0.4rem 0 0;
 		font-size: 0.75rem;
 		color: var(--muted);
+	}
+	.rating {
+		margin-top: 0.5rem;
+		display: flex;
+		gap: 0.35rem;
+		align-items: center;
+	}
+	.rating button {
+		border: 1px solid transparent;
+		background: transparent;
+		font-size: 0.9rem;
+		padding: 0.1rem 0.35rem;
+		border-radius: 0.4rem;
+		cursor: pointer;
+		opacity: 0.65;
+	}
+	.rating button:hover {
+		opacity: 1;
+		background: var(--hover, rgba(128, 128, 128, 0.15));
+	}
+	.rating button:disabled {
+		opacity: 0.4;
+		cursor: default;
+	}
+	.rating button.active {
+		opacity: 1;
+		border-color: currentColor;
+	}
+	.rating-error {
+		color: #ef4444;
+		font-size: 0.8rem;
 	}
 </style>

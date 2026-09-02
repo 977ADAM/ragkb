@@ -10,6 +10,7 @@ from ragkb.core.pipeline import RAGPipeline
 from ragkb.core.ports import AnswerEngine
 from ragkb.db.repos.auth import PostgresAccounts
 from ragkb.db.repos.ephemeral_history import EphemeralHistory
+from ragkb.db.repos.feedback import PostgresFeedback
 from ragkb.db.repos.postgres_history import PostgresHistory
 from ragkb.services.models_ollama import OllamaCatalog
 from ragkb.services.models_openai import OpenAICatalog
@@ -30,6 +31,7 @@ class Container:
         self.conversations: EphemeralHistory | PostgresHistory | None = None
         self.answer_history: EphemeralHistory | PostgresHistory | None = None
         self.accounts: PostgresAccounts | None = None
+        self.feedback: PostgresFeedback | None = None
         if session_factory is None and needs_database(cfg):
             if not cfg.database_url:
                 raise RuntimeError("Задайте RAGKB_DATABASE_URL")
@@ -64,6 +66,7 @@ class Container:
             self.conversations = ephemeral
             self.answer_history = ephemeral
         self.accounts = PostgresAccounts(session_factory)
+        self.feedback = PostgresFeedback(session_factory)
 
     def _ensure_postgres(self) -> None:
         if self._database_url and self.engine_obj is None:

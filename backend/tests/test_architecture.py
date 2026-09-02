@@ -132,6 +132,7 @@ def test_each_alembic_revision_creates_one_table() -> None:
         "cleanup_state",
         "users",
         "sessions",
+        "message_feedback",
     ]
 
 

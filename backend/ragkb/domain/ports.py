@@ -51,7 +51,8 @@ class ConversationRepository(Protocol):
         text: str,
         sources: list[dict[str, Any]] | None = None,
         model: str = "",
-    ) -> bool: ...
+    ) -> int | None:
+        """Сохраняет сообщение и возвращает его id (None — не сохранено)."""
     async def set_title_if_empty(self, conversation_id: str, user: str, title: str) -> bool: ...
     async def rename(self, conversation_id: str, user: str, title: str) -> bool: ...
     async def delete(self, conversation_id: str, user: str) -> bool: ...
@@ -72,12 +73,33 @@ class AnswerHistory(Protocol):
         text: str,
         sources: list[dict[str, Any]] | None = None,
         model: str = "",
-    ) -> bool: ...
+    ) -> int | None:
+        """Сохраняет сообщение и возвращает его id (None — не сохранено)."""
     async def set_title_if_empty(self, conversation_id: str, user: str, title: str) -> bool: ...
 
 
 class SourceRegistry(Protocol):
     def document_paths(self) -> set[str] | None: ...
+
+
+# --- Оценки ответов ---
+
+
+class FeedbackStore(Protocol):
+    async def conversation_owned_by(
+        self, conversation_id: str, user: str
+    ) -> bool: ...
+    async def message_in_conversation(
+        self, message_id: int, conversation_id: str
+    ) -> bool: ...
+    async def set_feedback(self, message_id: int, rating: str, comment: str) -> None:
+        """Записывает или меняет оценку сообщения (одна на сообщение)."""
+    async def counts(self) -> tuple[int, int]:
+        """(up, down) по всем оценкам."""
+    async def list_feedback(
+        self, limit: int = 200
+    ) -> list[tuple[str, str, str, str, str, str]]:
+        """(conversation_id, username, rating, comment, answer, created_at)."""
 
 
 # --- Модели ---

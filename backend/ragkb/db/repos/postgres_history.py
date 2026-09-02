@@ -56,7 +56,7 @@ class PostgresHistory:
         text: str,
         sources: list[dict[str, Any]] | None = None,
         model: str = "",
-    ) -> bool:
+    ) -> int | None:
         now = utcnow()
         async with self.session_factory() as session:
             owner = await session.scalar(
@@ -66,24 +66,25 @@ class PostgresHistory:
                 )
             )
             if owner is None:
-                return False
-            session.add(
-                MessageRow(
-                    conversation_id=conversation_id,
-                    role=role,
-                    text=text,
-                    sources=sources or [],
-                    created_at=now,
-                    model=model,
-                )
+                return None
+            row = MessageRow(
+                conversation_id=conversation_id,
+                role=role,
+                text=text,
+                sources=sources or [],
+                created_at=now,
+                model=model,
             )
+            session.add(row)
+            await session.flush()
+            message_id = row.id
             await session.execute(
                 update(ConversationRow)
                 .where(ConversationRow.id == conversation_id)
                 .values(updated_at=now)
             )
             await session.commit()
-        return True
+        return message_id
 
     async def set_title_if_empty(self, conversation_id: str, user: str, title: str) -> bool:
         async with self.session_factory() as session:
@@ -160,6 +161,7 @@ class PostgresHistory:
             ).scalars().all()
         return [
             Message(
+                id=row.id,
                 role=row.role,
                 text=row.text,
                 created_at=row.created_at.isoformat(),

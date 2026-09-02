@@ -7,14 +7,16 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
 from ragkb.api.deps.auth import current_user
-from ragkb.api.deps.services import chat_conversations_service
+from ragkb.api.deps.services import chat_conversations_service, feedback_service
 from ragkb.api.schemas.chat_conversations import (
     MessageRequest,
     OrgConversationsResponse,
     RenameRequest,
 )
+from ragkb.api.schemas.feedback import FeedbackBody
 from ragkb.domain.entities import User
 from ragkb.services.chat_conversations import ChatConversationsService
+from ragkb.services.feedback import FeedbackService
 
 router = APIRouter()
 
@@ -76,6 +78,21 @@ async def delete_conversation(
     svc: ChatConversationsService = Depends(chat_conversations_service),
 ) -> dict[str, bool]:
     return await svc.delete(user, organization_id, cid)
+
+
+@router.patch(
+    "/organization/{organization_id}/chat_conversations/{cid}/messages/{message_id}/feedback",
+    status_code=204,
+)
+async def rate_message(
+    organization_id: str,
+    cid: str,
+    message_id: int,
+    body: FeedbackBody,
+    user: User = Depends(current_user),
+    svc: FeedbackService = Depends(feedback_service),
+) -> None:
+    await svc.rate(user.name, cid, message_id, body.rating, body.comment)
 
 
 @router.post("/organization/{organization_id}/chat_conversations/{cid}/messages")
