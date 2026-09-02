@@ -185,7 +185,7 @@
 				<a href="/admin">Админ</a>
 			{/if}
 			{#if chat.user?.name}
-				<span>{chat.user.name}</span>
+				<a href="/profile" class="username" title="Профиль">{chat.user.name}</a>
 				<button type="button" onclick={logout}>Выйти</button>
 			{/if}
 			{#if chat.canReindex}
@@ -345,6 +345,16 @@
 	header a {
 		color: var(--accent);
 		font-size: 0.9rem;
+	}
+	header a.username {
+		color: inherit;
+		font-weight: 600;
+		text-decoration: none;
+		border-bottom: 1px dashed var(--line);
+	}
+	header a.username:hover {
+		color: var(--accent);
+		border-bottom-color: var(--accent);
 	}
 	header button {
 		font: inherit;

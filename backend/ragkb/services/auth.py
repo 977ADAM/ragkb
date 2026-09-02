@@ -9,7 +9,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
 from ragkb.domain.ports import AccountStore
-from ragkb.core.errors import Unauthenticated
+from ragkb.core.errors import InvalidRequest, Unauthenticated
 
 COOKIE_NAME = "ragkb_session"
 SESSION_DAYS = 7
@@ -71,3 +71,36 @@ class AuthService:
         if row is None:
             raise Unauthenticated("Не аутентифицирован")
         return row[1], row[2]
+
+    async def profile(
+        self, raw_token: str | None
+    ) -> tuple[str, str, datetime | None]:
+        """(username, role, created_at) — дата регистрации локального аккаунта."""
+        if not raw_token:
+            raise Unauthenticated("Не аутентифицирован")
+        row = await self._store.user_for_token_hash(_token_hash(raw_token))
+        if row is None:
+            raise Unauthenticated("Не аутентифицирован")
+        _user_id, username, role = row
+        profile = await self._store.get_profile(username)
+        if profile is None:
+            return username, role, None
+        _prof_role, created_at = profile
+        return username, role, created_at
+
+    async def change_password(
+        self, raw_token: str | None, current: str, new: str
+    ) -> None:
+        """Меняет пароль: проверяет текущий, обновляет хеш, гасит чужие сессии."""
+        if not raw_token:
+            raise Unauthenticated("Не аутентифицирован")
+        token_hash = _token_hash(raw_token)
+        row = await self._store.user_for_token_hash(token_hash)
+        if row is None:
+            raise Unauthenticated("Не аутентифицирован")
+        user_id, username, _role = row
+        account = await self._store.get_by_username(username)
+        if account is None or not verify_password(current, account[2]):
+            raise InvalidRequest("Неверный текущий пароль")
+        await self._store.update_password(username, hash_password(new))
+        await self._store.delete_other_sessions(user_id, keep_token_hash=token_hash)

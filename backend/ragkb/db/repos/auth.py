@@ -50,6 +50,15 @@ class PostgresAccounts:
             return None
         return (row.id, row.username, row.password_hash, row.role)
 
+    async def get_profile(self, username: str) -> tuple[str, str, datetime] | None:
+        async with self.session_factory() as session:
+            row = await session.scalar(
+                select(UserRow).where(UserRow.username == username)
+            )
+        if row is None:
+            return None
+        return row.role, row.created_at
+
     async def update_password(self, username: str, password_hash: str) -> None:
         async with self.session_factory() as session:
             row = await session.scalar(
@@ -78,6 +87,18 @@ class PostgresAccounts:
         async with self.session_factory() as session:
             await session.execute(
                 delete(SessionRow).where(SessionRow.token_hash == token_hash)
+            )
+            await session.commit()
+
+    async def delete_other_sessions(
+        self, user_id: str, keep_token_hash: str
+    ) -> None:
+        async with self.session_factory() as session:
+            await session.execute(
+                delete(SessionRow).where(
+                    SessionRow.user_id == user_id,
+                    SessionRow.token_hash != keep_token_hash,
+                )
             )
             await session.commit()
 

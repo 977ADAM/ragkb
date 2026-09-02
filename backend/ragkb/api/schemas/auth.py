@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
 
-from typing import ClassVar
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator
 
 _USERNAME = re.compile(r"^[a-z0-9._-]+$")
 
@@ -25,16 +23,13 @@ class Credentials(BaseModel):
         return value
 
 
+class ChangePassword(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
 
-class UserRresponse(BaseModel):
-    """Ответ с данными пользователя."""    
-    id: int
-    email: str
-    username: str
-    created_at: datetime
-
-    model_config: ClassVar[ConfigDict] = ConfigDict(from_attributes=True)
-
-class MessageResponse(BaseModel):
-    """Ответ с сообщением."""
-    message: str
+    @field_validator("new_password")
+    @classmethod
+    def require_length(cls, value: str) -> str:
+        if not (8 <= len(value) <= 128):
+            raise ValueError("пароль должен быть от 8 до 128 символов")
+        return value
