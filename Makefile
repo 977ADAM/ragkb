@@ -34,7 +34,7 @@ backend:
 	uv run uvicorn ragkb.platform.app:build --factory --host 127.0.0.1 --port 8000
 
 frontend:
-	cd frontend && RAGKB_BACKEND_URL=http://127.0.0.1:8000 RAGKB_DEV_USER=dev bun run dev
+	cd frontend && bun run dev
 
 test:
 	cd backend && uv run pytest
