@@ -113,7 +113,13 @@ RAGKB_LLM_URL=http://10.10.1.114:8080/v1
 RAGKB_LLM_MODEL=qwen2.5-instruct
 RAGKB_EMBEDDING_BACKEND=sentence-transformers
 RAGKB_EMBEDDING_MODEL=BAAI/bge-m3
+ADMIN_LOGIN=admin
+ADMIN_PASSWORD=…
 ```
+
+`ADMIN_LOGIN` / `ADMIN_PASSWORD` (8–128 символов) — одноразовый compose-сервис
+`ensure-admin` после migrate создаёт или обновляет админа. Оба пустые — сидер
+пропускается.
 
 Смена эмбеддера: `POST /index/rebuild` (админ в интерфейсе).
 

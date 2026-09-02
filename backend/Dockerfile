@@ -22,6 +22,7 @@ COPY ragkb ./ragkb
 COPY migrations ./migrations
 COPY alembic.ini ./
 COPY config.yaml ./
+COPY scripts ./scripts
 
 RUN uv sync --locked --extra migrations --extra local-models --no-editable
 

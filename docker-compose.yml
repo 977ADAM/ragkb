@@ -31,11 +31,24 @@ services:
     command: alembic upgrade head
     restart: "no"
 
-  rag:
+  ensure-admin:
     build: ./backend
     image: ragkb:local
     depends_on:
       migrate:
+        condition: service_completed_successfully
+    environment:
+      RAGKB_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ragkb}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ragkb}
+      ADMIN_LOGIN: ${ADMIN_LOGIN:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    command: python -m scripts.ensure_admin
+    restart: "no"
+
+  rag:
+    build: ./backend
+    image: ragkb:local
+    depends_on:
+      ensure-admin:
         condition: service_completed_successfully
     volumes:
       - ./data/docs:/app/data/docs:ro
