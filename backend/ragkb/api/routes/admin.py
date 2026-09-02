@@ -12,11 +12,7 @@ from ragkb.platform.deps import organization_service
 from ragkb.platform.errors import NotFound
 from ragkb.services.admin_users import AdminUsersService
 
-router = APIRouter(
-    prefix="/admin",
-    tags=["admin"],
-    dependencies=[Depends(require_admin)],
-)
+router = APIRouter(dependencies=[Depends(require_admin)])
 
 _LINKS = {"users": "/admin/users", "reports": "/admin/reports"}
 
