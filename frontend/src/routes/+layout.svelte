@@ -96,6 +96,37 @@
 		reset();
 		goto('/new');
 	}
+
+	/** Скрыта ли панель диалогов (sidebar). По умолчанию открыта. */
+	let sidebarOpen = $state(true);
+	function toggleSidebar() {
+		sidebarOpen = !sidebarOpen;
+	}
+
+	/** Ширина панели диалогов, px. По умолчанию 15rem = 240px. */
+	let sidebarWidth = $state(240);
+	/** Перетаскивание за правый край панели. */
+	let resizeStartX = 0;
+	let resizeStartWidth = 0;
+
+	/** @param {PointerEvent} event */
+	function startResize(event) {
+		resizeStartX = event.clientX;
+		resizeStartWidth = sidebarWidth;
+		event.preventDefault();
+		window.addEventListener('pointermove', onResize);
+		window.addEventListener('pointerup', endResize, { once: true });
+	}
+
+	/** @param {PointerEvent} event */
+	function onResize(event) {
+		const next = resizeStartWidth + (event.clientX - resizeStartX);
+		sidebarWidth = Math.min(480, Math.max(180, next));
+	}
+
+	function endResize() {
+		window.removeEventListener('pointermove', onResize);
+	}
 </script>
 
 <svelte:head>
@@ -106,8 +137,8 @@
 {#if authPage || adminPage}
 	{@render children()}
 {:else}
-<div class="app">
-	{#if chat.historyEnabled}
+<div class="app" style="--sidebar-w: {sidebarWidth}px">
+	{#if chat.historyEnabled && sidebarOpen}
 		<aside>
 			<button class="new" onclick={newChat} disabled={chat.busy}>Новый диалог</button>
 			<nav>
@@ -169,10 +200,20 @@
 				</div>
 			{/if}
 		</aside>
+		<div class="resizer" role="separator" aria-orientation="vertical" onpointerdown={startResize}></div>
 	{/if}
 
 	<main>
 		<header>
+			{#if chat.historyEnabled}
+				<button
+					class="sidebar-toggle"
+					type="button"
+					onclick={toggleSidebar}
+					aria-label={sidebarOpen ? 'Скрыть панель диалогов' : 'Показать панель диалогов'}
+					title={sidebarOpen ? 'Скрыть панель' : 'Показать панель'}
+				>{sidebarOpen ? '◀' : '☰'}</button>
+			{/if}
 			<img class="logo" src="/logo.png" alt="" width="28" height="28" />
 			<h1>
 				{chat.organization?.name
@@ -248,7 +289,7 @@
 		font: 16px/1.5 system-ui, sans-serif;
 	}
 	aside {
-		width: 15rem;
+		width: var(--sidebar-w, 15rem);
 		flex: none;
 		box-sizing: border-box;
 		border-right: 1px solid var(--line);
@@ -257,6 +298,32 @@
 		flex-direction: column;
 		gap: 0.75rem;
 		overflow-y: auto;
+	}
+	/* Ручка изменения ширины панели: тонкая полоса на стыке с контентом. */
+	.resizer {
+		flex: none;
+		width: 6px;
+		cursor: col-resize;
+		background: transparent;
+		transition: background 0.15s ease;
+	}
+	.resizer:hover,
+	.resizer:active {
+		background: var(--accent);
+	}
+	.sidebar-toggle {
+		font: inherit;
+		line-height: 1;
+		padding: 0.3rem 0.5rem;
+		border: 1px solid var(--line);
+		border-radius: 0.4rem;
+		background: var(--panel);
+		color: inherit;
+		cursor: pointer;
+	}
+	.sidebar-toggle:hover {
+		border-color: var(--accent);
+		color: var(--accent);
 	}
 	nav {
 		display: flex;
@@ -310,6 +377,11 @@
 			max-height: 30vh;
 			border-right: none;
 			border-bottom: 1px solid var(--line);
+		}
+		/* Вертикальную ручку изменения ширины на мобильной раскладке
+		   (панель сверху) показывать незачем. */
+		.resizer {
+			display: none;
 		}
 	}
 	.item {
