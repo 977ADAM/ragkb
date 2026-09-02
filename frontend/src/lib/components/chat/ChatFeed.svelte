@@ -17,6 +17,7 @@
 	{#each chat.messages as message, i (i)}
 		<Message
 			{message}
+			isLast={i === chat.messages.length - 1}
 			streaming={message.role === 'assistant' && chat.busy && i === chat.messages.length - 1}
 		/>
 	{/each}

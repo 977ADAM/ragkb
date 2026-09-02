@@ -11,6 +11,7 @@ from ragkb.api.deps.services import chat_conversations_service, feedback_service
 from ragkb.api.schemas.chat_conversations import (
     MessageRequest,
     OrgConversationsResponse,
+    RegenerateRequest,
     RenameRequest,
 )
 from ragkb.api.schemas.feedback import FeedbackBody
@@ -108,6 +109,29 @@ async def post_message(
         organization_id,
         cid,
         question=req.question,
+        top_k=req.top_k,
+        expand=req.expand,
+        model=req.model,
+    )
+    return StreamingResponse(stream, media_type="application/x-ndjson; charset=utf-8")
+
+
+@router.post(
+    "/organization/{organization_id}/chat_conversations/{cid}/messages/{message_id}/regenerate"
+)
+async def regenerate_message(
+    organization_id: str,
+    cid: str,
+    message_id: int,
+    req: RegenerateRequest,
+    user: User = Depends(current_user),
+    svc: ChatConversationsService = Depends(chat_conversations_service),
+) -> StreamingResponse:
+    stream = await svc.regenerate_message(
+        user,
+        organization_id,
+        cid,
+        message_id,
         top_k=req.top_k,
         expand=req.expand,
         model=req.model,

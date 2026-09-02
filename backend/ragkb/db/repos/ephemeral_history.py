@@ -50,6 +50,10 @@ class EphemeralHistory:
     async def delete(self, conversation_id: str, user: str) -> bool:
         return True
 
+    async def remove_message(self, message_id: int, user: str) -> bool:
+        # Эфемерная история ничего не хранит — удалять нечего.
+        return False
+
     async def cleanup(self, now=None, batch: int = 500) -> int:
         return 0
 

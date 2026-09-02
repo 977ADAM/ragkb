@@ -132,17 +132,72 @@ class ChatConversationsService:
         if not await self.history.owns(cid, user.name):
             raise NotFound("Диалог не найден")
         try:
+            await self.history.append(cid, user.name, "user", question)
+            await self.history.set_title_if_empty(cid, user.name, make_title(question))
+        except Exception:
+            pass
+        return await self._stream_answer(
+            user, cid, question=question, top_k=top_k, expand=expand, model=model
+        )
+
+    async def regenerate_message(
+        self,
+        user: User,
+        organization_id: str,
+        cid: str,
+        message_id: int,
+        *,
+        top_k: int | None,
+        expand: bool,
+        model: str | None,
+    ) -> AsyncIterator[str]:
+        """Перегенерирует последний ответ: удаляет его и отвечает заново.
+
+        Только последний ответ: история линейная, хвост обрубать не умеем.
+        Вопрос берём из предшествующего user-сообщения, заново не добавляем.
+        """
+        self.require_org(organization_id)
+        if not await self.history.owns(cid, user.name):
+            raise NotFound("Диалог не найден")
+        messages = await self.conversations.get_messages(cid, user.name)
+        if messages is None:
+            raise NotFound("Диалог не найден")
+        index = next((i for i, m in enumerate(messages) if m.id == message_id), None)
+        if index is None:
+            raise NotFound("Сообщение не найдено")
+        if index != len(messages) - 1:
+            raise InvalidRequest("перегенерировать можно только последний ответ")
+        answer = messages[index]
+        if answer.role != "assistant":
+            raise InvalidRequest("перегенерировать можно только ответ")
+        question = next(
+            (m.text for m in reversed(messages[:index]) if m.role == "user"), None
+        )
+        if question is None:
+            raise InvalidRequest("нет вопроса перед ответом")
+        if not await self.conversations.remove_message(message_id, user.name):
+            raise NotFound("Сообщение не найдено")
+        return await self._stream_answer(
+            user, cid, question=question, top_k=top_k, expand=expand, model=model
+        )
+
+    async def _stream_answer(
+        self,
+        user: User,
+        cid: str,
+        *,
+        question: str,
+        top_k: int | None,
+        expand: bool,
+        model: str | None,
+    ) -> AsyncIterator[str]:
+        try:
             resolved = self.resolve_model(model)
         except ValueError as exc:
             raise InvalidRequest(str(exc)) from exc
 
         engine = self._engine()
         turns = await self.history.recent_turns(cid, user.name, self.window)
-        try:
-            await self.history.append(cid, user.name, "user", question)
-            await self.history.set_title_if_empty(cid, user.name, make_title(question))
-        except Exception:
-            pass
 
         started = time.time()
         hits, tokens = engine.stream_answer(

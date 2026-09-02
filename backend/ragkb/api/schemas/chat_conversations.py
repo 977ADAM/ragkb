@@ -27,6 +27,14 @@ class MessageRequest(BaseModel):
     model: str | None = None
 
 
+class RegenerateRequest(BaseModel):
+    """Параметры перегенерации последнего ответа: вопрос не нужен."""
+
+    top_k: int | None = Field(None, ge=1, le=20)
+    expand: bool = False
+    model: str | None = None
+
+
 class OrgConversationsResponse(BaseModel):
     organization_id: str
     conversations: list[dict[str, Any]]

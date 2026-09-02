@@ -377,6 +377,85 @@ async function consume(body, index) {
 	}
 }
 
+/**
+ * Копирует текст в буфер обмена. Фолбэк для небезопасного контекста.
+ *
+ * @param {string} text
+ * @returns {Promise<boolean>}
+ */
+export async function copyText(text) {
+	if (navigator.clipboard?.writeText) {
+		try {
+			await navigator.clipboard.writeText(text);
+			return true;
+		} catch {
+			// небезопасный контекст — ниже фолбэк
+		}
+	}
+	try {
+		const area = document.createElement('textarea');
+		area.value = text;
+		area.style.position = 'fixed';
+		area.style.opacity = '0';
+		document.body.appendChild(area);
+		area.select();
+		const ok = document.execCommand('copy');
+		document.body.removeChild(area);
+		return ok;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Перегенерирует последний ответ: сервер удаляет старый и стримит новый.
+ *
+ * @param {number} messageId
+ * @returns {Promise<boolean>}
+ */
+export async function regenerateMessage(messageId) {
+	if (chat.busy || !chat.organization?.id || !chat.conversationId) return false;
+	const index = chat.messages.findIndex((m) => m.id === messageId);
+	if (index < 0 || chat.messages[index]?.role !== 'assistant') return false;
+	chat.busy = true;
+	chat.fatal = '';
+	// Пустой ответ добавляем сразу: в него дописываются токены потока.
+	chat.messages[index] = {
+		role: 'assistant',
+		text: '',
+		sources: [],
+		warnings: [],
+		elapsed: null,
+		model: chat.model,
+		feedback: null
+	};
+	try {
+		const response = await fetch(
+			`/api/conversations/${encodeURIComponent(chat.conversationId)}/messages/${messageId}/regenerate?org=${encodeURIComponent(chat.organization.id)}`,
+			{
+				method: 'POST',
+				credentials: 'include',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ model: chat.model || null })
+			}
+		);
+		if (!response.ok) {
+			const body = await response.json().catch(() => ({}));
+			chat.messages[index].error = body.detail || `Ошибка ${response.status}`;
+			return false;
+		}
+		if (!response.body) throw new Error('Пустой ответ от сервера');
+		await consume(response.body, index);
+		return true;
+	} catch (error) {
+		chat.messages[index].error = String(error);
+		return false;
+	} finally {
+		chat.busy = false;
+		await loadConversations();
+	}
+}
+
 export async function rebuildIndex() {
 	try {
 		const response = await fetch('/api/index/rebuild', { method: 'POST', credentials: 'include' });

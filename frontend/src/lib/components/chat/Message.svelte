@@ -1,5 +1,5 @@
 <script>
-	import { rateMessage } from '$lib/chat.svelte.js';
+	import { chat, copyText, rateMessage, regenerateMessage } from '$lib/chat.svelte.js';
 	import SourcesModal from './SourcesModal.svelte';
 
 	/**
@@ -10,9 +10,9 @@
 	 * @typedef {{id?: number, role: 'user' | 'assistant', text: string,
 	 *   sources?: Source[], warnings?: string[], elapsed?: number | null,
 	 *   model?: string, error?: string, feedback?: 'up' | 'down' | null}} Message
-	 * @type {{ message: Message, streaming?: boolean }}
+	 * @type {{ message: Message, isLast?: boolean, streaming?: boolean }}
 	 */
-	let { message, streaming = false } = $props();
+	let { message, isLast = false, streaming = false } = $props();
 
 	/** @type {Source | null} */
 	let openSource = $state(null);
@@ -43,6 +43,27 @@
 		openSource = message.sources?.find((s) => s.n === n) ?? null;
 	}
 
+	let copied = $state(false);
+	/** @param {MouseEvent} event */
+	async function copy(event) {
+		event.preventDefault();
+		if (await copyText(message.text ?? '')) {
+			copied = true;
+			setTimeout(() => (copied = false), 1500);
+		}
+	}
+
+	let regenBusy = $state(false);
+	/** @param {MouseEvent} event */
+	async function regenerate(event) {
+		event.preventDefault();
+		if (regenBusy || message.id === undefined || streaming) return;
+		regenBusy = true;
+		const ok = await regenerateMessage(message.id);
+		regenBusy = false;
+		if (ok && message.error) delete message.error;
+	}
+
 	let ratingBusy = $state(false);
 	let ratingError = $state('');
 
@@ -55,6 +76,9 @@
 		if (!ok) ratingError = 'Не удалось сохранить оценку';
 		ratingBusy = false;
 	}
+
+	/** Действия нужны, когда у сообщения есть что скопировать или показать. */
+	const hasActions = $derived(Boolean(message.text) || Boolean(message.error));
 </script>
 
 {#if openSource}
@@ -104,20 +128,36 @@
 	{#if message.elapsed !== null && message.elapsed !== undefined}
 		<p class="meta">{message.model} · {message.elapsed} с</p>
 	{/if}
-	{#if message.role === 'assistant' && message.id !== undefined && !streaming}
-		<div class="rating" role="group" aria-label="Оценить ответ">
-			<button
-				class:active={message.feedback === 'up'}
-				disabled={ratingBusy}
-				onclick={() => rate('up')}
-				title="Полезный ответ"
-			>👍</button>
-			<button
-				class:active={message.feedback === 'down'}
-				disabled={ratingBusy}
-				onclick={() => rate('down')}
-				title="Ответ не помог"
-			>👎</button>
+	{#if hasActions && !streaming}
+		<div class="actions" role="group" aria-label="Действия над сообщением">
+			<button type="button" class="action" onclick={copy} title="Скопировать текст">
+				{copied ? '✓' : '⧉'}
+			</button>
+			{#if message.role === 'assistant' && message.id !== undefined && isLast}
+				<button
+					type="button"
+					class="action"
+					disabled={regenBusy || chat.busy}
+					onclick={regenerate}
+					title="Перегенерировать ответ"
+				>↻</button>
+			{/if}
+			{#if message.role === 'assistant' && message.id !== undefined}
+				<button
+					class="action"
+					class:active={message.feedback === 'up'}
+					disabled={ratingBusy}
+					onclick={() => rate('up')}
+					title="Полезный ответ"
+				>👍</button>
+				<button
+					class="action"
+					class:active={message.feedback === 'down'}
+					disabled={ratingBusy}
+					onclick={() => rate('down')}
+					title="Ответ не помог"
+				>👎</button>
+			{/if}
 			{#if ratingError}
 				<span class="rating-error">{ratingError}</span>
 			{/if}
@@ -203,32 +243,36 @@
 		font-size: 0.75rem;
 		color: var(--muted);
 	}
-	.rating {
+	.actions {
 		margin-top: 0.5rem;
 		display: flex;
-		gap: 0.35rem;
+		gap: 0.2rem;
 		align-items: center;
 	}
-	.rating button {
+	.actions .action {
 		border: 1px solid transparent;
 		background: transparent;
 		font-size: 0.9rem;
+		line-height: 1.3;
 		padding: 0.1rem 0.35rem;
 		border-radius: 0.4rem;
 		cursor: pointer;
 		opacity: 0.65;
+		color: var(--muted, #6b7280);
 	}
-	.rating button:hover {
+	.actions .action:hover {
 		opacity: 1;
 		background: var(--hover, rgba(128, 128, 128, 0.15));
+		color: var(--fg);
 	}
-	.rating button:disabled {
-		opacity: 0.4;
+	.actions .action:disabled {
+		opacity: 0.35;
 		cursor: default;
 	}
-	.rating button.active {
+	.actions .action.active {
 		opacity: 1;
 		border-color: currentColor;
+		color: var(--fg);
 	}
 	.rating-error {
 		color: #ef4444;

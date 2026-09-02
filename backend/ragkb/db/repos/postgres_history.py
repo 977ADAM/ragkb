@@ -227,6 +227,19 @@ class PostgresHistory:
             await session.commit()
         return result.rowcount > 0
 
+    async def remove_message(self, message_id: int, user: str) -> bool:
+        async with self.session_factory() as session:
+            result = await session.execute(
+                delete(MessageRow).where(
+                    MessageRow.id == message_id,
+                    MessageRow.conversation_id.in_(
+                        select(ConversationRow.id).where(ConversationRow.owner == user)
+                    ),
+                )
+            )
+            await session.commit()
+        return result.rowcount > 0
+
     async def cleanup(self, now: datetime | None = None, batch: int = 500) -> int:
         now = now or utcnow()
         due_before = now - timedelta(days=self.CLEANUP_INTERVAL_DAYS)
