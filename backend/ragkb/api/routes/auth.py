@@ -54,5 +54,7 @@ async def signout(
 async def me(request: Request) -> dict[str, str]:
     if request.app.state.auth.mode == "session":
         svc = get_auth_service(request)
-        return {"username": await svc.me(raw_cookie(request))}
-    return {"username": (await current_user(request)).name}
+        username, role = await svc.me(raw_cookie(request))
+        return {"username": username, "role": role}
+    user = await current_user(request)
+    return {"username": user.name, "role": user.role}

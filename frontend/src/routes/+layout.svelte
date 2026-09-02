@@ -23,18 +23,21 @@
 	let { children } = $props();
 
 	const authPage = $derived(page.url.pathname === '/login' || page.url.pathname === '/register');
+	const adminPage = $derived(
+		page.url.pathname === '/admin' || page.url.pathname.startsWith('/admin/')
+	);
 
 	// start() не зовём на /login и /register. После goto('/new') раскладка
 	// не перемонтируется — поэтому следим за путём, а не только onMount.
 	// chat.started не даёт эффекту зациклиться от собственного присвоения.
 	$effect(() => {
-		if (authPage) return;
+		if (authPage || adminPage) return;
 		start();
 	});
 
 	onMount(() => {
 		const refresh = () => {
-			if (document.visibilityState === 'visible' && !chat.busy && !authPage) {
+			if (document.visibilityState === 'visible' && !chat.busy && !authPage && !adminPage) {
 				loadConversations({ consistency: 'eventual' });
 			}
 		};
@@ -101,7 +104,7 @@
 	<title>База знаний</title>
 </svelte:head>
 
-{#if authPage}
+{#if authPage || adminPage}
 	{@render children()}
 {:else}
 <div class="app">
@@ -178,6 +181,9 @@
 					{/each}
 				</select>
 			</label>
+			{#if chat.isAdmin}
+				<a href="/admin">Админ</a>
+			{/if}
 			{#if chat.user?.name}
 				<span>{chat.user.name}</span>
 				<button type="button" onclick={logout}>Выйти</button>

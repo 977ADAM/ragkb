@@ -35,7 +35,9 @@ export const chat = $state({
 	// хотя их просто негде хранить.
 	historyEnabled: true,
 	canReindex: false,
-	/** @type {{name: string, is_admin?: boolean} | null} */
+	/** Ссылка «Админ» в шапке: роль из bootstrap (`is_admin` или `role`). */
+	isAdmin: false,
+	/** @type {{name: string, is_admin?: boolean, role?: string} | null} */
 	user: null,
 	/** @type {{id: string, name: string, description?: string} | null} */
 	organization: null,
@@ -75,6 +77,7 @@ export async function start() {
 			return;
 		}
 		chat.user = body.user ?? null;
+		chat.isAdmin = Boolean(body.user?.is_admin) || body.user?.role === 'admin';
 		chat.organization = body.organization ?? null;
 		chat.models = body.models ?? [];
 		chat.model = (chat.models.find((m) => m.is_default) ?? chat.models[0])?.id ?? '';

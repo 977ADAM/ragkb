@@ -24,6 +24,7 @@ class User:
     name: str
     email: str = ""
     groups: tuple[str, ...] = ()
+    role: str = "user"
 
     def in_group(self, group: str) -> bool:
         return group in self.groups
@@ -68,7 +69,7 @@ async def current_user(request: Request) -> User:
         row = await accounts.user_for_token_hash(digest)
         if row is None:
             raise Unauthenticated("Не аутентифицирован")
-        return User(name=row[1])
+        return User(name=row[1], role=row[2])
     user = user_from_headers(request.headers, cfg)
     if user is None:
         raise Unauthenticated("Не аутентифицирован")
@@ -86,6 +87,10 @@ async def require_admin(request: Request) -> User:
     cfg: AuthConfig = request.app.state.auth
     user = await current_user(request)
     if cfg.mode == "disabled":
+        return user
+    if cfg.mode == "session":
+        if user.role != "admin":
+            raise Forbidden("Требуется роль администратора")
         return user
     if not user.in_group(cfg.admin_group):
         raise Forbidden(f"Требуется членство в группе «{cfg.admin_group}»")

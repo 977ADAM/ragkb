@@ -58,8 +58,10 @@ class BootstrapService:
         self.history_enabled = history_enabled
 
     async def app_start(self, user: User, session_id: UUID) -> BootstrapResponse:
-        is_admin = self.cfg.auth.mode == "disabled" or user.in_group(
-            self.cfg.auth.admin_group
+        is_admin = (
+            self.cfg.auth.mode == "disabled"
+            or (self.cfg.auth.mode == "session" and user.role == "admin")
+            or user.in_group(self.cfg.auth.admin_group)
         )
         try:
             organization = self.organization.get()

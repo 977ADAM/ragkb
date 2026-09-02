@@ -56,7 +56,10 @@ def test_me_disabled_without_database(tmp_path: Path) -> None:
     cfg.store.backend = "numpy"
     cfg.index_dir = str(tmp_path / "idx")
     with TestClient(create_app(cfg)) as client:
-        assert client.get("/auth/me").json() == {"username": "anonymous"}
+        assert client.get("/auth/me").json() == {
+            "username": "anonymous",
+            "role": "user",
+        }
         assert client.get("/health").status_code == 200
 
 
@@ -71,13 +74,17 @@ def test_alembic_sync_url_sqlite_and_postgres() -> None:
 
 
 def test_session_auth_on_sqlite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from alembic import command
+    from alembic.config import Config as AlembicConfig
     from fastapi.testclient import TestClient
-    from helpers import migrate
+    from helpers import BACKEND_ROOT
 
     db = tmp_path / "ragkb.sqlite3"
     url = f"sqlite+aiosqlite:///{db}"
+    cfg_alembic = AlembicConfig(str(BACKEND_ROOT / "alembic.ini"))
+    cfg_alembic.set_main_option("script_location", str(BACKEND_ROOT / "migrations"))
     monkeypatch.setenv("RAGKB_DATABASE_URL", url)
-    migrate()
+    command.upgrade(cfg_alembic, "head")
     cfg = Config()
     cfg.database_url = url
     cfg.auth.mode = "session"
@@ -90,4 +97,4 @@ def test_session_auth_on_sqlite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         )
         assert r.status_code == 200
         assert r.json() == {"username": "ada"}
-        assert client.get("/auth/me").json() == {"username": "ada"}
+        assert client.get("/auth/me").json() == {"username": "ada", "role": "user"}

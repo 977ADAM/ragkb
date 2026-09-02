@@ -20,4 +20,4 @@ jobs:
           cd /opt/ragkb
           git fetch origin
           git reset --hard origin/main
-          docker compose up -d --build postgres migrate rag frontend
+          docker compose up -d --build postgres migrate ensure-admin rag frontend

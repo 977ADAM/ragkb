@@ -19,6 +19,9 @@ class UserRow(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=func.now()
     )
+    role: Mapped[str] = mapped_column(
+        Text, nullable=False, default="user", server_default="user"
+    )
 
     def to_domain(self) -> User:
         return User(
@@ -26,6 +29,7 @@ class UserRow(Base):
             username=self.username,
             password_hash=self.password_hash,
             created_at=self.created_at,
+            role=self.role,
         )
 
     @classmethod
@@ -35,6 +39,7 @@ class UserRow(Base):
             username=user.username,
             password_hash=user.password_hash,
             created_at=user.created_at,
+            role=user.role,
         )
 
 
