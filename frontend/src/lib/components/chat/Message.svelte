@@ -186,7 +186,7 @@
 		padding: 0;
 		margin: 0;
 		font: inherit;
-		color: var(--accent, #1d4ed8);
+		color: var(--accent);
 		cursor: pointer;
 		text-decoration: underline;
 		text-underline-offset: 2px;
@@ -208,12 +208,12 @@
 		}
 	}
 	.error {
-		color: #ef4444;
+		color: var(--error);
 		margin: 0.4rem 0 0;
 		font-size: 0.9rem;
 	}
 	.warning {
-		color: #d97706;
+		color: var(--warning);
 		margin: 0.4rem 0 0;
 		font-size: 0.9rem;
 	}
@@ -275,7 +275,7 @@
 		color: var(--fg);
 	}
 	.rating-error {
-		color: #ef4444;
+		color: var(--error);
 		font-size: 0.8rem;
 	}
 </style>

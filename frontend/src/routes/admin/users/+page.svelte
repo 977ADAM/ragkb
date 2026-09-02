@@ -113,7 +113,7 @@
 		border-bottom: 1px solid var(--line, #d1d5db);
 	}
 	.error {
-		color: #b91c1c;
+		color: var(--error);
 	}
 	.muted {
 		color: var(--muted, #6b7280);

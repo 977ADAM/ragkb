@@ -106,12 +106,12 @@
 		margin: 0;
 	}
 	dd.missing {
-		color: #b45309;
+		color: var(--warning);
 	}
 	.snippet {
 		margin: 0;
 		white-space: pre-wrap;
-		background: var(--mine, #eef2ff);
+		background: var(--mine);
 		border-radius: 0.4rem;
 		padding: 0.6rem 0.75rem;
 		font-size: 0.9rem;

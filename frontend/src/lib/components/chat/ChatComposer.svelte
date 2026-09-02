@@ -151,10 +151,10 @@
 		width: 0.5rem;
 		height: 0.5rem;
 		border-radius: 50%;
-		background: #22c55e;
+		background: var(--accent);
 	}
 	.composer[data-status='busy'] .status-dot {
-		background: #f59e0b;
+		background: var(--warning);
 		animation: blink 1s steps(2) infinite;
 	}
 	@keyframes blink {
@@ -218,11 +218,14 @@
 	.composer-bar > button[type='submit'] {
 		font: inherit;
 		padding: 0.5rem 0.9rem;
-		border: 1px solid var(--line);
+		border: 1px solid var(--accent);
 		border-radius: 0.5rem;
-		background: var(--panel);
-		color: inherit;
+		background: var(--accent);
+		color: var(--accent-contrast);
 		cursor: pointer;
+	}
+	.composer-bar > button[type='submit']:hover:not(:disabled) {
+		filter: brightness(1.08);
 	}
 	button:disabled {
 		opacity: 0.5;

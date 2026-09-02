@@ -20,7 +20,7 @@
 
 <style>
 	.fatal {
-		color: #ef4444;
+		color: var(--error);
 		margin: 0.4rem 0 0;
 		font-size: 0.9rem;
 	}

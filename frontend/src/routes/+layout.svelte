@@ -8,7 +8,6 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import favicon from '$lib/assets/favicon.svg';
 	import {
 		chat,
 		start,
@@ -100,7 +99,7 @@
 </script>
 
 <svelte:head>
-	<link rel="icon" href={favicon} />
+	<link rel="icon" href="/logo.png" />
 	<title>База знаний</title>
 </svelte:head>
 
@@ -168,6 +167,7 @@
 
 	<main>
 		<header>
+			<img class="logo" src="/logo.png" alt="" width="28" height="28" />
 			<h1>
 				{chat.organization?.name
 					? `База знаний — ${chat.organization.name}`
@@ -208,21 +208,33 @@
 	   и в тёмной теме чёрный текст ложится на чёрный фон. */
 	:global(html) {
 		color-scheme: light dark;
-		--bg: #ffffff;
-		--fg: #111827;
-		--muted: #6b7280;
-		--panel: #f3f4f6;
-		--mine: #dbeafe;
-		--line: #d1d5db;
+		/* Дружелюбная красная палитра: тёплый фон, «клубничные» акценты,
+		   без агрессивно-сигнальных заливок. */
+		--bg: #fff8f6;
+		--fg: #411414;
+		--muted: #a66a63;
+		--panel: #fdeae5;
+		--mine: #ffd9d2;
+		--line: #eec4bb;
+		--accent: #d64541;
+		--accent-soft: #fbe3e0;
+		--error: #c0392b;
+		--warning: #a9741e;
+		--accent-contrast: #fff;
 	}
 	@media (prefers-color-scheme: dark) {
 		:global(html) {
-			--bg: #111315;
-			--fg: #e5e7eb;
-			--muted: #9ca3af;
-			--panel: #1f2226;
-			--mine: #1e3a5f;
-			--line: #374151;
+			--bg: #221313;
+			--fg: #f3e3e0;
+			--muted: #c2958d;
+			--panel: #35211e;
+			--mine: #5e2621;
+			--line: #5a342e;
+			--accent: #f07770;
+			--accent-soft: #4c2a26;
+			--error: #f0807a;
+			--warning: #e0a94a;
+			--accent-contrast: #3a1512;
 		}
 	}
 	:global(body) {
@@ -314,8 +326,13 @@
 	header {
 		display: flex;
 		align-items: center;
-		gap: 1rem;
+		gap: 0.6rem;
 		flex-wrap: wrap;
+	}
+	.logo {
+		flex: none;
+		border-radius: 0.4rem;
+		display: block;
 	}
 	h1 {
 		font-size: 1.25rem;
@@ -324,6 +341,23 @@
 	label {
 		font-size: 0.85rem;
 		color: var(--muted);
+	}
+	header a {
+		color: var(--accent);
+		font-size: 0.9rem;
+	}
+	header button {
+		font: inherit;
+		padding: 0.4rem 0.8rem;
+		border: 1px solid var(--line);
+		border-radius: 0.5rem;
+		background: var(--panel);
+		color: inherit;
+		cursor: pointer;
+	}
+	header button:not(:disabled):hover {
+		border-color: var(--accent);
+		color: var(--accent);
 	}
 	.empty {
 		color: var(--muted);

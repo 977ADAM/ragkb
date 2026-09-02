@@ -50,7 +50,7 @@
 		color: var(--muted, #6b7280);
 	}
 	.error {
-		color: #b91c1c;
+		color: var(--error);
 	}
 	a {
 		color: inherit;

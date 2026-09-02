@@ -94,7 +94,7 @@
 		vertical-align: top;
 	}
 	.down {
-		color: #b91c1c;
+		color: var(--error);
 	}
 	.answer {
 		max-width: 28rem;
@@ -102,7 +102,7 @@
 		font-size: 0.85rem;
 	}
 	.error {
-		color: #b91c1c;
+		color: var(--error);
 	}
 	.muted {
 		color: var(--muted, #6b7280);
