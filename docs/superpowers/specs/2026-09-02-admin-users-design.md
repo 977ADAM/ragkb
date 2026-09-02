@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Дата | 2026-09-02 |
-| Версия | 1 |
+| Версия | 2 |
 | Статус | в работе |
 | Автор | Cursor Grok 4.6 |
 
@@ -45,13 +45,43 @@
 Нельзя `DELETE` самого себя. Нельзя `DELETE` или `PATCH` на `user` последнего
 админа в таблице.
 
-## Сидер (этап Docker, не build)
+## Сидер (этап compose, не image build)
 
-Образ при `docker build` к БД не подключается. Сидер — сервис compose
-`ensure-admin`: образ `ragkb:local`, `depends_on: migrate` (completed),
-`command` запускает `python -m scripts.ensure_admin`, те же
-`RAGKB_DATABASE_URL` и `ADMIN_*`, что у `rag`. `rag` зависит от успешного
-завершения `ensure-admin`.
+Образ при `docker build` к БД не подключается. Сидер — одноразовый сервис
+`ensure-admin` (`restart: "no"`, тот же `image: ragkb:local`,
+`command: python -m scripts.ensure_admin`). Цепочка только через
+`condition: service_completed_successfully` (как `rag` сейчас ждёт
+`migrate`):
+
+```yaml
+  migrate:
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: alembic upgrade head
+    restart: "no"
+
+  ensure-admin:
+    image: ragkb:local
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      RAGKB_DATABASE_URL: postgresql+asyncpg://...
+      ADMIN_LOGIN: ${ADMIN_LOGIN:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    command: python -m scripts.ensure_admin
+    restart: "no"
+
+  rag:
+    depends_on:
+      ensure-admin:
+        condition: service_completed_successfully
+```
+
+`docker compose up` / `make up` / `deploy.sh` / Actions включают сервис
+`ensure-admin` в список (иначе `rag` не дождётся сидера). Не `service_started`
+и не `service_healthy` для migrate/ensure-admin: оба процесса завершаются.
 
 `get_admin_credentials()`: читает `ADMIN_LOGIN` и `ADMIN_PASSWORD` из
 окружения. Оба пустые или один пустой — вернуть `None` (сидер выходит 0, в
@@ -116,4 +146,5 @@ BFF: `frontend/src/routes/api/admin/` проксирует cookie.
 ## Согласованность
 
 Не противоречит публичному signup. Не переносит org в БД. Не добавляет
-метрики. Сидер не в `lifespan` API и не в слое `Dockerfile RUN`.
+метрики. Сидер не в `lifespan` API и не в `Dockerfile RUN`. Ожидание сидера
+только `service_completed_successfully`.
