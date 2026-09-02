@@ -15,6 +15,7 @@ ENV UV_COMPILE_BYTECODE=1 \
     PATH="/app/.venv/bin:$PATH"
 
 COPY pyproject.toml uv.lock ./
+# local-models: sentence-transformers + torch CPU (см. tool.uv.sources в pyproject).
 RUN uv sync --locked --extra migrations --extra local-models --no-install-project
 
 COPY ragkb ./ragkb
