@@ -11,7 +11,7 @@ from ragkb.api.deps.auth import (
 from ragkb.api.schemas.auth import Credentials
 from ragkb.platform.auth import current_user
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter()
 
 
 @router.post("/signup")
