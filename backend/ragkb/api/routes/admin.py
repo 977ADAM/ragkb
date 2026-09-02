@@ -1,6 +1,7 @@
 """HTTP-слой админки: пользователи, хаб организации, заглушка отчётов."""
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Request
@@ -13,6 +14,8 @@ from ragkb.domain.entities import User
 from ragkb.services.admin_users import AdminUsersService
 from ragkb.services.feedback import FeedbackService
 from ragkb.services.organization import OrganizationService
+
+log = logging.getLogger("ragkb")
 
 router = APIRouter(dependencies=[Depends(require_admin)])
 
@@ -44,8 +47,15 @@ async def list_users(svc: AdminUsers) -> dict[str, list[dict[str, str]]]:
 
 
 @router.patch("/users/{username}")
-async def patch_user(username: str, body: RoleBody, svc: AdminUsers) -> dict[str, str]:
-    return await svc.set_role(username, body.role)
+async def patch_user(
+    username: str,
+    body: RoleBody,
+    svc: AdminUsers,
+    actor: User = Depends(require_admin),
+) -> dict[str, str]:
+    result = await svc.set_role(username, body.role)
+    log.info("админ %s: роль %s -> %s", actor.name, username, body.role)
+    return result
 
 
 @router.delete("/users/{username}", status_code=204)
@@ -55,6 +65,7 @@ async def delete_user(
     user: User = Depends(require_admin),
 ) -> None:
     await svc.delete(username, user.name)
+    log.info("админ %s: удалён пользователь %s", user.name, username)
 
 
 @router.get("/organization")

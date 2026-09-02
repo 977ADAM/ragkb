@@ -40,10 +40,16 @@ def user_from_headers(headers: Headers, cfg: AuthConfig) -> User | None:
     )
 
 
+def _remember_user(request: Request, user: User) -> User:
+    """Кладёт пользователя в state — access-лог берёт его оттуда."""
+    request.state.user = user
+    return user
+
+
 async def current_user(request: Request) -> User:
     cfg: AuthConfig = request.app.state.auth
     if cfg.mode == "disabled":
-        return User(name=ANONYMOUS)
+        return _remember_user(request, User(name=ANONYMOUS))
     if cfg.mode == "session":
         raw = request.cookies.get(COOKIE_NAME)
         if not raw:
@@ -59,11 +65,11 @@ async def current_user(request: Request) -> User:
         row = await accounts.user_for_token_hash(digest)
         if row is None:
             raise Unauthenticated("Не аутентифицирован")
-        return User(name=row[1], role=row[2])
+        return _remember_user(request, User(name=row[1], role=row[2]))
     user = user_from_headers(request.headers, cfg)
     if user is None:
         raise Unauthenticated("Не аутентифицирован")
-    return user
+    return _remember_user(request, user)
 
 
 async def optional_user(request: Request) -> User | None:

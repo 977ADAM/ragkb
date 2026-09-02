@@ -49,3 +49,47 @@ def test_create_app_logs_disabled_auth_to_configured_dir(tmp_path: Path) -> None
     _flush()
     text = (log_dir / "app.log").read_text(encoding="utf-8")
     assert "аутентификация выключена" in text
+
+
+def test_access_log_writes_method_status_and_ms(tmp_path: Path) -> None:
+    """Каждый HTTP-запрос пишет access-строку с методом, статусом и временем."""
+    log_dir = tmp_path / "logs"
+    cfg = Config(logging=LoggingConfig(level="INFO", dir=str(log_dir)))
+    cfg.auth.mode = "disabled"
+    cfg.history.enabled = False
+    from fastapi.testclient import TestClient
+
+    with TestClient(create_app(cfg)) as client:
+        client.get("/health")
+        client.get("/definitely-missing-route")
+    _flush()
+    text = (log_dir / "app.log").read_text(encoding="utf-8")
+    assert "GET /health -> 200" in text
+    assert "GET /definitely-missing-route -> 404" in text
+    import re
+
+    assert re.search(r"-> 200 \(\d+ ms\)", text)
+
+
+def test_unhandled_exception_returns_json_500(tmp_path: Path) -> None:
+    """Неперехваченное исключение даёт JSON 500 и попадает в errors.log."""
+    log_dir = tmp_path / "logs"
+    cfg = Config(logging=LoggingConfig(level="INFO", dir=str(log_dir)))
+    cfg.auth.mode = "disabled"
+    cfg.history.enabled = False
+    from fastapi.testclient import TestClient
+
+    app = create_app(cfg)
+
+    @app.get("/boom")
+    async def boom() -> None:
+        raise RuntimeError("взрыв")
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        res = client.get("/boom")
+    assert res.status_code == 500
+    body = res.json()
+    assert body == {"detail": "Внутренняя ошибка сервера"}
+    _flush()
+    err = (log_dir / "errors.log").read_text(encoding="utf-8")
+    assert "необработанная ошибка" in err

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any, Literal
@@ -19,6 +20,8 @@ from ragkb.domain.ports import (
     SourceRegistry,
 )
 from ragkb.services.chat_cache import EventualCache
+
+log = logging.getLogger("ragkb")
 
 
 class ChatConversationsService:
@@ -259,6 +262,17 @@ class ChatConversationsService:
             if self.persist:
                 warnings.append("Ответ не сохранён в историю диалога")
 
+        elapsed_sec = round(time.time() - started, 2)
+        log.info(
+            "ответ готов: %s %s за %s с, источников %s, модель %s%s",
+            user,
+            cid,
+            elapsed_sec,
+            len(sources),
+            model,
+            ", warnings: " + "; ".join(warnings) if warnings else "",
+        )
+
         yield json.dumps(
             {
                 "type": "done",
@@ -266,7 +280,7 @@ class ChatConversationsService:
                 "message_id": saved if self.persist else None,
                 "sources": sources,
                 "warnings": warnings,
-                "elapsed_sec": round(time.time() - started, 2),
+                "elapsed_sec": elapsed_sec,
                 "model": model,
                 "truncated": truncated,
             },

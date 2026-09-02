@@ -1,6 +1,7 @@
 """HTTP диалогов."""
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
@@ -18,6 +19,8 @@ from ragkb.api.schemas.feedback import FeedbackBody
 from ragkb.domain.entities import User
 from ragkb.services.chat_conversations import ChatConversationsService
 from ragkb.services.feedback import FeedbackService
+
+log = logging.getLogger("ragkb")
 
 router = APIRouter()
 
@@ -94,6 +97,9 @@ async def rate_message(
     svc: FeedbackService = Depends(feedback_service),
 ) -> None:
     await svc.rate(user.name, cid, message_id, body.rating, body.comment)
+    log.info(
+        "оценка ответа: %s %s сообщение %s: %s", user.name, cid, message_id, body.rating
+    )
 
 
 @router.post("/organization/{organization_id}/chat_conversations/{cid}/messages")
@@ -136,4 +142,5 @@ async def regenerate_message(
         expand=req.expand,
         model=req.model,
     )
+    log.info("перегенерация ответа: %s %s сообщение %s", user.name, cid, message_id)
     return StreamingResponse(stream, media_type="application/x-ndjson; charset=utf-8")

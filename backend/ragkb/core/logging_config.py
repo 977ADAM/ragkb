@@ -56,7 +56,16 @@ def setup_logging(*, level: str = "INFO", log_dir: Path | str | None = None) -> 
         errors.setFormatter(formatter)
         root.addHandler(errors)
 
-    for name in ("httpx", "httpcore", "urllib3", "chromadb", "huggingface_hub"):
+    # Свои access-строки пишет middleware в app.py; логгер uvicorn.access
+    # только дублирует их в другом формате — глушим.
+    for name in (
+        "httpx",
+        "httpcore",
+        "urllib3",
+        "chromadb",
+        "huggingface_hub",
+        "uvicorn.access",
+    ):
         logging.getLogger(name).setLevel(logging.WARNING)
 
 

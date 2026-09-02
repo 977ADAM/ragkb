@@ -1,4 +1,6 @@
 """HTTP-слой auth: signup, signin, signout, me, profile, password."""
+import logging
+
 from fastapi import APIRouter, Request, Response
 
 from ragkb.api.deps import AuthSvc
@@ -11,6 +13,8 @@ from ragkb.api.deps.auth import (
 )
 from ragkb.api.schemas.auth import ChangePassword, Credentials
 from ragkb.core.errors import Forbidden
+
+log = logging.getLogger("ragkb")
 
 router = APIRouter()
 
@@ -25,6 +29,7 @@ async def signup(
     username, token = await svc.register(body.username, body.password)
     await svc.logout(raw_cookie(request))
     set_session_cookie(response, request, token)
+    log.info("регистрация: %s", username)
     return {"username": username}
 
 
@@ -38,6 +43,7 @@ async def signin(
     username, token = await svc.login(body.username, body.password)
     await svc.logout(raw_cookie(request))
     set_session_cookie(response, request, token)
+    log.info("вход: %s", username)
     return {"username": username}
 
 
@@ -47,8 +53,20 @@ async def signout(
     response: Response,
     svc: AuthSvc,
 ) -> None:
+    user = await optional_name(svc, raw_cookie(request))
     await svc.logout(raw_cookie(request))
     clear_session_cookie(response, request)
+    log.info("выход: %s", user or "без сессии")
+
+
+async def optional_name(svc, raw_token):
+    if not raw_token:
+        return None
+    try:
+        username, _role = await svc.me(raw_token)
+        return username
+    except Exception:
+        return None
 
 
 @router.get("/me")
@@ -86,6 +104,8 @@ async def change_password(
     """Смена пароля локального аккаунта. В proxy-режиме недоступна."""
     if request.app.state.auth.mode != "session":
         raise Forbidden("Смена пароля доступна только локальным аккаунтам")
+    username = await optional_name(svc, raw_cookie(request))
     await svc.change_password(
         raw_cookie(request), body.current_password, body.new_password
     )
+    log.info("смена пароля: %s", username or "неизвестно")
