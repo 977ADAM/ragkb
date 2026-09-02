@@ -47,14 +47,16 @@ class AuthService:
         return raw
 
     async def register(self, username: str, password: str) -> tuple[str, str]:
-        user_id = await self._store.create_user(username, hash_password(password))
+        user_id = await self._store.create_user(
+            username, hash_password(password), role="user"
+        )
         return username, await self._new_session(user_id)
 
     async def login(self, username: str, password: str) -> tuple[str, str]:
         row = await self._store.get_by_username(username)
         if row is None or not verify_password(password, row[2]):
             raise Unauthenticated("Неверный логин или пароль")
-        user_id, canonical, _ = row
+        user_id, canonical, _password_hash, _role = row
         return canonical, await self._new_session(user_id)
 
     async def logout(self, raw_token: str | None) -> None:
@@ -62,10 +64,10 @@ class AuthService:
             return
         await self._store.delete_session(_token_hash(raw_token))
 
-    async def me(self, raw_token: str | None) -> str:
+    async def me(self, raw_token: str | None) -> tuple[str, str]:
         if not raw_token:
             raise Unauthenticated("Не аутентифицирован")
         row = await self._store.user_for_token_hash(_token_hash(raw_token))
         if row is None:
             raise Unauthenticated("Не аутентифицирован")
-        return row[1]
+        return row[1], row[2]

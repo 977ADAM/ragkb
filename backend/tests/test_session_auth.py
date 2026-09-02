@@ -96,11 +96,48 @@ async def test_accounts_user_and_session() -> None:
     live_hash = f"hash1-{uuid.uuid4().hex}"
     expired_hash = f"old-{uuid.uuid4().hex}"
     await store.create_session(uid, live_hash, "2099-01-01T00:00:00+00:00")
-    assert await store.user_for_token_hash(live_hash) == (uid, username)
+    assert await store.user_for_token_hash(live_hash) == (uid, username, "user")
     await store.create_session(uid, expired_hash, "2000-01-01T00:00:00+00:00")
     assert await store.user_for_token_hash(expired_hash) is None
     await store.delete_session(live_hash)
     assert await store.user_for_token_hash(live_hash) is None
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_create_user_default_role_user(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from alembic import command
+    from alembic.config import Config as AlembicConfig
+    from helpers import BACKEND_ROOT
+
+    db = tmp_path / "ragkb.sqlite3"
+    url = f"sqlite+aiosqlite:///{db}"
+    cfg = AlembicConfig(str(BACKEND_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BACKEND_ROOT / "migrations"))
+    monkeypatch.setenv("RAGKB_DATABASE_URL", url)
+    command.upgrade(cfg, "head")
+    engine = make_engine(url)
+    store = PostgresAccounts(make_session_factory(engine))
+    await store.ready()
+    uid = await store.create_user("ada", hash_password("password1"))
+    row = await store.get_by_username("ada")
+    assert row is not None
+    assert row[0] == uid
+    assert row[-1] == "user"
+    listed = await store.list_users()
+    assert [(name, role) for name, role, _created in listed] == [("ada", "user")]
+    promoted = await store.set_role("ada", "admin")
+    assert promoted is not None
+    assert promoted[0] == "ada"
+    assert promoted[1] == "admin"
+    assert await store.count_admins() == 1
+    assert await store.set_role("nobody", "admin") is None
+    assert await store.delete_user("ada") is True
+    assert await store.get_by_username("ada") is None
+    assert await store.delete_user("ada") is False
+    assert await store.count_admins() == 0
     await engine.dispose()
 
 
@@ -122,7 +159,7 @@ def test_register_login_me_logout_bootstrap(indexed):
         assert r.status_code == 200
         assert r.json() == {"username": "ada"}
         assert r.cookies.get("ragkb_session")
-        assert client.get("/auth/me").json() == {"username": "ada"}
+        assert client.get("/auth/me").json() == {"username": "ada", "role": "user"}
         boot = client.get(
             "/bootstrap",
             params={"session_id": "00000000-0000-4000-8000-000000000002"},
@@ -169,13 +206,13 @@ def test_failed_login_keeps_existing_session(indexed):
         )
         assert unknown.status_code == 401
         assert client.get("/auth/me").status_code == 200
-        assert client.get("/auth/me").json() == {"username": "ada"}
+        assert client.get("/auth/me").json() == {"username": "ada", "role": "user"}
         wrong = client.post(
             "/auth/signin",
             json={"username": "bob", "password": "wrongpass"},
         )
         assert wrong.status_code == 401
-        assert client.get("/auth/me").json() == {"username": "ada"}
+        assert client.get("/auth/me").json() == {"username": "ada", "role": "user"}
 
 
 def test_duplicate_register_keeps_existing_session(indexed):
@@ -183,7 +220,7 @@ def test_duplicate_register_keeps_existing_session(indexed):
         body = {"username": "ada", "password": "password1"}
         assert client.post("/auth/signup", json=body).status_code == 200
         assert client.post("/auth/signup", json=body).status_code == 409
-        assert client.get("/auth/me").json() == {"username": "ada"}
+        assert client.get("/auth/me").json() == {"username": "ada", "role": "user"}
 
 
 def test_short_password_rejected(indexed):
