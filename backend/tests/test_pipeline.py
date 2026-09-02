@@ -10,11 +10,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
 
 from ragkb.core.bm25 import BM25Index
-from ragkb.core.chunking import chunk_document
+from ragkb.core.chunking import Chunk, ChunkConfig, chunk_document
 from ragkb.core.config import ChunkConfig, Config, EmbeddingConfig
 from ragkb.core.embeddings import TfidfEmbedder
 from ragkb.core.loaders import Block, Document, load
-from ragkb.core.retrieval import reciprocal_rank_fusion
+from ragkb.core.pipeline import RAGPipeline
+from ragkb.core.retrieval import Hit, reciprocal_rank_fusion
 from ragkb.core.text import stem, tokenize
 
 # ----------------------------------------------------------------- нормализация
@@ -87,6 +88,49 @@ def test_citation_does_not_duplicate_title():
     ])
     chunk = chunk_document(doc, ChunkConfig(min_size=1))[0]
     assert chunk.citation().count("Регламент") == 1
+
+
+def _chunk(text: str, *, title: str = "Документ", source: str = "data/docs/a.md") -> Chunk:
+    return Chunk(
+        chunk_id="c1",
+        doc_id="d1",
+        text=text,
+        embed_text=text,
+        source=source,
+        title=title,
+        section=f"{title} > Раздел",
+        page=3,
+        position=0,
+    )
+
+
+def test_cited_sources_carry_snapshot_text():
+    from ragkb.core.pipeline import RAGPipeline
+
+    hits = [
+        Hit(chunk=_chunk("Первый фрагмент про отпуск."), score=0.9),
+        Hit(chunk=_chunk("Второй фрагмент про больничный.", title="Медицина"), score=0.8),
+        Hit(chunk=_chunk("Третий фрагмент про командировки.", title="Поездки"), score=0.7),
+    ]
+    sources = RAGPipeline._cited_sources("Ответ: [2] и [1].", hits)
+    assert [s["n"] for s in sources] == [1, 2]
+    for s in sources:
+        assert "text" in s
+    by_n = {s["n"]: s for s in sources}
+    assert by_n[1]["text"] == "Первый фрагмент про отпуск."
+    assert by_n[1]["citation"] == "Документ / Раздел / с. 3"
+    assert by_n[2]["source"] == "data/docs/a.md"
+
+
+def test_cited_sources_skip_uncited_hits():
+    from ragkb.core.pipeline import RAGPipeline
+
+    hits = [
+        Hit(chunk=_chunk("Цитируется."), score=0.9),
+        Hit(chunk=_chunk("Не цитируется."), score=0.8),
+    ]
+    sources = RAGPipeline._cited_sources("Только [1].", hits)
+    assert [s["n"] for s in sources] == [1]
 
 
 # ------------------------------------------------------------------------ BM25

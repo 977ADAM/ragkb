@@ -8,7 +8,8 @@
  */
 
 /**
- * @typedef {{source?: string, title?: string, available?: boolean}} Source
+ * @typedef {{n?: number, citation?: string, source?: string, page?: number | null,
+ *   text?: string, available?: boolean | undefined}} Source
  * @typedef {{id?: number, role: 'user' | 'assistant', text: string,
  *   sources?: Source[], warnings?: string[], elapsed?: number | null,
  *   model?: string, error?: string, feedback?: 'up' | 'down' | null}} Message

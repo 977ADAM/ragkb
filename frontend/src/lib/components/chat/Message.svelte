@@ -1,16 +1,47 @@
 <script>
 	import { rateMessage } from '$lib/chat.svelte.js';
+	import SourcesModal from './SourcesModal.svelte';
 
 	/**
 	 * Одна реплика: текст, ошибка потока, предупреждения, источники, мета.
 	 *
-	 * @typedef {{source?: string, title?: string, available?: boolean}} Source
+	 * @typedef {{n?: number, citation?: string, source?: string, page?: number | null,
+	 *   text?: string, available?: boolean | undefined}} Source
 	 * @typedef {{id?: number, role: 'user' | 'assistant', text: string,
 	 *   sources?: Source[], warnings?: string[], elapsed?: number | null,
 	 *   model?: string, error?: string, feedback?: 'up' | 'down' | null}} Message
 	 * @type {{ message: Message, streaming?: boolean }}
 	 */
 	let { message, streaming = false } = $props();
+
+	/** @type {Source | null} */
+	let openSource = $state(null);
+
+	/**
+	 * Разбивает текст ответа на сегменты: обычный текст и маркеры [N].
+	 *
+	 * @returns {Array<{ kind: 'text', text: string } | { kind: 'cite', n: number, text: string }>}
+	 */
+	function segments() {
+		const parts = (message.text ?? '').split(/(\[\d+\])/g);
+		/** @type {Array<{ kind: 'text', text: string } | { kind: 'cite', n: number, text: string }>} */
+		const out = [];
+		for (const part of parts) {
+			if (!part) continue;
+			const m = part.match(/^\[(\d+)\]$/);
+			if (m && message.sources?.some((s) => s.n === Number(m[1]))) {
+				out.push({ kind: 'cite', n: Number(m[1]), text: part });
+			} else {
+				out.push({ kind: 'text', text: part });
+			}
+		}
+		return out.length ? out : [{ kind: 'text', text: message.text ?? '' }];
+	}
+
+	/** @param {number} n */
+	function openByN(n) {
+		openSource = message.sources?.find((s) => s.n === n) ?? null;
+	}
 
 	let ratingBusy = $state(false);
 	let ratingError = $state('');
@@ -26,10 +57,32 @@
 	}
 </script>
 
+{#if openSource}
+	<SourcesModal source={openSource} onclose={() => (openSource = null)} />
+{/if}
+
 <article class={message.role}>
-	<p class="text">
-		{message.text}{#if streaming}<span class="caret"></span>{/if}
-	</p>
+	{#if streaming || message.role === 'user'}
+		<p class="text">
+			{message.text}{#if streaming}<span class="caret"></span>{/if}
+		</p>
+	{:else}
+		<p class="text">
+			{#each segments() as segment, i (i)}
+				{#if segment.kind === 'cite'}
+					<button
+						type="button"
+						class="cite"
+						onclick={() => openByN(segment.n)}
+						aria-label={`Источник ${segment.n}`}
+					>{segment.text}</button
+					>
+				{:else}
+					{segment.text}
+				{/if}
+			{/each}
+		</p>
+	{/if}
 	{#if message.error}
 		<p class="error">{message.error}</p>
 	{/if}
@@ -40,7 +93,9 @@
 		<ol class="sources">
 			{#each message.sources as source, s (s)}
 				<li class:missing={source.available === false}>
-					{source.title || source.source}
+					<button type="button" class="source-link" onclick={() => (openSource = source)}>
+						{source.citation || source.source}
+					</button>
 					{#if source.available === false}<span> — документа больше нет в базе</span>{/if}
 				</li>
 			{/each}
@@ -85,6 +140,20 @@
 		margin: 0;
 		white-space: pre-wrap;
 	}
+	.cite {
+		border: none;
+		background: transparent;
+		padding: 0;
+		margin: 0;
+		font: inherit;
+		color: var(--accent, #1d4ed8);
+		cursor: pointer;
+		text-decoration: underline;
+		text-underline-offset: 2px;
+	}
+	.cite:hover {
+		text-decoration-thickness: 2px;
+	}
 	.caret {
 		display: inline-block;
 		width: 0.5ch;
@@ -116,6 +185,18 @@
 	}
 	.sources .missing {
 		color: var(--muted);
+	}
+	.source-link {
+		border: none;
+		background: transparent;
+		padding: 0;
+		margin: 0;
+		font: inherit;
+		color: inherit;
+		cursor: pointer;
+		text-align: left;
+		text-decoration: underline;
+		text-underline-offset: 2px;
 	}
 	.meta {
 		margin: 0.4rem 0 0;

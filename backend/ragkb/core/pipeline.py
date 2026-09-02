@@ -384,7 +384,11 @@ class RAGPipeline:
 
     @staticmethod
     def _cited_sources(text: str, hits: list[Hit]) -> list[dict[str, Any]]:
-        """Собирает список реально процитированных источников по маркерам [N]."""
+        """Собирает список реально процитированных источников по маркерам [N].
+
+        `text` — снапшот чанка на момент ответа (то, что видел LLM):
+        если документ позже удалили, фрагмент остаётся виден.
+        """
         numbers = {int(n) for n in re.findall(r"\[(\d+)\]", text)}
         out = []
         for i, hit in enumerate(hits, start=1):
@@ -396,6 +400,7 @@ class RAGPipeline:
                         "source": hit.chunk.source,
                         "page": hit.chunk.page,
                         "score": round(hit.score, 4),
+                        "text": hit.chunk.text,
                     }
                 )
         return out

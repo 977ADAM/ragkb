@@ -49,6 +49,8 @@ def test_create_conversation_then_message_stream(client):
     assert lines[-1]["type"] == "done"
     assert lines[-1]["truncated"] is False
     assert "error" not in {e["type"] for e in lines}
+    for source in lines[-1].get("sources", []):
+        assert "text" in source, "источник несёт фрагмент текста"
     body = client.get(f"/organization/acme/chat_conversations/{cid}").json()
     roles = [m["role"] for m in body["messages"]]
     assert roles[:2] == ["user", "assistant"]
