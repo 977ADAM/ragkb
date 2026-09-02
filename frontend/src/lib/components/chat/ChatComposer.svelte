@@ -62,6 +62,19 @@
 					<span class="status-dot"></span>
 					<span class="status-text">{chat.busy ? 'Отвечает…' : 'Готов'}</span>
 				</div>
+				{#if chat.models.length > 0}
+					<label class="model">
+						<span class="sr-only">Модель</span>
+						<select
+							bind:value={chat.model}
+							disabled={chat.busy || chat.models.length === 0}
+						>
+							{#each chat.models as item (item.id)}
+								<option value={item.id}>{item.display_name || item.id}</option>
+							{/each}
+						</select>
+					</label>
+				{/if}
 				<span class="char-counter" aria-live="polite">
 					{chat.question.length} / {CHAR_LIMIT}
 				</span>
@@ -166,6 +179,21 @@
 		font-size: 0.75rem;
 		color: var(--muted);
 		font-variant-numeric: tabular-nums;
+	}
+	.model select {
+		font: inherit;
+		font-size: 0.85rem;
+		padding: 0.3rem 0.5rem;
+		border: 1px solid var(--line);
+		border-radius: 0.45rem;
+		background: var(--panel);
+		color: inherit;
+		cursor: pointer;
+		max-width: 14rem;
+	}
+	.model select:disabled {
+		opacity: 0.6;
+		cursor: default;
 	}
 	.history {
 		position: relative;

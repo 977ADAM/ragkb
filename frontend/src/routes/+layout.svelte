@@ -179,14 +179,6 @@
 					? `База знаний — ${chat.organization.name}`
 					: 'База знаний'}
 			</h1>
-			<label>
-				Модель
-				<select bind:value={chat.model} disabled={chat.busy || chat.models.length === 0}>
-					{#each chat.models as item (item.id)}
-						<option value={item.id}>{item.display_name || item.id}</option>
-					{/each}
-				</select>
-			</label>
 			{#if chat.isAdmin}
 				<a href="/admin">Админ</a>
 			{/if}
@@ -379,10 +371,6 @@
 	h1 {
 		font-size: 1.25rem;
 		margin: 0 auto 0 0;
-	}
-	label {
-		font-size: 0.85rem;
-		color: var(--muted);
 	}
 	header a {
 		color: var(--accent);
