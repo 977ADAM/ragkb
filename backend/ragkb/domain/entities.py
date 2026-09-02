@@ -11,6 +11,7 @@ class User:
     username: str
     password_hash: str
     created_at: datetime | None = None
+    role: str = "user"
 
 
 @dataclass

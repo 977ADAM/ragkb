@@ -125,6 +125,8 @@ def test_each_alembic_revision_creates_one_table() -> None:
     found: list[str] = []
     for path in sorted((MIGRATIONS / "versions").glob("*.py")):
         names = set(re.findall(r"CREATE TABLE (\w+)", path.read_text(), re.I))
+        if not names:
+            continue
         assert len(names) == 1, f"{path.name} создаёт {sorted(names)}"
         found.append(names.pop())
     assert found == [
@@ -134,3 +136,9 @@ def test_each_alembic_revision_creates_one_table() -> None:
         "users",
         "sessions",
     ]
+
+
+def test_revision_0006_alters_users_role() -> None:
+    text = (MIGRATIONS / "versions" / "0006_user_role.py").read_text()
+    assert "role" in text.lower()
+    assert "0005_sessions" in text
