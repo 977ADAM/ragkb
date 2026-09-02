@@ -56,7 +56,10 @@ def test_me_disabled_without_database(tmp_path: Path) -> None:
     cfg.store.backend = "numpy"
     cfg.index_dir = str(tmp_path / "idx")
     with TestClient(create_app(cfg)) as client:
-        assert client.get("/auth/me").json() == {"username": "anonymous"}
+        assert client.get("/auth/me").json() == {
+            "username": "anonymous",
+            "role": "user",
+        }
         assert client.get("/health").status_code == 200
 
 

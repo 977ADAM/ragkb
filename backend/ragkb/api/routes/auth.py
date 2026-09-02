@@ -56,4 +56,5 @@ async def me(request: Request) -> dict[str, str]:
         svc = get_auth_service(request)
         username, role = await svc.me(raw_cookie(request))
         return {"username": username, "role": role}
-    return {"username": (await current_user(request)).name}
+    user = await current_user(request)
+    return {"username": user.name, "role": user.role}

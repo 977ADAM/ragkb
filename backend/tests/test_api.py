@@ -29,8 +29,10 @@ def test_organization_and_bootstrap(client):
     boot = client.get("/bootstrap", params={"session_id": sid}).json()
     assert boot["session_id"] == sid
     assert boot["user"]["name"] == ANONYMOUS
+    assert boot["user"]["is_admin"] is True
     assert boot["organization"]["id"] == "acme"
     assert boot["capabilities"]["history"] is True
+    assert boot["capabilities"]["reindex"] is True
 
 
 def test_create_conversation_then_message_stream(client):

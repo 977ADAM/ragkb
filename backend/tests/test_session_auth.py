@@ -166,6 +166,9 @@ def test_register_login_me_logout_bootstrap(indexed):
         )
         assert boot.status_code == 200
         assert boot.json()["user"]["name"] == "ada"
+        assert boot.json()["user"]["is_admin"] is False
+        assert boot.json()["capabilities"]["reindex"] is False
+        assert client.post("/index/rebuild").status_code == 403
         client.post("/auth/signout")
         assert client.get("/auth/me").status_code == 401
         assert client.get("/health").status_code == 200
@@ -238,10 +241,37 @@ def test_bootstrap_unauthorized_without_cookie(indexed):
         assert r.status_code == 401
 
 
+def test_session_admin_rebuild_and_bootstrap(indexed):
+    with _session_client(indexed) as client:
+        assert (
+            client.post(
+                "/auth/signup",
+                json={"username": "ada", "password": "password1"},
+            ).status_code
+            == 200
+        )
+        engine = create_engine(alembic_sync_url(database_url()))
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE users SET role = 'admin' WHERE username = 'ada'"))
+        engine.dispose()
+        assert client.get("/auth/me").json() == {"username": "ada", "role": "admin"}
+        assert client.post("/index/rebuild").status_code == 200
+        boot = client.get(
+            "/bootstrap",
+            params={"session_id": "00000000-0000-4000-8000-000000000003"},
+        )
+        assert boot.status_code == 200
+        assert boot.json()["user"]["is_admin"] is True
+        assert boot.json()["capabilities"]["reindex"] is True
+
+
 def test_me_disabled_is_anonymous(indexed):
     indexed.auth.mode = "disabled"
     with TestClient(create_app(indexed)) as client:
-        assert client.get("/auth/me").json() == {"username": "anonymous"}
+        assert client.get("/auth/me").json() == {
+            "username": "anonymous",
+            "role": "user",
+        }
 
 
 def test_session_history_disabled_does_not_persist_chats(indexed):
