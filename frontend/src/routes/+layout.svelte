@@ -162,6 +162,12 @@
 					</button>
 				{/if}
 			</nav>
+			{#if chat.user?.name}
+				<div class="me">
+					<a href="/profile" class="username" title="Профиль">{chat.user.name}</a>
+					<button type="button" class="logout" onclick={logout}>Выйти</button>
+				</div>
+			{/if}
 		</aside>
 	{/if}
 
@@ -184,7 +190,7 @@
 			{#if chat.isAdmin}
 				<a href="/admin">Админ</a>
 			{/if}
-			{#if chat.user?.name}
+			{#if !chat.historyEnabled && chat.user?.name}
 				<a href="/profile" class="username" title="Профиль">{chat.user.name}</a>
 				<button type="button" onclick={logout}>Выйти</button>
 			{/if}
@@ -264,6 +270,42 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.25rem;
+	}
+	/* Профиль прижат к низу колонки: список диалогов может быть коротким. */
+	.me {
+		margin-top: auto;
+		padding-top: 0.5rem;
+		border-top: 1px solid var(--line);
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.9rem;
+	}
+	.me .username {
+		flex: 1;
+		min-width: 0;
+		color: inherit;
+		font-weight: 600;
+		text-decoration: none;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.me .username:hover {
+		color: var(--accent);
+	}
+	.me .logout {
+		font: inherit;
+		padding: 0.3rem 0.6rem;
+		border: 1px solid var(--line);
+		border-radius: 0.45rem;
+		background: var(--panel);
+		color: inherit;
+		cursor: pointer;
+	}
+	.me .logout:hover {
+		border-color: var(--accent);
+		color: var(--accent);
 	}
 	/* На узком экране колонка диалогов съедала половину ширины и переписку
 	   читать становилось нечем — там она превращается в полосу сверху. */
