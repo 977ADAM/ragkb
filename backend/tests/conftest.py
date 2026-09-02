@@ -10,7 +10,7 @@ from sqlalchemy import create_engine, text
 
 from ragkb.core.config import Config, OrganizationConfig
 from ragkb.core.pipeline import build_index
-from ragkb.platform.app import create_app
+from ragkb.app import create_app
 
 
 @pytest.fixture(scope="session", autouse=True)

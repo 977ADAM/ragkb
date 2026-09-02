@@ -10,13 +10,12 @@ from helpers import alembic_sync_url, database_url, migrate
 from sqlalchemy import create_engine, text
 
 from ragkb.core.config import LLMConfig
-from ragkb.features.chat_conversations.ephemeral import EphemeralHistory
-from ragkb.features.chat_conversations.ports import make_title
-from ragkb.features.chat_conversations.postgres import PostgresHistory
-from ragkb.features.chat_conversations.service import ChatConversationsService
-from ragkb.platform.auth import User
-from ragkb.platform.db import EXPECTED_REVISION, make_engine, make_session_factory
-from ragkb.platform.errors import NotFound
+from ragkb.core.database import EXPECTED_REVISION, make_engine, make_session_factory
+from ragkb.core.errors import NotFound
+from ragkb.db.repos.ephemeral_history import EphemeralHistory
+from ragkb.db.repos.postgres_history import PostgresHistory
+from ragkb.domain.entities import User, make_title
+from ragkb.services.chat_conversations import ChatConversationsService
 
 
 def test_make_title_trims():

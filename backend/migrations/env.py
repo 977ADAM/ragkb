@@ -15,8 +15,7 @@ if str(_BACKEND_ROOT) not in sys.path:
 
 from ragkb.core.config import DEFAULT_CONFIG, Config
 from ragkb.core.database import alembic_sync_url, Base
-from ragkb.db.models import UserRow
-from ragkb.features.chat_conversations.models import ConversationRow
+from ragkb.db.models import ConversationRow, UserRow
 
 config = context.config
 target_metadata = Base.metadata

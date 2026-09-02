@@ -18,7 +18,7 @@ info:
 
 servers:
   - url: http://127.0.0.1:8000
-    description: uvicorn ragkb.platform.app:build (локально)
+    description: uvicorn ragkb.app:build (локально)
   - url: http://rag:8000
     description: сервис rag в compose (BFF ходит сюда)
   - url: http://127.0.0.1:3000/api

@@ -1,7 +1,7 @@
 from ragkb.core.config import LLMConfig
-from ragkb.features.models.ollama import OllamaCatalog
-from ragkb.features.models.openai import OpenAICatalog
-from ragkb.features.models.static import StaticCatalog
+from ragkb.services.models_ollama import OllamaCatalog
+from ragkb.services.models_openai import OpenAICatalog
+from ragkb.services.models_static import StaticCatalog
 
 
 def test_openai_catalog_short_name_for_gguf_path():

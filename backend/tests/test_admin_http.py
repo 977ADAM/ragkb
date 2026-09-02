@@ -12,8 +12,8 @@ from helpers import BACKEND_ROOT
 
 from ragkb.core.config import Config, OrganizationConfig
 from ragkb.db.repos.auth import PostgresAccounts
-from ragkb.platform.app import create_app
-from ragkb.platform.db import make_engine, make_session_factory
+from ragkb.app import create_app
+from ragkb.core.database import make_engine, make_session_factory
 from ragkb.services.auth import hash_password
 
 

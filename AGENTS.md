@@ -5,19 +5,30 @@
 
 ## Где что лежит
 
-- Ядро поиска: `backend/ragkb/core/` — не импортирует `features/` и `platform/`.
-- HTTP: вертикальные слайсы в `backend/ragkb/features/` (поиск, чат, индекс);
-  auth уже в раскладке как в clustering: `domain/`, `services/`, `db/`, `api/`.
-  Сборка — `backend/ragkb/platform/app.py` (`create_app`, `build`).
+Пять каталогов в `backend/ragkb/` — раскладка по слоям, как в clustering:
+
+- `api/` — FastAPI: роутеры, схемы, Depends-фабрики, HTTP-хендлер ошибок.
+- `core/` — ядро поиска и генерации; конфиг, движок БД (`database.py`),
+  доменные ошибки (`errors.py`). Не импортирует `api/`, `db/`, `domain/`,
+  `services/` и не знает FastAPI (кроме исключений в сигнатурах нет).
+- `db/` — SQLAlchemy-модели и адаптеры хранения: `models.py`, `repos/`
+  (Postgres и память: `PostgresAccounts`, `PostgresHistory`,
+  `EphemeralHistory`).
+- `domain/` — чистые сущности и порты без SQLAlchemy/pydantic/FastAPI.
+- `services/` — сценарии приложения без FastAPI и SQLAlchemy
+  (auth, admin_users, search, models, index, organization, chat,
+  telemetry, bootstrap + каталоги моделей).
+- Сборка: `backend/ragkb/app.py` (`create_app`, `build`) и
+  `backend/ragkb/container.py` (композиционный корень).
+
 - История диалогов и локальные аккаунты: Postgres (SQLAlchemy async в
-  `features/` и `platform/`). Схема — Alembic в `backend/migrations/`.
-  Приложение схему не накатывает. URL: `RAGKB_DATABASE_URL`.
+  `db/`). Схема — Alembic в `backend/migrations/`. Приложение схему не
+  накатывает. URL: `RAGKB_DATABASE_URL`.
 - Конфиг: `backend/config.yaml`, перекрывается `RAGKB_*`.
 - Документы корпуса: `data/docs/` в корне репозитория.
-- Контракт API и раскладка каталогов:
-  `docs/superpowers/specs/2026-08-21-hexagonal-slices-design.md` и
-  `docs/superpowers/specs/2026-08-31-backend-frontend-layout-design.md`.
-  В первой спеке `web/` значит `frontend/`.
+- Контракт API: `docs/superpowers/specs/2026-08-21-hexagonal-slices-design.md`
+  (там `web/` значит `frontend/`; каталоги `features/`/`platform/` в тексте
+  — историческая раскладка, актуальную смотри в этом файле и в README).
 
 ## Как запускать
 
@@ -29,7 +40,7 @@
 cd backend
 uv sync --extra migrations --extra dev
 alembic upgrade head
-uv run uvicorn ragkb.platform.app:build --factory
+uv run uvicorn ragkb.app:build --factory
 cd ../frontend && bun run dev
 ```
 
@@ -39,8 +50,9 @@ CLI (`ragkb serve` / `index` / `ask`) нет. Индекс — `POST /index/rebu
 ## Чего не делать
 
 - Не возвращать HTML из FastAPI и не заводить второй UI рядом с `frontend/`.
-- Не импортировать `sqlalchemy`/`alembic` в `backend/ragkb/core/`.
-  SQLAlchemy можно в `features/` и `platform/`; Alembic — только
+- Не импортировать `sqlalchemy`/`alembic` в `backend/ragkb/core/` (кроме
+  `core/database.py`, который владеет движком и `Base`).
+  SQLAlchemy — только в `backend/ragkb/db/`; Alembic — только
   `backend/migrations/`.
 - Не ходить из браузера в FastAPI напрямую: только BFF `frontend/src/routes/api/`.
 - Compose: `RAGKB_AUTH_MODE=session`, вход формами (`/login`, `/register`).

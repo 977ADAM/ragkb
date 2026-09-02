@@ -10,8 +10,8 @@ from sqlalchemy import create_engine, select, text
 
 from ragkb.db.models import UserRow
 from ragkb.db.repos.auth import PostgresAccounts
-from ragkb.platform.app import create_app
-from ragkb.platform.db import EXPECTED_REVISION, make_engine, make_session_factory
+from ragkb.app import create_app
+from ragkb.core.database import EXPECTED_REVISION, make_engine, make_session_factory
 from ragkb.services.auth import hash_password, verify_password
 
 

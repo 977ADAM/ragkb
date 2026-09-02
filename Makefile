@@ -31,7 +31,7 @@ backend:
 	export RAGKB_AUTH_MODE="$${RAGKB_AUTH_MODE:-session}"; \
 	mkdir -p data; \
 	cd backend && uv run alembic upgrade head && \
-	uv run uvicorn ragkb.platform.app:build --factory --host 127.0.0.1 --port 8000
+	uv run uvicorn ragkb.app:build --factory --host 127.0.0.1 --port 8000
 
 frontend:
 	cd frontend && bun run dev

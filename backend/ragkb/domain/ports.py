@@ -1,8 +1,12 @@
-"""Порты репозиториев. Типизированы на domain.entities."""
+"""Порты репозиториев и сервисов. Типизированы на domain.entities."""
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
+
+from ragkb.domain.entities import Conversation, Message
+
+# --- Аккаунты ---
 
 
 class AccountStore(Protocol):
@@ -26,3 +30,66 @@ class AccountStore(Protocol):
     ) -> tuple[str, str, datetime] | None: ...
     async def delete_user(self, username: str) -> bool: ...
     async def count_admins(self) -> int: ...
+
+
+# --- Диалоги ---
+
+
+class ConversationRepository(Protocol):
+    async def create(self, user: str) -> str: ...
+    async def owns(self, conversation_id: str, user: str) -> bool: ...
+    async def list_conversations(
+        self, user: str, limit: int = 50, offset: int = 0
+    ) -> list[Conversation]: ...
+    async def count_conversations(self, user: str) -> int: ...
+    async def get_messages(self, conversation_id: str, user: str) -> list[Message] | None: ...
+    async def append(
+        self,
+        conversation_id: str,
+        user: str,
+        role: str,
+        text: str,
+        sources: list[dict[str, Any]] | None = None,
+        model: str = "",
+    ) -> bool: ...
+    async def set_title_if_empty(self, conversation_id: str, user: str, title: str) -> bool: ...
+    async def rename(self, conversation_id: str, user: str, title: str) -> bool: ...
+    async def delete(self, conversation_id: str, user: str) -> bool: ...
+    async def cleanup(self, now=None, batch: int = 500) -> int: ...
+
+
+class AnswerHistory(Protocol):
+    async def owns(self, conversation_id: str, user: str) -> bool: ...
+    async def recent_turns(
+        self, conversation_id: str, user: str, window: int
+    ) -> list[tuple[str, str]]: ...
+    async def create(self, user: str) -> str: ...
+    async def append(
+        self,
+        conversation_id: str,
+        user: str,
+        role: str,
+        text: str,
+        sources: list[dict[str, Any]] | None = None,
+        model: str = "",
+    ) -> bool: ...
+    async def set_title_if_empty(self, conversation_id: str, user: str, title: str) -> bool: ...
+
+
+class SourceRegistry(Protocol):
+    def document_paths(self) -> set[str] | None: ...
+
+
+# --- Модели ---
+
+
+class ModelCatalog(Protocol):
+    def list(self) -> list: ...
+    def resolve(self, requested: str | None) -> str: ...
+
+
+# --- Телеметрия ---
+
+
+class EventSink(Protocol):
+    def emit(self, payload: dict[str, Any]) -> None: ...

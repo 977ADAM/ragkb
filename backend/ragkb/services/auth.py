@@ -9,7 +9,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
 from ragkb.domain.ports import AccountStore
-from ragkb.platform.errors import Unauthenticated
+from ragkb.core.errors import Unauthenticated
 
 COOKIE_NAME = "ragkb_session"
 SESSION_DAYS = 7

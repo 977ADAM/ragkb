@@ -5,10 +5,12 @@ alwaysApply: true
 
 # Раскладка репозитория
 
-- Код сервиса только в `backend/` (пакет `ragkb`: `core`, `domain`, `services`,
-  `db`, `api`, `platform`, `features`).
+- Код сервиса только в `backend/`. Пакет `ragkb` — пять каталогов по слоям:
+  `api/`, `core/`, `db/`, `domain/`, `services/` (плюс файлы верхнего уровня
+  `app.py` — вход uvicorn, `container.py` — композиционный корень).
+  Каталогов `features/` и `platform/` нет.
 - Интерфейс только в `frontend/` (SvelteKit + BFF). FastAPI не отдаёт HTML.
-- Точка входа: `uvicorn ragkb.platform.app:build --factory`. Конфиг:
+- Точка входа: `uvicorn ragkb.app:build --factory`. Конфиг:
   `backend/config.yaml`.
 - Миграции истории и аккаунтов: Postgres, `backend/migrations/`,
   `alembic upgrade head`. URL: `RAGKB_DATABASE_URL`.
@@ -16,6 +18,8 @@ alwaysApply: true
   (`RAGKB_LLM_URL`). Эмбеддинги — HuggingFace в контейнере `rag`
   (`sentence-transformers`, `BAAI/bge-m3`). На сервере TLS и вход — Angie;
   compose отдаёт `frontend:3000`.
-- Живые доки: корневой `README.md`, `AGENTS.md`, спеки
-  `2026-08-21-hexagonal-slices` и `2026-08-31-backend-frontend-layout`.
-  В спеке слайсов путь `web/` читать как `frontend/`.
+- Живые доки: корневой `README.md`, `AGENTS.md`. Исторические спеки
+  (`2026-08-21-hexagonal-slices`, `2026-08-31-backend-frontend-layout`)
+  описывают прежнюю раскладку `features/`/`platform/`; в спеке слайсов путь
+  `web/` читать как `frontend/`, но актуальную структуру каталогов брать из
+  README/AGENTS.

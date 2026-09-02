@@ -7,8 +7,9 @@ import pytest
 from starlette.datastructures import Headers
 
 from ragkb.core.config import AuthConfig
-from ragkb.platform.auth import User, parse_groups, user_from_headers
-from ragkb.platform.errors import Forbidden, Unauthenticated
+from ragkb.api.deps.auth import parse_groups, user_from_headers
+from ragkb.domain.entities import User
+from ragkb.core.errors import Forbidden, Unauthenticated
 
 
 def test_parse_groups_comma_and_repeats():
@@ -39,7 +40,7 @@ def test_missing_header_is_none():
 def test_admin_forbidden(indexed):
     from fastapi.testclient import TestClient
 
-    from ragkb.platform.app import create_app
+    from ragkb.app import create_app
 
     indexed.auth.mode = "proxy"
     with TestClient(create_app(indexed)) as client:

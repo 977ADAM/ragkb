@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from ragkb.domain.ports import AccountStore
-from ragkb.platform.errors import Forbidden, InvalidRequest, NotFound
+from ragkb.core.errors import Forbidden, InvalidRequest, NotFound
 
 _ROLES = frozenset({"user", "admin"})
 

@@ -3,7 +3,7 @@ from pathlib import Path
 
 from ragkb.core.config import Config, LoggingConfig, OrganizationConfig
 from ragkb.core.logging_config import get_logger, setup_logging
-from ragkb.platform.app import create_app
+from ragkb.app import create_app
 
 
 def _flush() -> None:

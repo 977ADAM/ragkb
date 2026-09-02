@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from ragkb.core.config import Config
-from ragkb.platform.app import create_app
+from ragkb.app import create_app
 
 
 def test_history_enabled_env_false_zero_no(monkeypatch: pytest.MonkeyPatch) -> None:

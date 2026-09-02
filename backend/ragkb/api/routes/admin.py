@@ -6,11 +6,12 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
-from ragkb.features.organization.service import OrganizationService
-from ragkb.platform.auth import User, require_admin
-from ragkb.platform.deps import organization_service
-from ragkb.platform.errors import NotFound
+from ragkb.api.deps.auth import require_admin
+from ragkb.api.deps.services import organization_service
+from ragkb.core.errors import NotFound
+from ragkb.domain.entities import User
 from ragkb.services.admin_users import AdminUsersService
+from ragkb.services.organization import OrganizationService
 
 router = APIRouter(dependencies=[Depends(require_admin)])
 

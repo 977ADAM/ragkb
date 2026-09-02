@@ -288,9 +288,13 @@ python examples/bench_store.py
 
 ```
 backend/ragkb/
-  core/         поиск и генерация
-  platform/     FastAPI, контейнер, идентификация
-  features/     слайсы HTTP
+  api/         FastAPI: routes, schemas, deps, обработка ошибок
+  core/        поиск и генерация, конфиг, движок БД, доменные ошибки
+  db/          ORM-модели и адаптеры хранения (Postgres и память)
+  domain/      сущности и порты
+  services/    сценарии приложения (без FastAPI и SQLAlchemy)
+  app.py       create_app/build — вход uvicorn
+  container.py композиционный корень
 frontend/       SvelteKit, BFF
 ```
 

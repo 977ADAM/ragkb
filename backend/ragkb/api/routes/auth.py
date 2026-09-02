@@ -4,12 +4,12 @@ from fastapi import APIRouter, Request, Response
 from ragkb.api.deps import AuthSvc
 from ragkb.api.deps.auth import (
     clear_session_cookie,
+    current_user,
     get_auth_service,
     raw_cookie,
     set_session_cookie,
 )
 from ragkb.api.schemas.auth import Credentials
-from ragkb.platform.auth import current_user
 
 router = APIRouter()
 

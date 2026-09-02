@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from uuid import uuid4
 
-from ragkb.platform.auth import ANONYMOUS
+from ragkb.domain.entities import ANONYMOUS
 
 
 def test_health_anonymous(client):
@@ -14,7 +14,7 @@ def test_health_anonymous(client):
 def test_unauthenticated_when_proxy_mode(indexed):
     from fastapi.testclient import TestClient
 
-    from ragkb.platform.app import create_app
+    from ragkb.app import create_app
 
     indexed.auth.mode = "proxy"
     with TestClient(create_app(indexed)) as client:

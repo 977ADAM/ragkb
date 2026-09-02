@@ -9,8 +9,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ragkb.core.database import assert_revision
+from ragkb.core.errors import Conflict
 from ragkb.db.models import SessionRow, UserRow
-from ragkb.platform.errors import Conflict
 
 
 class PostgresAccounts:

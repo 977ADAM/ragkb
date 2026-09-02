@@ -1,4 +1,4 @@
-"""Правило зависимостей слайсов — красный тест, не замечание на ревью."""
+"""Правило зависимостей слоёв — красный тест, не замечание на ревью."""
 from __future__ import annotations
 
 import ast
@@ -9,6 +9,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 PKG = ROOT / "ragkb"
 MIGRATIONS = ROOT / "migrations"
+
+ALLOWED_TOP_DIRS = {"api", "core", "db", "domain", "services"}
 
 
 def _imports(path: Path) -> list[str]:
@@ -26,30 +28,57 @@ def _py_files(root: Path) -> list[Path]:
     return [p for p in root.rglob("*.py") if "__pycache__" not in p.parts]
 
 
-def test_core_does_not_import_features_or_platform():
+def test_package_has_only_five_layer_dirs():
+    top = {p.name for p in PKG.iterdir() if p.is_dir() and "__pycache__" not in p.name}
+    assert top == ALLOWED_TOP_DIRS
+
+
+def test_core_does_not_import_upper_layers():
+    forbidden = ("ragkb.api", "ragkb.db", "ragkb.domain", "ragkb.services")
     for path in _py_files(PKG / "core"):
         for name in _imports(path):
-            assert not name.startswith("ragkb.features"), path
-            assert not name.startswith("ragkb.platform"), path
+            for prefix in forbidden:
+                assert not name.startswith(prefix), f"{path} импортирует {name}"
 
 
-def test_feature_routers_do_not_import_core_or_ports():
-    for path in (PKG / "features").rglob("router.py"):
+def test_domain_does_not_import_upper_layers():
+    forbidden = (
+        "fastapi",
+        "sqlalchemy",
+        "pydantic",
+        "ragkb.api",
+        "ragkb.db",
+        "ragkb.services",
+        "ragkb.core",
+    )
+    for path in _py_files(PKG / "domain"):
         for name in _imports(path):
+            for prefix in forbidden:
+                assert not name.startswith(prefix), f"{path} импортирует {name}"
+
+
+def test_services_do_not_import_http_or_orm():
+    _assert_not_imported(
+        PKG / "services",
+        ("fastapi", "sqlalchemy", "ragkb.api", "ragkb.db", "ragkb.core.database"),
+    )
+
+
+def test_api_does_not_import_orm():
+    _assert_not_imported(PKG / "api", ("sqlalchemy", "ragkb.db"))
+
+
+def test_routes_do_not_import_core_or_ports():
+    for path in (PKG / "api" / "routes").rglob("*.py"):
+        for name in _imports(path):
+            if name == "ragkb.core.errors":
+                continue
             assert not name.startswith("ragkb.core"), path
             assert not name.endswith(".ports"), path
 
 
-def test_feature_services_do_not_import_other_features():
-    for path in (PKG / "features").rglob("service.py"):
-        slice_name = path.parent.name
-        if slice_name == "bootstrap":
-            continue
-        for name in _imports(path):
-            if name.startswith("ragkb.features.") and not name.startswith(
-                f"ragkb.features.{slice_name}"
-            ):
-                pytest.fail(f"{path} импортирует чужой слайс {name}")
+def test_db_does_not_import_http_or_services():
+    _assert_not_imported(PKG / "db", ("fastapi", "ragkb.api", "ragkb.services"))
 
 
 def test_sqlalchemy_not_in_core():
@@ -63,7 +92,7 @@ def test_sqlalchemy_not_in_core():
     for path in _py_files(MIGRATIONS):
         for name in _imports(path):
             if name.startswith("ragkb.") and not name.startswith(
-                ("ragkb.core.config", "ragkb.core.database", "ragkb.features.", "ragkb.db")
+                ("ragkb.core.config", "ragkb.core.database", "ragkb.db")
             ):
                 pytest.fail(f"{path} импортирует {name}")
 
@@ -77,43 +106,11 @@ def _assert_not_imported(root: Path, prefixes: tuple[str, ...]) -> None:
                 assert not name.startswith(prefix), f"{path} импортирует {name}"
 
 
-def test_domain_depends_only_on_stdlib():
-    _assert_not_imported(
-        PKG / "domain",
-        (
-            "fastapi",
-            "sqlalchemy",
-            "pydantic",
-            "ragkb.api",
-            "ragkb.db",
-            "ragkb.services",
-            "ragkb.features",
-            "ragkb.platform",
-            "ragkb.core",
-        ),
-    )
-
-
-def test_services_do_not_import_http_or_orm():
-    _assert_not_imported(
-        PKG / "services",
-        ("fastapi", "sqlalchemy", "ragkb.api", "ragkb.db", "ragkb.features"),
-    )
-
-
-def test_api_does_not_import_orm():
-    _assert_not_imported(PKG / "api", ("sqlalchemy", "ragkb.db"))
-
-
-def test_db_does_not_import_fastapi_or_features():
-    _assert_not_imported(PKG / "db", ("fastapi", "ragkb.features", "ragkb.api"))
-
-
 def test_expected_revision_matches_alembic_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
-    from ragkb.platform.db import EXPECTED_REVISION
+    from ragkb.core.database import EXPECTED_REVISION
 
     script = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
     assert script.get_current_head() == EXPECTED_REVISION

@@ -1,1 +1,1 @@
-"""Доменный слой: чистые сущности без SQLAlchemy/pydantic."""
+"""Доменный слой: чистые сущности и порты без SQLAlchemy/pydantic/FastAPI."""
