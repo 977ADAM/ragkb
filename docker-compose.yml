@@ -51,7 +51,7 @@ services:
       ensure-admin:
         condition: service_completed_successfully
     volumes:
-      - ./data/docs:/app/data/docs:ro
+      - ./data/docs:/app/data/docs
       - ./data/logs:/app/data/logs
       - rag_index:/app/data/index
       - rag_hf:/app/data/hf
