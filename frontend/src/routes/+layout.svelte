@@ -47,7 +47,7 @@
 	});
 
 	async function logout() {
-		await fetch('/api/auth/signout', { method: 'POST', credentials: 'include' });
+		await fetch('/api/auths/signout', { method: 'POST', credentials: 'include' });
 		location.href = '/login';
 	}
 

@@ -16,7 +16,7 @@ export async function handle({ event, resolve }) {
 	/** @type {{ role?: string } | null} */
 	let meBody = null;
 	try {
-		const res = await backend('/auth/me', event.request);
+		const res = await backend('/auths/me', event.request);
 		me = res.status;
 		if (res.ok) meBody = await res.json();
 	} catch {

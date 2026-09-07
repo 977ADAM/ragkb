@@ -44,7 +44,7 @@ uv run uvicorn ragkb.app:build --factory
 cd ../frontend && bun run dev
 ```
 
-CLI (`ragkb serve` / `index` / `ask`) нет. Индекс — `POST /index/rebuild`.
+CLI (`ragkb serve` / `index` / `ask`) нет. Индекс — `POST /api/v1/index/rebuild`.
 Тесты: `RAGKB_TEST_DATABASE_URL=… cd backend && uv run pytest`.
 
 ## Чего не делать
@@ -54,10 +54,11 @@ CLI (`ragkb serve` / `index` / `ask`) нет. Индекс — `POST /index/rebu
   `core/database.py`, который владеет движком и `Base`).
   SQLAlchemy — только в `backend/ragkb/db/`; Alembic — только
   `backend/migrations/`.
-- Не ходить из браузера в FastAPI напрямую: только BFF `frontend/src/routes/api/`.
+- Не ходить из браузера в FastAPI напрямую: только BFF `frontend/src/routes/api/`
+  (BFF `/api/…` → FastAPI `/api/v1/…`; `GET /health` без версии).
 - Compose: `RAGKB_AUTH_MODE=session`, вход формами (`/login`, `/register`).
   `RAGKB_DEV_USER` сессию не заменяет. На сервере Angie не должен требовать
-  OIDC на `/login`, `/register`, `/api/auth`. oauth2-proxy и Keycloak в стеке нет.
+  OIDC на `/login`, `/register`, `/api/auths`. oauth2-proxy и Keycloak в стеке нет.
 - LLM не поднимать в compose: OpenAI-совместимый HTTP (`RAGKB_LLM_URL`).
   Эмбеддинги в контейнере `rag` — HuggingFace (`sentence-transformers`,
   модель `BAAI/bge-m3`). Ollama в стеке нет.

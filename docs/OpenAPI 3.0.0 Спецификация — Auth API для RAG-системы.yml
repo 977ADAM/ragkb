@@ -3,15 +3,15 @@ info:
   title: ragkb Auth API
   description: |
     Регистрация и вход ragkb. Личность — сессионная кука `ragkb_session`
-    (не JWT). Браузер в FastAPI не ходит: SvelteKit BFF (`/api/auth/…`)
-    проксирует те же пути без префикса `/api` на сервис `rag`.
+    (не JWT). Браузер в FastAPI не ходит: SvelteKit BFF (`/api/auths/…`)
+    проксирует на FastAPI `/api/v1/auths/…`.
 
     FastAPI сам OpenAPI не отдаёт (`openapi_url: null`). Этот файл — контракт
-    слайса `features/auth` и `GET /health`.
+    auth и `GET /health` (health на корне, без `/api/v1`).
 
-    Режим `auth.mode: session` (compose). `disabled` — `GET /auth/me` без куки
-    отдаёт `anonymous`. `proxy` — личность из `X-Forwarded-*`, не из этой
-    куки.
+    Режим `auth.mode: session` (compose). `disabled` — `GET /api/v1/auths/me`
+    без куки отдаёт `anonymous`. `proxy` — личность из `X-Forwarded-*`, не из
+    этой куки.
 
     Нет почты, подтверждения, сброса пароля, JWT refresh, админки пользователей.
   version: "1.1.0"
@@ -21,8 +21,6 @@ servers:
     description: uvicorn ragkb.app:build (локально)
   - url: http://rag:8000
     description: сервис rag в compose (BFF ходит сюда)
-  - url: http://127.0.0.1:3000/api
-    description: BFF SvelteKit; те же пути, что ниже, плюс префикс /api
 
 tags:
   - name: auth
@@ -126,7 +124,7 @@ components:
         example: ragkb_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0
 
 paths:
-  /auth/signup:
+  /api/v1/auths/signup:
     post:
       tags: [auth]
       summary: Регистрация
@@ -173,7 +171,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ValidationError'
 
-  /auth/signin:
+  /api/v1/auths/signin:
     post:
       tags: [auth]
       summary: Вход
@@ -220,7 +218,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ValidationError'
 
-  /auth/signout:
+  /api/v1/auths/signout:
     post:
       tags: [auth]
       summary: Выход
@@ -236,7 +234,7 @@ paths:
             Set-Cookie:
               $ref: '#/components/headers/ClearSessionCookie'
 
-  /auth/me:
+  /api/v1/auths/me:
     get:
       tags: [auth]
       summary: Текущий пользователь

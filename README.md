@@ -77,7 +77,7 @@ uv sync --extra migrations --extra dev
 # схема истории (нужен Postgres и RAGKB_DATABASE_URL)
 alembic upgrade head
 
-# индекс — POST /index/rebuild (кнопка в интерфейсе у администратора)
+# индекс — POST /api/v1/index/rebuild (кнопка в интерфейсе у администратора)
 # локально с формами и SQLite (без Postgres):
 make backend
 
@@ -126,13 +126,13 @@ ADMIN_PASSWORD=…
 - оба значения пустые — сидер выходит 0, пользователя-админа нет;
 - после подъёма войти этим логином и открыть `/admin`.
 
-Смена эмбеддера: `POST /index/rebuild` (админ в интерфейсе).
+Смена эмбеддера: `POST /api/v1/index/rebuild` (админ в интерфейсе).
 
 Или целиком в Docker: `docker compose up -d` (см. `docker-compose.yml`).
 oauth2-proxy и **Keycloak в стеке нет**. На сервере TLS делает **Angie**
 (вне compose): он проксирует на `frontend:3000`. Личность — сессионная кука
 после форм `/login` и `/register`. Angie **не должен** требовать корпоративный
-OIDC на `/login`, `/register`, `/api/auth`. Keycloak/Angie OIDC для ragkb
+OIDC на `/login`, `/register`, `/api/auths`. Keycloak/Angie OIDC для ragkb
 больше не источник личности. `RAGKB_DEV_USER` при `session` не подменяет вход.
 
 - нужен `.env` из `.env.example` с паролем Postgres (`POSTGRES_PASSWORD`) и
@@ -158,29 +158,33 @@ OIDC на `/login`, `/register`, `/api/auth`. Keycloak/Angie OIDC для ragkb
 
 ## Команды
 
-Консольной точки входа больше нет. Сервер — uvicorn, индекс — `POST /index/rebuild`,
+Консольной точки входа больше нет. Сервер — uvicorn, индекс — `POST /api/v1/index/rebuild`,
 оценка поиска — `python backend/examples/eval.py`.
 
 ## HTTP API
 
 Браузер ходит только в BFF (`frontend/`). Ниже — контракт FastAPI.
 
+`GET /health` живёт на корне, без версии. Остальные ручки — префикс `/api/v1`
+(например `POST /api/v1/auths/signin`). BFF `frontend/src/routes/api/`
+проксирует на них: браузерный `/api/auths/signin` → FastAPI `/api/v1/auths/signin`.
+
 | Метод | Назначение |
 |---|---|
 | `GET /health` | живость, без аутентификации, только `{"status": ...}` |
-| `GET /status` | индекс, эмбеддер, LLM (под аутентификацией) |
-| `GET /bootstrap?session_id=` | первый экран; `session_id` — UUID клиента |
-| `GET /models` | модели |
-| `POST /search` | поиск без генерации |
-| `GET /organization` | чья база; не настроено — 404 |
-| `GET/POST /organization/{id}/chat_conversations` | список / завести пустой диалог |
+| `GET /api/v1/status` | индекс, эмбеддер, LLM (под аутентификацией) |
+| `GET /api/v1/bootstrap?session_id=` | первый экран; `session_id` — UUID клиента |
+| `GET /api/v1/models` | модели |
+| `POST /api/v1/search` | поиск без генерации |
+| `GET /api/v1/organization` | чья база; не настроено — 404 |
+| `GET/POST /api/v1/organization/{id}/chat_conversations` | список / завести пустой диалог |
 | `GET/PATCH/DELETE .../chat_conversations/{cid}` | сообщения, имя, удаление |
 | `POST .../chat_conversations/{cid}/messages` | вопрос, поток NDJSON |
-| `POST /events` | телеметрия пачкой (до 100 событий) |
-| `POST /index/rebuild` | переиндексация: в `session` роль `admin`; в `proxy` группа `auth.admin_group` (по умолчанию `ragkb-admins`) |
+| `POST /api/v1/events` | телеметрия пачкой (до 100 событий) |
+| `POST /api/v1/index/rebuild` | переиндексация: в `session` роль `admin`; в `proxy` группа `auth.admin_group` (по умолчанию `ragkb-admins`) |
 
 При `RAGKB_AUTH_MODE=session` (compose) все эндпоинты, кроме `/health`,
-`POST /auth/signup` и `POST /auth/signin`, требуют сессионную куку и без
+`POST /api/v1/auths/signup` и `POST /api/v1/auths/signin`, требуют сессионную куку и без
 неё отвечают `401`. Режим `proxy` по-прежнему читает `X-Forwarded-*`.
 Встроенной страницы `GET /` нет.
 

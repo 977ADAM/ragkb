@@ -65,7 +65,7 @@ def _client(cfg: Config):
 
 def _signin(client: TestClient, username: str) -> None:
     res = client.post(
-        "/auth/signin",
+        "/api/v1/auths/signin",
         json={"username": username, "password": "password1"},
     )
     assert res.status_code == 200
@@ -73,7 +73,7 @@ def _signin(client: TestClient, username: str) -> None:
 
 def _feedback_path(cid: str, mid: int) -> str:
     return (
-        f"/organization/acme/chat_conversations/{cid}/messages/{mid}/feedback"
+        f"/api/v1/organization/acme/chat_conversations/{cid}/messages/{mid}/feedback"
     )
 
 
@@ -106,7 +106,7 @@ def test_rereating_updates_instead_of_duplicating(seeded) -> None:
             ).status_code
             == 204
         )
-        res = client.get("/admin/feedback")
+        res = client.get("/api/v1/admin/feedback")
         assert res.status_code == 200
         body = res.json()
         assert body["counts"] == {"up": 0, "down": 1}
@@ -160,7 +160,7 @@ def test_plain_user_cannot_read_summary(seeded) -> None:
     with _client(_cfg(tmp_path, url)) as client:
         _signin(client, "bob")
         assert client.patch(_feedback_path(cid, mid), json={"rating": "up"}).status_code == 404
-        res = client.get("/admin/feedback")
+        res = client.get("/api/v1/admin/feedback")
         assert res.status_code == 403
 
 

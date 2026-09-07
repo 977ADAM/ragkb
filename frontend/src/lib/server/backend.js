@@ -12,6 +12,19 @@ const BASE = (env.RAGKB_BACKEND_URL || env.RAGKB_API_URL || 'http://127.0.0.1:80
 	''
 );
 
+/** FastAPI, кроме `/health`, живёт под `/api/v1`. */
+const API_V1 = '/api/v1';
+
+/**
+ * @param {string} path
+ * @returns {string}
+ */
+function backendPath(path) {
+	if (path === '/health' || path.startsWith('/health?')) return path;
+	if (path === API_V1 || path.startsWith(`${API_V1}/`)) return path;
+	return `${API_V1}${path}`;
+}
+
 /**
  * Заголовки идентификации для бэкенда.
  *
@@ -62,7 +75,7 @@ function identity(request) {
  * @param {RequestInit} [init]
  */
 export function backend(path, request, init = {}) {
-	return fetch(`${BASE}${path}`, {
+	return fetch(`${BASE}${backendPath(path)}`, {
 		...init,
 		headers: { ...identity(request), .../** @type {Record<string, string>} */ (init.headers ?? {}) }
 	});

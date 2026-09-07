@@ -113,7 +113,7 @@ def create_app(cfg: Config) -> FastAPI:
             return {"status": "no_index"}
         return {"status": "ok"}
 
-    app.include_router(api_router)
+    app.include_router(api_router, prefix="/api/v1")
     return app
 
 

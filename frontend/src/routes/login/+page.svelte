@@ -12,7 +12,7 @@
 		error = '';
 		pending = true;
 		try {
-			const response = await fetch('/api/auth/signin', {
+			const response = await fetch('/api/auths/signin', {
 				method: 'POST',
 				credentials: 'include',
 				headers: { 'content-type': 'application/json' },

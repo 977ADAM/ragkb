@@ -11,7 +11,7 @@
 	async function load() {
 		error = '';
 		try {
-			const response = await fetch('/api/auth/profile', { credentials: 'include' });
+			const response = await fetch('/api/auths/profile', { credentials: 'include' });
 			const body = await response.json().catch(() => ({}));
 			if (!response.ok) {
 				error = typeof body.detail === 'string' ? body.detail : 'Не удалось загрузить профиль';
@@ -48,7 +48,7 @@
 		}
 		busy = true;
 		try {
-			const response = await fetch('/api/auth/password', {
+			const response = await fetch('/api/auths/password', {
 				method: 'POST',
 				credentials: 'include',
 				headers: { 'content-type': 'application/json' },

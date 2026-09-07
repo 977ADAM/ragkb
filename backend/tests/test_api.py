@@ -18,15 +18,15 @@ def test_unauthenticated_when_proxy_mode(indexed):
 
     indexed.auth.mode = "proxy"
     with TestClient(create_app(indexed)) as client:
-        res = client.get("/models")
+        res = client.get("/api/v1/models")
     assert res.status_code == 401
 
 
 def test_organization_and_bootstrap(client):
-    org = client.get("/organization").json()
+    org = client.get("/api/v1/organization").json()
     assert org["id"] == "acme"
     sid = str(uuid4())
-    boot = client.get("/bootstrap", params={"session_id": sid}).json()
+    boot = client.get("/api/v1/bootstrap", params={"session_id": sid}).json()
     assert boot["session_id"] == sid
     assert boot["user"]["name"] == ANONYMOUS
     assert boot["user"]["is_admin"] is True
@@ -36,11 +36,11 @@ def test_organization_and_bootstrap(client):
 
 
 def test_create_conversation_then_message_stream(client):
-    created = client.post("/organization/acme/chat_conversations").json()
+    created = client.post("/api/v1/organization/acme/chat_conversations").json()
     cid = created["conversation_id"]
     assert created["title"] == ""
     res = client.post(
-        f"/organization/acme/chat_conversations/{cid}/messages",
+        f"/api/v1/organization/acme/chat_conversations/{cid}/messages",
         json={"question": "сколько дней отпуска?"},
     )
     assert res.status_code == 200
@@ -51,30 +51,30 @@ def test_create_conversation_then_message_stream(client):
     assert "error" not in {e["type"] for e in lines}
     for source in lines[-1].get("sources", []):
         assert "text" in source, "источник несёт фрагмент текста"
-    body = client.get(f"/organization/acme/chat_conversations/{cid}").json()
+    body = client.get(f"/api/v1/organization/acme/chat_conversations/{cid}").json()
     roles = [m["role"] for m in body["messages"]]
     assert roles[:2] == ["user", "assistant"]
 
 
 def test_foreign_org_is_404(client):
-    assert client.get("/organization/other/chat_conversations").status_code == 404
+    assert client.get("/api/v1/organization/other/chat_conversations").status_code == 404
 
 
 def test_foreign_conversation_is_404(client):
     assert (
-        client.get(f"/organization/acme/chat_conversations/{uuid4()}").status_code
+        client.get(f"/api/v1/organization/acme/chat_conversations/{uuid4()}").status_code
         == 404
     )
 
 
 def test_search(client):
-    data = client.post("/search", json={"query": "отпуск", "top_k": 3}).json()
+    data = client.post("/api/v1/search", json={"query": "отпуск", "top_k": 3}).json()
     assert data["results"]
 
 
 def test_events(client):
     res = client.post(
-        "/events",
+        "/api/v1/events",
         json={
             "session_id": str(uuid4()),
             "events": [{"name": "page_view", "props": {}}],
@@ -84,5 +84,5 @@ def test_events(client):
 
 
 def test_models_static(client):
-    models = client.get("/models").json()["models"]
+    models = client.get("/api/v1/models").json()["models"]
     assert models[0]["is_default"] is True

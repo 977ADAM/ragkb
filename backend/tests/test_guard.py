@@ -56,7 +56,8 @@ def test_me_disabled_without_database(tmp_path: Path) -> None:
     cfg.store.backend = "numpy"
     cfg.index_dir = str(tmp_path / "idx")
     with TestClient(create_app(cfg)) as client:
-        assert client.get("/auth/me").json() == {
+        assert client.get("/auths/me").status_code == 404
+        assert client.get("/api/v1/auths/me").json() == {
             "username": "anonymous",
             "role": "user",
         }
@@ -93,8 +94,8 @@ def test_session_auth_on_sqlite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     cfg.index_dir = str(tmp_path / "idx")
     with TestClient(create_app(cfg)) as client:
         r = client.post(
-            "/auth/signup", json={"username": "ada", "password": "password1"}
+            "/api/v1/auths/signup", json={"username": "ada", "password": "password1"}
         )
         assert r.status_code == 200
         assert r.json() == {"username": "ada"}
-        assert client.get("/auth/me").json() == {"username": "ada", "role": "user"}
+        assert client.get("/api/v1/auths/me").json() == {"username": "ada", "role": "user"}

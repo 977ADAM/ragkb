@@ -10,6 +10,7 @@ alwaysApply: true
   `app.py` — вход uvicorn, `container.py` — композиционный корень).
   Каталогов `features/` и `platform/` нет.
 - Интерфейс только в `frontend/` (SvelteKit + BFF). FastAPI не отдаёт HTML.
+  Ручки сервиса кроме `GET /health` — префикс `/api/v1`.
 - Точка входа: `uvicorn ragkb.app:build --factory`. Конфиг:
   `backend/config.yaml`.
 - Миграции истории и аккаунтов: Postgres, `backend/migrations/`,

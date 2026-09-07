@@ -57,7 +57,7 @@ def _admin_client(cfg: Config):
 
 def _signin(client: TestClient, username: str) -> None:
     res = client.post(
-        "/auth/signin",
+        "/api/v1/auths/signin",
         json={"username": username, "password": "password1"},
     )
     assert res.status_code == 200
@@ -77,14 +77,14 @@ def test_plain_user_cannot_list_admin_users(
 ) -> None:
     with _admin_client(_session_cfg(tmp_path, sqlite_url)) as client:
         _signin(client, "bob")
-        res = client.get("/admin/users")
+        res = client.get("/api/v1/admin/users")
         assert res.status_code == 403
 
 
 def test_admin_lists_users(tmp_path: Path, sqlite_url: str) -> None:
     with _admin_client(_session_cfg(tmp_path, sqlite_url)) as client:
         _signin(client, "ada")
-        res = client.get("/admin/users")
+        res = client.get("/api/v1/admin/users")
         assert res.status_code == 200
         users = {(u["username"], u["role"]) for u in res.json()["users"]}
         assert ("ada", "admin") in users
@@ -96,7 +96,7 @@ def test_admin_lists_users(tmp_path: Path, sqlite_url: str) -> None:
 def test_cannot_demote_last_admin(tmp_path: Path, sqlite_url: str) -> None:
     with _admin_client(_session_cfg(tmp_path, sqlite_url)) as client:
         _signin(client, "ada")
-        res = client.patch("/admin/users/ada", json={"role": "user"})
+        res = client.patch("/api/v1/admin/users/ada", json={"role": "user"})
         assert res.status_code == 403
         assert res.json()["detail"] == "нельзя разжаловать последнего админа"
 
@@ -104,7 +104,7 @@ def test_cannot_demote_last_admin(tmp_path: Path, sqlite_url: str) -> None:
 def test_cannot_delete_self(tmp_path: Path, sqlite_url: str) -> None:
     with _admin_client(_session_cfg(tmp_path, sqlite_url)) as client:
         _signin(client, "ada")
-        res = client.delete("/admin/users/ada")
+        res = client.delete("/api/v1/admin/users/ada")
         assert res.status_code == 403
         assert res.json()["detail"] == "нельзя удалить себя"
 
@@ -112,14 +112,14 @@ def test_cannot_delete_self(tmp_path: Path, sqlite_url: str) -> None:
 def test_patch_missing_user_is_404(tmp_path: Path, sqlite_url: str) -> None:
     with _admin_client(_session_cfg(tmp_path, sqlite_url)) as client:
         _signin(client, "ada")
-        res = client.patch("/admin/users/nobody", json={"role": "admin"})
+        res = client.patch("/api/v1/admin/users/nobody", json={"role": "admin"})
         assert res.status_code == 404
 
 
 def test_reports_unavailable(tmp_path: Path, sqlite_url: str) -> None:
     with _admin_client(_session_cfg(tmp_path, sqlite_url)) as client:
         _signin(client, "ada")
-        res = client.get("/admin/reports")
+        res = client.get("/api/v1/admin/reports")
         assert res.status_code == 200
         assert res.json() == {"status": "unavailable"}
 
@@ -127,7 +127,7 @@ def test_reports_unavailable(tmp_path: Path, sqlite_url: str) -> None:
 def test_organization_hub_from_config(tmp_path: Path, sqlite_url: str) -> None:
     with _admin_client(_session_cfg(tmp_path, sqlite_url)) as client:
         _signin(client, "ada")
-        res = client.get("/admin/organization")
+        res = client.get("/api/v1/admin/organization")
         assert res.status_code == 200
         body = res.json()
         assert body["name"] == "Acme"
@@ -149,7 +149,7 @@ def test_organization_hub_empty_when_unconfigured(
     )
     with _admin_client(cfg) as client:
         _signin(client, "ada")
-        res = client.get("/admin/organization")
+        res = client.get("/api/v1/admin/organization")
         assert res.status_code == 200
         body = res.json()
         assert body["name"] == ""

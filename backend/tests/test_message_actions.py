@@ -78,21 +78,21 @@ def _client(tmp_path: Path, url: str, engine: _FakeEngine | None = None):
 
 def _signin(client: TestClient, username: str) -> None:
     res = client.post(
-        "/auth/signin",
+        "/api/v1/auths/signin",
         json={"username": username, "password": "password1"},
     )
     assert res.status_code == 200
 
 
 def _messages(client: TestClient, cid: str) -> list[dict]:
-    body = client.get(f"/organization/acme/chat_conversations/{cid}").json()
+    body = client.get(f"/api/v1/organization/acme/chat_conversations/{cid}").json()
     return body["messages"]
 
 
 def _ask(client: TestClient, cid: str, question: str, engine: _FakeEngine) -> int:
     with client.stream(
         "POST",
-        f"/organization/acme/chat_conversations/{cid}/messages",
+        f"/api/v1/organization/acme/chat_conversations/{cid}/messages",
         json={"question": question},
     ) as resp:
         assert resp.status_code == 200
@@ -120,14 +120,14 @@ def test_regenerate_replaces_last_answer(seeded) -> None:
     engine = _FakeEngine()
     with _client(tmp_path, url, engine) as client:
         _signin(client, "ada")
-        cid = client.post("/organization/acme/chat_conversations", json={}).json()[
+        cid = client.post("/api/v1/organization/acme/chat_conversations", json={}).json()[
             "conversation_id"
         ]
         mid1 = _ask(client, cid, "сколько дней отпуска?", engine)
 
         with client.stream(
             "POST",
-            f"/organization/acme/chat_conversations/{cid}/messages/{mid1}/regenerate",
+            f"/api/v1/organization/acme/chat_conversations/{cid}/messages/{mid1}/regenerate",
             json={},
         ) as resp:
             assert resp.status_code == 200
@@ -151,14 +151,14 @@ def test_regenerate_non_last_answer_is_400(seeded) -> None:
     engine = _FakeEngine()
     with _client(tmp_path, url, engine) as client:
         _signin(client, "ada")
-        cid = client.post("/organization/acme/chat_conversations", json={}).json()[
+        cid = client.post("/api/v1/organization/acme/chat_conversations", json={}).json()[
             "conversation_id"
         ]
         mid1 = _ask(client, cid, "первый вопрос?", engine)
         mid2 = _ask(client, cid, "второй вопрос?", engine)
         assert mid1 != mid2
         res = client.post(
-            f"/organization/acme/chat_conversations/{cid}/messages/{mid1}/regenerate",
+            f"/api/v1/organization/acme/chat_conversations/{cid}/messages/{mid1}/regenerate",
             json={},
         )
         assert res.status_code == 400
@@ -169,15 +169,15 @@ def test_regenerate_foreign_dialog_is_404(seeded) -> None:
     engine = _FakeEngine()
     with _client(tmp_path, url, engine) as client:
         _signin(client, "ada")
-        cid = client.post("/organization/acme/chat_conversations", json={}).json()[
+        cid = client.post("/api/v1/organization/acme/chat_conversations", json={}).json()[
             "conversation_id"
         ]
         mid = _ask(client, cid, "вопрос?", engine)
-        client.post("/auth/signout")
+        client.post("/api/v1/auths/signout")
 
         _signin(client, "bob")
         res = client.post(
-            f"/organization/acme/chat_conversations/{cid}/messages/{mid}/regenerate",
+            f"/api/v1/organization/acme/chat_conversations/{cid}/messages/{mid}/regenerate",
             json={},
         )
         assert res.status_code == 404

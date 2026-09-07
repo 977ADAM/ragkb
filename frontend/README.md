@@ -1,6 +1,8 @@
 # Интерфейс базы знаний
 
 SvelteKit-чат. Браузер к FastAPI не ходит: запросы идут в `/api/*` (BFF).
+BFF проксирует на FastAPI `/api/v1/*`. Живость бэкенда — `GET /health` без версии;
+проверка BFF — `GET /health` на самом SvelteKit (`ok`).
 
 ## Запуск
 
@@ -28,5 +30,5 @@ bun run dev
 | `RAGKB_DEV_GROUPS` | Например `ragkb-admins` (режим `proxy`) |
 
 `make up` / compose: `RAGKB_AUTH_MODE=session` — регистрация и вход в UI.
-Angie на сервере не должен требовать OIDC на `/login`, `/register`, `/api/auth`.
+Angie на сервере не должен требовать OIDC на `/login`, `/register`, `/api/auths`.
 Angie → `frontend:3000` → `rag:8000`.

@@ -45,7 +45,7 @@ def test_admin_forbidden(indexed):
     indexed.auth.mode = "proxy"
     with TestClient(create_app(indexed)) as client:
         headers = {"X-Forwarded-Preferred-Username": "bob"}
-        assert client.post("/index/rebuild", headers=headers).status_code == 403
+        assert client.post("/api/v1/index/rebuild", headers=headers).status_code == 403
     assert isinstance(Forbidden("x"), Exception)
     assert isinstance(Unauthenticated("x"), Exception)
 
