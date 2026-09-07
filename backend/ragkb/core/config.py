@@ -90,15 +90,8 @@ class LLMConfig:
 
 @dataclass
 class AuthConfig:
-    # mode: "proxy" — логин приходит заголовком от reverse proxy (Angie)
-    #       "disabled" — аутентификации нет, всё работает от имени anonymous
-    #       "session" — локальный логин/пароль, кука ragkb_session
-    # По умолчанию закрыто: забытая настройка должна давать отказ,
-    # а не открытый наружу сервис.
-    mode: str = "proxy"
-    # Заголовки семейства X-Forwarded-*, которые прокси передаёт наверх.
-    # НЕ X-Auth-Request-*: те выставляются в заголовки ответа для режима
-    # nginx/Angie auth_request.
+    """Конфигурация аутентификации."""
+    mode: str = "disabled"                            # "session" | "proxy" | "disabled"
     header: str = "X-Forwarded-Preferred-Username"
     email_header: str = "X-Forwarded-Email"
     groups_header: str = "X-Forwarded-Groups"
