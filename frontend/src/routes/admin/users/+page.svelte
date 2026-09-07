@@ -55,34 +55,36 @@
 	}
 </script>
 
-<h1>Пользователи</h1>
+<h1 class="mb-4 text-xl font-semibold">Пользователи</h1>
 {#if error}
-	<p class="error">{error}</p>
+	<p class="text-red-600 dark:text-red-400">{error}</p>
 {/if}
-<table>
+<table class="w-full border-collapse text-left">
 	<thead>
 		<tr>
-			<th>Имя</th>
-			<th>Роль</th>
-			<th>Создан</th>
-			<th></th>
+			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Имя</th>
+			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Роль</th>
+			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Создан</th>
+			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700"></th>
 		</tr>
 	</thead>
 	<tbody>
 		{#each users as user (user.username)}
 			<tr>
-				<td>{user.username}</td>
-				<td>{user.role}</td>
-				<td>{user.created_at ?? ''}</td>
-				<td>
+				<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">{user.username}</td>
+				<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">{user.role}</td>
+				<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">{user.created_at ?? ''}</td>
+				<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">
 					{#if user.role === 'admin'}
 						<button
+							class="btn"
 							type="button"
 							disabled={pending === user.username}
 							onclick={() => setRole(user.username, 'user')}>Снять админа</button
 						>
 					{:else}
 						<button
+							class="btn"
 							type="button"
 							disabled={pending === user.username}
 							onclick={() => setRole(user.username, 'admin')}>Выдать админа</button
@@ -94,41 +96,5 @@
 	</tbody>
 </table>
 {#if users.length === 0 && !error}
-	<p class="muted">Никого нет.</p>
+	<p class="text-stone-500 dark:text-stone-400">Никого нет.</p>
 {/if}
-
-<style>
-	h1 {
-		font-size: 1.25rem;
-		margin: 0 0 1rem;
-	}
-	table {
-		width: 100%;
-		border-collapse: collapse;
-	}
-	th,
-	td {
-		text-align: left;
-		padding: 0.4rem 0.5rem;
-		border-bottom: 1px solid var(--line, #d1d5db);
-	}
-	.error {
-		color: var(--error);
-	}
-	.muted {
-		color: var(--muted, #6b7280);
-	}
-	button {
-		font: inherit;
-		padding: 0.35rem 0.7rem;
-		border: 1px solid var(--line, #d1d5db);
-		border-radius: 0.4rem;
-		background: var(--panel, #f3f4f6);
-		color: inherit;
-		cursor: pointer;
-	}
-	button:disabled {
-		opacity: 0.5;
-		cursor: default;
-	}
-</style>

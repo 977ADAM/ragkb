@@ -20,41 +20,25 @@
 	});
 </script>
 
-<h1>{org?.name || 'Организация'}</h1>
+<h1 class="mb-4 text-xl font-semibold">{org?.name || 'Организация'}</h1>
 {#if error}
-	<p class="error">{error}</p>
+	<p class="text-red-600 dark:text-red-400">{error}</p>
 {:else if org}
 	{#if org.description}
 		<p>{org.description}</p>
 	{/if}
 	{#if org.id}
-		<p class="muted">Идентификатор: {org.id}</p>
+		<p class="text-stone-500 dark:text-stone-400">Идентификатор: {org.id}</p>
 	{/if}
 	<p>
-		<a href="/admin/users">Пользователи</a>
+		<a class="no-underline hover:underline" href="/admin/users">Пользователи</a>
 		·
-		<a href="/admin/documents">Документы</a>
+		<a class="no-underline hover:underline" href="/admin/documents">Документы</a>
 		·
-		<a href="/admin/feedback">Оценки ответов</a>
+		<a class="no-underline hover:underline" href="/admin/feedback">Оценки ответов</a>
 		·
-		<a href="/admin/reports">Отчёты</a>
+		<a class="no-underline hover:underline" href="/admin/reports">Отчёты</a>
 	</p>
 {:else}
-	<p class="muted">Загрузка…</p>
+	<p class="text-stone-500 dark:text-stone-400">Загрузка…</p>
 {/if}
-
-<style>
-	h1 {
-		font-size: 1.25rem;
-		margin: 0 0 1rem;
-	}
-	.muted {
-		color: var(--muted, #6b7280);
-	}
-	.error {
-		color: var(--error);
-	}
-	a {
-		color: inherit;
-	}
-</style>

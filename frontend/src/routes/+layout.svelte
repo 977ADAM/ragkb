@@ -18,6 +18,7 @@
 		loadMoreConversations,
 		rebuildIndex
 	} from '$lib/chat.svelte.js';
+	import '../app.css';
 
 	let { children } = $props();
 
@@ -137,364 +138,156 @@
 {#if authPage || adminPage}
 	{@render children()}
 {:else}
-<div class="app" style="--sidebar-w: {sidebarWidth}px">
-	{#if chat.historyEnabled && sidebarOpen}
-		<aside>
-			<button class="new" onclick={newChat} disabled={chat.busy}>Новый диалог</button>
-			<nav>
-				{#each chat.conversations as item (item.id)}
-					<div class="item" class:active={item.id === chat.conversationId}>
-						{#if renaming === item.id}
-							<!-- svelte-ignore a11y_autofocus -->
-							<input
-								class="rename"
-								bind:value={renameTitle}
-								onkeydown={onRenameKey}
-								onblur={commitRename}
-								onfocus={(e) => e.currentTarget.select()}
-								maxlength="60"
-								autofocus
-								aria-label="Новый заголовок диалога"
-							/>
-						{:else}
-							<a
-								class="open"
-								href="/chat/{item.id}"
-								ondblclick={(e) => {
-									e.preventDefault();
-									startRename(item);
-								}}
-							>
-								{item.title}
-							</a>
-							<button
-								class="icon"
-								title="Переименовать диалог"
-								aria-label="Переименовать диалог «{item.title}»"
-								onclick={() => startRename(item)}
-								disabled={chat.busy}>✎</button
-							>
-							<button
-								class="icon"
-								title="Удалить диалог"
-								aria-label="Удалить диалог «{item.title}»"
-								onclick={() => remove(item)}
-								disabled={chat.busy}>×</button
-							>
-						{/if}
+	<!-- Высота окна, а не min-height: иначе поле ввода уезжает за нижний
+	     край и страница целиком ползает под курсором при каждом ответе. -->
+	<div class="flex h-dvh max-[40rem]:flex-col">
+		{#if chat.historyEnabled && sidebarOpen}
+			<!-- На узком экране колонка диалогов превращается в полосу сверху:
+			     w-auto + ограничение высоты, вертикальная ручка скрыта. -->
+			<aside
+				class="flex w-(--sidebar-w) shrink-0 flex-col gap-3 overflow-y-auto border-r border-stone-300 bg-white p-4 dark:border-stone-700 dark:bg-stone-900 max-[40rem]:w-auto max-[40rem]:max-h-[30vh] max-[40rem]:border-r-0 max-[40rem]:border-b"
+				style="--sidebar-w: {sidebarWidth}px"
+			>
+				<button class="btn" onclick={newChat} disabled={chat.busy}>Новый диалог</button>
+				<nav class="flex flex-col gap-1">
+					{#each chat.conversations as item (item.id)}
+						<div
+							class="flex items-center rounded-md {item.id === chat.conversationId
+								? 'bg-red-50 dark:bg-red-950/40'
+								: ''}"
+						>
+							{#if renaming === item.id}
+								<!-- svelte-ignore a11y_autofocus -->
+								<input
+									class="field min-w-0 flex-1"
+									bind:value={renameTitle}
+									onkeydown={onRenameKey}
+									onblur={commitRename}
+									onfocus={(e) => e.currentTarget.select()}
+									maxlength="60"
+									autofocus
+									aria-label="Новый заголовок диалога"
+								/>
+							{:else}
+								<a
+									class="min-w-0 flex-1 truncate rounded-md px-2 py-1.5 no-underline hover:bg-stone-100 dark:hover:bg-stone-800"
+									href="/chat/{item.id}"
+									ondblclick={(e) => {
+										e.preventDefault();
+										startRename(item);
+									}}
+								>
+									{item.title}
+								</a>
+								<button
+									class="btn-icon"
+									title="Переименовать диалог"
+									aria-label="Переименовать диалог «{item.title}»"
+									onclick={() => startRename(item)}
+									disabled={chat.busy}>✎</button
+								>
+								<button
+									class="btn-icon"
+									title="Удалить диалог"
+									aria-label="Удалить диалог «{item.title}»"
+									onclick={() => remove(item)}
+									disabled={chat.busy}>×</button
+								>
+							{/if}
+						</div>
+					{/each}
+					{#if chat.conversations.length === 0}
+						<p class="px-2 py-1 text-sm text-stone-500 dark:text-stone-400">
+							Диалогов пока нет.
+						</p>
+					{/if}
+					{#if chat.conversations.length < chat.conversationsTotal}
+						<button
+							class="cursor-pointer border-none bg-transparent px-2 py-1 text-left text-sm text-stone-500 hover:text-red-600 disabled:opacity-50 dark:text-stone-400 dark:hover:text-red-400"
+							onclick={loadMoreConversations}
+							disabled={chat.busy}
+						>
+							Показать ещё ({chat.conversationsTotal - chat.conversations.length})
+						</button>
+					{/if}
+				</nav>
+				{#if chat.user?.name}
+					<!-- Профиль прижат к низу колонки: список диалогов может быть коротким. -->
+					<div
+						class="mt-auto flex items-center gap-2 border-t border-stone-300 pt-2 text-sm dark:border-stone-700"
+					>
+						<a
+							class="min-w-0 flex-1 truncate font-semibold no-underline hover:text-red-600 dark:hover:text-red-400"
+							href="/profile"
+							title="Профиль"
+						>{chat.user.name}</a
+						>
+						<button type="button" class="btn" onclick={logout}>Выйти</button>
 					</div>
-				{/each}
-				{#if chat.conversations.length === 0}
-					<p class="empty">Диалогов пока нет.</p>
 				{/if}
-				{#if chat.conversations.length < chat.conversationsTotal}
-					<button class="more" onclick={loadMoreConversations} disabled={chat.busy}>
-						Показать ещё ({chat.conversationsTotal - chat.conversations.length})
+			</aside>
+			<!-- Ручка изменения ширины панели: тонкая полоса на стыке с контентом. -->
+			<div
+				class="w-1.5 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-red-600 dark:hover:bg-red-500 max-[40rem]:hidden"
+				role="separator"
+				aria-orientation="vertical"
+				onpointerdown={startResize}
+			></div>
+		{/if}
+
+		<main
+			class="mx-auto flex min-w-0 max-w-[46rem] flex-1 flex-col px-4 py-6 pb-8 max-[40rem]:w-full"
+		>
+			<header class="flex flex-wrap items-center gap-x-2.5 gap-y-2">
+				{#if chat.historyEnabled}
+					<button
+						class="btn"
+						type="button"
+						onclick={toggleSidebar}
+						aria-label={sidebarOpen ? 'Скрыть панель диалогов' : 'Показать панель диалогов'}
+						title={sidebarOpen ? 'Скрыть панель' : 'Показать панель'}
+					>{sidebarOpen ? '◀' : '☰'}</button>
+				{/if}
+				<img
+					class="block shrink-0 rounded-md"
+					src="/logo.png"
+					alt=""
+					width="28"
+					height="28"
+				/>
+				<h1 class="mr-auto text-xl font-semibold">
+					{chat.organization?.name
+						? `База знаний — ${chat.organization.name}`
+						: 'База знаний'}
+				</h1>
+				{#if chat.isAdmin}
+					<a
+						class="text-sm text-red-600 no-underline hover:text-red-700 hover:underline dark:text-red-400 dark:hover:text-red-300"
+						href="/admin"
+					>Админ</a>
+				{/if}
+				{#if !chat.historyEnabled && chat.user?.name}
+					<a
+						class="border-b border-dashed border-stone-400 font-semibold no-underline hover:border-red-500 hover:text-red-600 dark:border-stone-600 dark:hover:border-red-400 dark:hover:text-red-400"
+						href="/profile"
+						title="Профиль"
+					>{chat.user.name}</a
+					>
+					<button type="button" class="btn" onclick={logout}>Выйти</button>
+				{/if}
+				{#if chat.canReindex}
+					<button class="btn" onclick={rebuildIndex} disabled={chat.busy}>
+						Перестроить индекс
 					</button>
 				{/if}
-			</nav>
-			{#if chat.user?.name}
-				<div class="me">
-					<a href="/profile" class="username" title="Профиль">{chat.user.name}</a>
-					<button type="button" class="logout" onclick={logout}>Выйти</button>
-				</div>
-			{/if}
-		</aside>
-		<div class="resizer" role="separator" aria-orientation="vertical" onpointerdown={startResize}></div>
-	{/if}
+				{#if !chat.historyEnabled}
+					<button class="btn" onclick={newChat} disabled={chat.busy || chat.messages.length === 0}>
+						Новый диалог
+					</button>
+				{/if}
+			</header>
 
-	<main>
-		<header>
-			{#if chat.historyEnabled}
-				<button
-					class="sidebar-toggle"
-					type="button"
-					onclick={toggleSidebar}
-					aria-label={sidebarOpen ? 'Скрыть панель диалогов' : 'Показать панель диалогов'}
-					title={sidebarOpen ? 'Скрыть панель' : 'Показать панель'}
-				>{sidebarOpen ? '◀' : '☰'}</button>
-			{/if}
-			<img class="logo" src="/logo.png" alt="" width="28" height="28" />
-			<h1>
-				{chat.organization?.name
-					? `База знаний — ${chat.organization.name}`
-					: 'База знаний'}
-			</h1>
-			{#if chat.isAdmin}
-				<a href="/admin">Админ</a>
-			{/if}
-			{#if !chat.historyEnabled && chat.user?.name}
-				<a href="/profile" class="username" title="Профиль">{chat.user.name}</a>
-				<button type="button" onclick={logout}>Выйти</button>
-			{/if}
-			{#if chat.canReindex}
-				<button onclick={rebuildIndex} disabled={chat.busy}>Перестроить индекс</button>
-			{/if}
-			{#if !chat.historyEnabled}
-				<button onclick={newChat} disabled={chat.busy || chat.messages.length === 0}>
-					Новый диалог
-				</button>
-			{/if}
-		</header>
-
-		{@render children()}
-	</main>
-</div>
+			{@render children()}
+		</main>
+	</div>
 {/if}
-
-<style>
-	/* Собственные цвета и тема: без них страница берёт фон браузера,
-	   и в тёмной теме чёрный текст ложится на чёрный фон. */
-	:global(html) {
-		color-scheme: light dark;
-		/* Дружелюбная красная палитра: тёплый фон, «клубничные» акценты,
-		   без агрессивно-сигнальных заливок. */
-		--bg: #fff8f6;
-		--fg: #411414;
-		--muted: #a66a63;
-		--panel: #fdeae5;
-		--mine: #ffd9d2;
-		--line: #eec4bb;
-		--accent: #d64541;
-		--accent-soft: #fbe3e0;
-		--error: #c0392b;
-		--warning: #a9741e;
-		--accent-contrast: #fff;
-	}
-	@media (prefers-color-scheme: dark) {
-		:global(html) {
-			--bg: #221313;
-			--fg: #f3e3e0;
-			--muted: #c2958d;
-			--panel: #35211e;
-			--mine: #5e2621;
-			--line: #5a342e;
-			--accent: #f07770;
-			--accent-soft: #4c2a26;
-			--error: #f0807a;
-			--warning: #e0a94a;
-			--accent-contrast: #3a1512;
-		}
-	}
-	:global(body) {
-		margin: 0;
-		background: var(--bg);
-		color: var(--fg);
-	}
-	.app {
-		display: flex;
-		/* Высота окна, а не min-height: иначе поле ввода уезжает за нижний
-		   край и страница целиком ползает под курсором при каждом ответе. */
-		height: 100dvh;
-		font: 16px/1.5 system-ui, sans-serif;
-	}
-	aside {
-		width: var(--sidebar-w, 15rem);
-		flex: none;
-		box-sizing: border-box;
-		border-right: 1px solid var(--line);
-		padding: 1rem 0.75rem;
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
-		overflow-y: auto;
-	}
-	/* Ручка изменения ширины панели: тонкая полоса на стыке с контентом. */
-	.resizer {
-		flex: none;
-		width: 6px;
-		cursor: col-resize;
-		background: transparent;
-		transition: background 0.15s ease;
-	}
-	.resizer:hover,
-	.resizer:active {
-		background: var(--accent);
-	}
-	.sidebar-toggle {
-		font: inherit;
-		line-height: 1;
-		padding: 0.3rem 0.5rem;
-		border: 1px solid var(--line);
-		border-radius: 0.4rem;
-		background: var(--panel);
-		color: inherit;
-		cursor: pointer;
-	}
-	.sidebar-toggle:hover {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-	nav {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
-	}
-	/* Профиль прижат к низу колонки: список диалогов может быть коротким. */
-	.me {
-		margin-top: auto;
-		padding-top: 0.5rem;
-		border-top: 1px solid var(--line);
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		font-size: 0.9rem;
-	}
-	.me .username {
-		flex: 1;
-		min-width: 0;
-		color: inherit;
-		font-weight: 600;
-		text-decoration: none;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.me .username:hover {
-		color: var(--accent);
-	}
-	.me .logout {
-		font: inherit;
-		padding: 0.3rem 0.6rem;
-		border: 1px solid var(--line);
-		border-radius: 0.45rem;
-		background: var(--panel);
-		color: inherit;
-		cursor: pointer;
-	}
-	.me .logout:hover {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-	/* На узком экране колонка диалогов съедала половину ширины и переписку
-	   читать становилось нечем — там она превращается в полосу сверху. */
-	@media (max-width: 40rem) {
-		.app {
-			flex-direction: column;
-		}
-		aside {
-			width: auto;
-			max-height: 30vh;
-			border-right: none;
-			border-bottom: 1px solid var(--line);
-		}
-		/* Вертикальную ручку изменения ширины на мобильной раскладке
-		   (панель сверху) показывать незачем. */
-		.resizer {
-			display: none;
-		}
-	}
-	.item {
-		display: flex;
-		align-items: center;
-		border-radius: 0.4rem;
-	}
-	.item.active {
-		background: var(--panel);
-	}
-	.item .open {
-		flex: 1;
-		min-width: 0;
-		padding: 0.4rem 0.5rem;
-		color: inherit;
-		text-decoration: none;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.item .icon {
-		border: none;
-		background: none;
-		color: var(--muted);
-		padding: 0.2rem 0.4rem;
-		cursor: pointer;
-	}
-	.item .rename {
-		flex: 1;
-		min-width: 0;
-		font: inherit;
-		padding: 0.35rem 0.45rem;
-		border: 1px solid var(--line);
-		border-radius: 0.4rem;
-		background: var(--bg);
-		color: inherit;
-	}
-	main {
-		flex: 1;
-		min-width: 0;
-		max-width: 46rem;
-		margin: 0 auto;
-		padding: 1.5rem 1rem 2rem;
-		display: flex;
-		flex-direction: column;
-		box-sizing: border-box;
-	}
-	header {
-		display: flex;
-		align-items: center;
-		gap: 0.6rem;
-		flex-wrap: wrap;
-	}
-	.logo {
-		flex: none;
-		border-radius: 0.4rem;
-		display: block;
-	}
-	h1 {
-		font-size: 1.25rem;
-		margin: 0 auto 0 0;
-	}
-	header a {
-		color: var(--accent);
-		font-size: 0.9rem;
-	}
-	header a.username {
-		color: inherit;
-		font-weight: 600;
-		text-decoration: none;
-		border-bottom: 1px dashed var(--line);
-	}
-	header a.username:hover {
-		color: var(--accent);
-		border-bottom-color: var(--accent);
-	}
-	header button {
-		font: inherit;
-		padding: 0.4rem 0.8rem;
-		border: 1px solid var(--line);
-		border-radius: 0.5rem;
-		background: var(--panel);
-		color: inherit;
-		cursor: pointer;
-	}
-	header button:not(:disabled):hover {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-	.empty {
-		color: var(--muted);
-	}
-	.more {
-		font: inherit;
-		margin-top: 0.25rem;
-		padding: 0.35rem 0.5rem;
-		border: none;
-		background: none;
-		color: var(--muted);
-		cursor: pointer;
-		text-align: left;
-	}
-	.new {
-		font: inherit;
-		padding: 0.5rem 0.9rem;
-		border: 1px solid var(--line);
-		border-radius: 0.5rem;
-		background: var(--panel);
-		color: inherit;
-		cursor: pointer;
-	}
-	button:disabled {
-		opacity: 0.5;
-		cursor: default;
-	}
-</style>

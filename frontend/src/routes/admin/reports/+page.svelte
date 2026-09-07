@@ -19,23 +19,10 @@
 	});
 </script>
 
-<h1>Отчёты</h1>
+<h1 class="mb-4 text-xl font-semibold">Отчёты</h1>
 <p>Отчёты появятся позже. Сейчас аналитики в системе нет.</p>
 {#if error}
-	<p class="error">{error}</p>
+	<p class="text-red-600 dark:text-red-400">{error}</p>
 {:else if status === 'unavailable'}
-	<p class="muted">Сервис отчётов недоступен.</p>
+	<p class="text-stone-500 dark:text-stone-400">Сервис отчётов недоступен.</p>
 {/if}
-
-<style>
-	h1 {
-		font-size: 1.25rem;
-		margin: 0 0 1rem;
-	}
-	.muted {
-		color: var(--muted, #6b7280);
-	}
-	.error {
-		color: var(--error);
-	}
-</style>

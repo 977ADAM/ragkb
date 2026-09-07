@@ -13,7 +13,7 @@
 	});
 </script>
 
-<section class="feed" bind:this={feed} aria-live="polite">
+<section class="flex flex-1 flex-col gap-3 overflow-y-auto py-4" bind:this={feed} aria-live="polite">
 	{#each chat.messages as message, i (i)}
 		<Message
 			{message}
@@ -22,20 +22,8 @@
 		/>
 	{/each}
 	{#if chat.messages.length === 0}
-		<p class="empty">Задайте вопрос по документам базы знаний.</p>
+		<p class="text-stone-500 dark:text-stone-400">
+			Задайте вопрос по документам базы знаний.
+		</p>
 	{/if}
 </section>
-
-<style>
-	.feed {
-		flex: 1;
-		overflow-y: auto;
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
-		padding: 1rem 0;
-	}
-	.empty {
-		color: var(--muted);
-	}
-</style>

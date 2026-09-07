@@ -1,6 +1,10 @@
 import { json } from '@sveltejs/kit';
 import { proxyJson } from '$lib/server/backend.js';
 
+/**
+ * @param {URL} url
+ * @param {string} id
+ */
 function path(url, id) {
 	const org = url.searchParams.get('org') ?? '';
 	if (!org) return null;

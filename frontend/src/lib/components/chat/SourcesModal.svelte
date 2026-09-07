@@ -17,106 +17,52 @@
 <svelte:window onkeydown={onKey} />
 
 <div
-	class="overlay"
+	class="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"
 	role="presentation"
 	onmousedown={(e) => {
 		if (e.target === e.currentTarget) onclose();
 	}}
 >
-	<div class="dialog" role="dialog" aria-modal="true" aria-label="Источник" tabindex="-1">
-		<header>
-			<h2>{source.citation || source.source || 'Источник'}</h2>
-			<button class="close" type="button" onclick={onclose} aria-label="Закрыть">×</button>
+	<div
+		class="max-h-[80vh] w-full max-w-[42rem] overflow-auto rounded-lg border border-stone-300 bg-white p-4 text-stone-900 shadow-[0_10px_30px_rgba(0,0,0,0.25)] dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
+		role="dialog"
+		aria-modal="true"
+		aria-label="Источник"
+		tabindex="-1"
+	>
+		<header class="mb-2 flex items-start justify-between gap-3">
+			<h2 class="m-0 text-base leading-snug">
+				{source.citation || source.source || 'Источник'}
+			</h2>
+			<button
+				class="cursor-pointer border-none bg-transparent text-xl leading-none text-stone-500 hover:text-red-600 dark:text-stone-400 dark:hover:text-red-400"
+				type="button"
+				onclick={onclose}
+				aria-label="Закрыть"
+			>×</button>
 		</header>
-		<dl class="facts">
+		<dl class="mb-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
 			{#if source.source}
-				<dt>Файл</dt>
-				<dd>{source.source}</dd>
+				<dt class="text-stone-500 dark:text-stone-400">Файл</dt>
+				<dd class="m-0">{source.source}</dd>
 			{/if}
 			{#if source.page}
-				<dt>Страница</dt>
-				<dd>{source.page}</dd>
+				<dt class="text-stone-500 dark:text-stone-400">Страница</dt>
+				<dd class="m-0">{source.page}</dd>
 			{/if}
 			{#if source.available === false}
-				<dt>Статус</dt>
-				<dd class="missing">документа больше нет в базе</dd>
+				<dt class="text-stone-500 dark:text-stone-400">Статус</dt>
+				<dd class="m-0 text-amber-600 dark:text-amber-400">документа больше нет в базе</dd>
 			{/if}
 		</dl>
 		{#if source.text}
-			<p class="snippet">{source.text}</p>
+			<p class="m-0 whitespace-pre-wrap rounded-md bg-red-100 p-3 text-sm dark:bg-red-950">
+				{source.text}
+			</p>
 		{:else}
-			<p class="muted">Фрагмент не сохранён — ответ получен до этой версии.</p>
+			<p class="m-0 text-stone-500 dark:text-stone-400">
+				Фрагмент не сохранён — ответ получен до этой версии.
+			</p>
 		{/if}
 	</div>
 </div>
-
-<style>
-	.overlay {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.45);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 50;
-		padding: 1rem;
-	}
-	.dialog {
-		background: var(--panel, #fff);
-		color: var(--fg, #111);
-		border-radius: 0.6rem;
-		max-width: 42rem;
-		width: 100%;
-		max-height: 80vh;
-		overflow: auto;
-		padding: 1rem 1.15rem;
-		box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
-	}
-	header {
-		display: flex;
-		justify-content: space-between;
-		align-items: flex-start;
-		gap: 0.75rem;
-		margin-bottom: 0.6rem;
-	}
-	h2 {
-		margin: 0;
-		font-size: 1.05rem;
-		line-height: 1.3;
-	}
-	.close {
-		border: none;
-		background: transparent;
-		font-size: 1.4rem;
-		line-height: 1;
-		cursor: pointer;
-		color: var(--muted, #6b7280);
-	}
-	.facts {
-		display: grid;
-		grid-template-columns: auto 1fr;
-		gap: 0.15rem 0.75rem;
-		margin: 0 0 0.75rem;
-		font-size: 0.8rem;
-	}
-	dt {
-		color: var(--muted, #6b7280);
-	}
-	dd {
-		margin: 0;
-	}
-	dd.missing {
-		color: var(--warning);
-	}
-	.snippet {
-		margin: 0;
-		white-space: pre-wrap;
-		background: var(--mine);
-		border-radius: 0.4rem;
-		padding: 0.6rem 0.75rem;
-		font-size: 0.9rem;
-	}
-	.muted {
-		color: var(--muted, #6b7280);
-	}
-</style>

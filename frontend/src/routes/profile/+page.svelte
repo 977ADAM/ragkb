@@ -72,27 +72,28 @@
 	}
 </script>
 
-<h1>Профиль</h1>
+<h1 class="mb-4 text-xl font-semibold">Профиль</h1>
 
 {#if error}
-	<p class="error">{error}</p>
+	<p class="text-red-600 dark:text-red-400">{error}</p>
 {:else if profile}
-	<dl class="facts">
-		<dt>Имя пользователя</dt>
-		<dd>{profile.username}</dd>
-		<dt>Роль</dt>
-		<dd>{roleLabel(profile.role)}</dd>
+	<dl class="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[0.95rem]">
+		<dt class="text-stone-500 dark:text-stone-400">Имя пользователя</dt>
+		<dd class="m-0">{profile.username}</dd>
+		<dt class="text-stone-500 dark:text-stone-400">Роль</dt>
+		<dd class="m-0">{roleLabel(profile.role)}</dd>
 		{#if profile.created_at}
-			<dt>Зарегистрирован</dt>
-			<dd>{new Date(profile.created_at).toLocaleString()}</dd>
+			<dt class="text-stone-500 dark:text-stone-400">Зарегистрирован</dt>
+			<dd class="m-0">{new Date(profile.created_at).toLocaleString()}</dd>
 		{/if}
 	</dl>
 
-	<h2>Смена пароля</h2>
-	<form onsubmit={submit}>
-		<label>
+	<h2 class="mt-6 mb-3 text-base font-semibold">Смена пароля</h2>
+	<form class="flex max-w-md flex-col gap-3" onsubmit={submit}>
+		<label class="flex flex-col gap-1 text-sm text-stone-500 dark:text-stone-400">
 			Текущий пароль
 			<input
+				class="field"
 				name="current"
 				type="password"
 				autocomplete="current-password"
@@ -100,9 +101,10 @@
 				required
 			/>
 		</label>
-		<label>
+		<label class="flex flex-col gap-1 text-sm text-stone-500 dark:text-stone-400">
 			Новый пароль
 			<input
+				class="field"
 				name="next"
 				type="password"
 				autocomplete="new-password"
@@ -111,9 +113,10 @@
 				required
 			/>
 		</label>
-		<label>
+		<label class="flex flex-col gap-1 text-sm text-stone-500 dark:text-stone-400">
 			Повторите новый пароль
 			<input
+				class="field"
 				name="repeat"
 				type="password"
 				autocomplete="new-password"
@@ -123,83 +126,11 @@
 			/>
 		</label>
 		{#if notice}
-			<p class="notice">{notice}</p>
+			<p class="m-0 text-sm text-red-600 dark:text-red-400">{notice}</p>
 		{/if}
 		{#if formError}
-			<p class="error">{formError}</p>
+			<p class="m-0 text-sm text-red-600 dark:text-red-400">{formError}</p>
 		{/if}
-		<button type="submit" disabled={busy}>Сменить пароль</button>
+		<button class="btn-accent w-fit" type="submit" disabled={busy}>Сменить пароль</button>
 	</form>
 {/if}
-
-<style>
-	h1 {
-		font-size: 1.25rem;
-		margin: 0 0 1rem;
-	}
-	h2 {
-		font-size: 1.05rem;
-		margin: 1.5rem 0 0.75rem;
-	}
-	.facts {
-		display: grid;
-		grid-template-columns: auto 1fr;
-		gap: 0.25rem 1rem;
-		margin: 0;
-		font-size: 0.95rem;
-	}
-	dt {
-		color: var(--muted);
-	}
-	dd {
-		margin: 0;
-	}
-	form {
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
-		max-width: 22rem;
-	}
-	label {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
-		font-size: 0.85rem;
-		color: var(--muted);
-	}
-	input {
-		font: inherit;
-		padding: 0.4rem 0.5rem;
-		border: 1px solid var(--line);
-		border-radius: 0.4rem;
-		background: var(--bg);
-		color: inherit;
-	}
-	input:focus {
-		outline: 2px solid var(--accent);
-		outline-offset: 0;
-		border-color: transparent;
-	}
-	.error {
-		color: var(--error);
-		margin: 0;
-	}
-	.notice {
-		color: var(--accent);
-		margin: 0;
-	}
-	button {
-		font: inherit;
-		padding: 0.5rem 0.9rem;
-		border: 1px solid var(--accent);
-		border-radius: 0.5rem;
-		background: var(--accent);
-		color: var(--accent-contrast);
-		cursor: pointer;
-		align-self: flex-start;
-	}
-	button:disabled {
-		opacity: 0.55;
-		cursor: default;
-	}
-</style>

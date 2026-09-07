@@ -56,6 +56,13 @@
 		return 'индекс не собран';
 	}
 
+	/** @param {string | null | undefined} state */
+	function stateClass(state) {
+		if (state === 'stale') return 'text-amber-600 dark:text-amber-400';
+		if (state === 'new') return 'text-red-600 dark:text-red-400';
+		return '';
+	}
+
 	/** @param {number} bytes */
 	function formatSize(bytes) {
 		if (!Number.isFinite(bytes)) return '';
@@ -142,71 +149,93 @@
 	}
 </script>
 
-<h1>Документы</h1>
+<h1 class="mb-4 text-xl font-semibold">Документы</h1>
 {#if error}
-	<p class="error">{error}</p>
+	<p class="text-red-600 dark:text-red-400">{error}</p>
 {/if}
 {#if summary}
-	<p class="counts">
+	<p class="mb-3">
 		Файлов: <b>{summary.corpus_files}</b>
 		· В индексе: <b>{summary.indexed_docs}</b>
 		· Чанков: <b>{summary.chunks}</b>
 	</p>
 {/if}
-<p class="toolbar">
-	<button type="button" disabled={busy} onclick={() => fileInput?.click()}>Загрузить</button>
+<p class="mb-4 flex items-center gap-3">
+	<button class="btn" type="button" disabled={busy} onclick={() => fileInput?.click()}>
+		Загрузить
+	</button>
 	<input bind:this={fileInput} type="file" hidden disabled={busy} onchange={onPick} />
 	{#if busy}
-		<span class="muted">Индексация…</span>
+		<span class="text-stone-500 dark:text-stone-400">Индексация…</span>
 	{/if}
 </p>
-<table>
+<table class="w-full border-collapse text-left">
 	<thead>
 		<tr>
-			<th>Имя</th>
-			<th>Состояние</th>
-			<th>Размер</th>
-			<th>Изменён</th>
-			<th>Чанков</th>
-			<th></th>
+			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Имя</th>
+			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Состояние</th>
+			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Размер</th>
+			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Изменён</th>
+			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Чанков</th>
+			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700"></th>
 		</tr>
 	</thead>
 	<tbody>
 		{#each corpus as row (row.name)}
 			<tr>
-				<td>{row.name}</td>
-				<td>{stateLabel(row.state)}</td>
-				<td>{formatSize(row.size)}</td>
-				<td>{formatTime(row.mtime)}</td>
-				<td>{row.chunks}</td>
-				<td>
-					<button type="button" disabled={busy} onclick={() => remove(row.name)}>Удалить</button>
+				<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">{row.name}</td>
+				<td
+					class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700 {stateClass(
+						row.state
+					)}"
+				>
+					{stateLabel(row.state)}
+				</td>
+				<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">
+					{formatSize(row.size)}
+				</td>
+				<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">
+					{formatTime(row.mtime)}
+				</td>
+				<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">{row.chunks}</td>
+				<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">
+					<button class="btn" type="button" disabled={busy} onclick={() => remove(row.name)}>
+						Удалить
+					</button>
 				</td>
 			</tr>
 		{/each}
 	</tbody>
 </table>
 {#if corpus.length === 0 && !error}
-	<p class="muted">Документов нет.</p>
+	<p class="text-stone-500 dark:text-stone-400">Документов нет.</p>
 {/if}
 
 {#if orphans.length}
-	<h2>Сироты</h2>
-	<p class="muted">документа нет в каталоге — исчезнет при полной переиндексации</p>
-	<table>
+	<h2 class="mt-6 mb-1 text-lg font-semibold">Сироты</h2>
+	<p class="text-stone-500 dark:text-stone-400">
+		документа нет в каталоге — исчезнет при полной переиндексации
+	</p>
+	<table class="mt-2 w-full border-collapse text-left">
 		<thead>
 			<tr>
-				<th>Название</th>
-				<th>Источник</th>
-				<th>Чанки</th>
+				<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Название</th>
+				<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Источник</th>
+				<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Чанки</th>
 			</tr>
 		</thead>
 		<tbody>
 			{#each orphans as orphan, i (orphan.source ?? i)}
 				<tr>
-					<td>{orphan.title ?? ''}</td>
-					<td>{orphan.source ?? ''}</td>
-					<td>{orphan.chunks ?? 0}</td>
+					<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">
+						{orphan.title ?? ''}
+					</td>
+					<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">
+						{orphan.source ?? ''}
+					</td>
+					<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">
+						{orphan.chunks ?? 0}
+					</td>
 				</tr>
 			{/each}
 		</tbody>
@@ -214,59 +243,12 @@
 {/if}
 
 {#if skipped.length}
-	<h2>Пропущено при сборке</h2>
-	<ul>
+	<h2 class="mt-6 mb-1 text-lg font-semibold">Пропущено при сборке</h2>
+	<ul class="list-disc pl-5 text-stone-500 dark:text-stone-400">
 		{#each skipped as item, i (i)}
-			<li>{skippedPath(item)}{skippedReason(item) ? ` — ${skippedReason(item)}` : ''}</li>
+			<li>
+				{skippedPath(item)}{skippedReason(item) ? ` — ${skippedReason(item)}` : ''}
+			</li>
 		{/each}
 	</ul>
 {/if}
-
-<style>
-	h1 {
-		font-size: 1.25rem;
-		margin: 0 0 1rem;
-	}
-	h2 {
-		font-size: 1.1rem;
-		margin: 1.5rem 0 0.5rem;
-	}
-	.counts {
-		margin: 0 0 0.75rem;
-	}
-	.toolbar {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		margin: 0 0 1rem;
-	}
-	table {
-		width: 100%;
-		border-collapse: collapse;
-	}
-	th,
-	td {
-		text-align: left;
-		padding: 0.4rem 0.5rem;
-		border-bottom: 1px solid var(--line, #d1d5db);
-	}
-	.error {
-		color: var(--error);
-	}
-	.muted {
-		color: var(--muted, #6b7280);
-	}
-	button {
-		font: inherit;
-		padding: 0.35rem 0.7rem;
-		border: 1px solid var(--line, #d1d5db);
-		border-radius: 0.4rem;
-		background: var(--panel, #f3f4f6);
-		color: inherit;
-		cursor: pointer;
-	}
-	button:disabled {
-		opacity: 0.5;
-		cursor: default;
-	}
-</style>

@@ -33,36 +33,53 @@
 	}
 </script>
 
-<h1>Оценки ответов</h1>
+<h1 class="mb-4 text-xl font-semibold">Оценки ответов</h1>
 {#if error}
-	<p class="error">{error}</p>
+	<p class="text-red-600 dark:text-red-400">{error}</p>
 {/if}
 {#if counts}
-	<p class="counts">
+	<p class="mb-3">
 		Полезных ответов: <b>{counts.up}</b> · Не помогли: <b>{counts.down}</b>
 	</p>
 {/if}
-<table>
+<table class="w-full border-collapse text-left align-top">
 	<thead>
 		<tr>
-			<th>Пользователь</th>
-			<th>Оценка</th>
-			<th>Комментарий</th>
-			<th>Ответ</th>
-			<th>Когда</th>
-			<th></th>
+			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Пользователь</th>
+			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Оценка</th>
+			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Комментарий</th>
+			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Ответ</th>
+			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Когда</th>
+			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700"></th>
 		</tr>
 	</thead>
 	<tbody>
 		{#each items as item (item.conversation_id + item.created_at)}
 			<tr>
-				<td>{item.username}</td>
-				<td class:down={item.rating === 'down'}>{item.rating === 'up' ? '👍' : '👎'}</td>
-				<td>{item.comment || '—'}</td>
-				<td class="answer">{item.answer ?? ''}</td>
-				<td>{item.created_at ?? ''}</td>
-				<td>
-					<button type="button" onclick={() => openConversation(item.conversation_id)}>
+				<td class="border-b border-stone-300 px-2 py-1.5 align-top dark:border-stone-700">
+					{item.username}
+				</td>
+				<td
+					class="border-b border-stone-300 px-2 py-1.5 align-top dark:border-stone-700 {item.rating ===
+					'down'
+						? 'text-red-600 dark:text-red-400'
+						: ''}"
+				>
+					{item.rating === 'up' ? '👍' : '👎'}
+				</td>
+				<td class="border-b border-stone-300 px-2 py-1.5 align-top dark:border-stone-700">
+					{item.comment || '—'}
+				</td>
+				<td
+					class="max-w-[28rem] border-b border-stone-300 px-2 py-1.5 align-top text-sm whitespace-pre-wrap dark:border-stone-700"
+				>
+					{item.answer ?? ''}
+				</td>
+				<td class="border-b border-stone-300 px-2 py-1.5 align-top dark:border-stone-700">
+					{item.created_at ?? ''}
+				</td>
+				<td class="border-b border-stone-300 px-2 py-1.5 align-top dark:border-stone-700">
+					<button class="btn" type="button" onclick={() => openConversation(item.conversation_id)}>
 						Открыть диалог
 					</button>
 				</td>
@@ -71,40 +88,5 @@
 	</tbody>
 </table>
 {#if !error && items.length === 0}
-	<p class="muted">Оценок пока нет.</p>
+	<p class="text-stone-500 dark:text-stone-400">Оценок пока нет.</p>
 {/if}
-
-<style>
-	h1 {
-		font-size: 1.25rem;
-		margin: 0 0 1rem;
-	}
-	.counts {
-		margin: 0 0 0.75rem;
-	}
-	table {
-		width: 100%;
-		border-collapse: collapse;
-	}
-	th,
-	td {
-		text-align: left;
-		padding: 0.4rem 0.5rem;
-		border-bottom: 1px solid var(--line, #d1d5db);
-		vertical-align: top;
-	}
-	.down {
-		color: var(--error);
-	}
-	.answer {
-		max-width: 28rem;
-		white-space: pre-wrap;
-		font-size: 0.85rem;
-	}
-	.error {
-		color: var(--error);
-	}
-	.muted {
-		color: var(--muted, #6b7280);
-	}
-</style>

@@ -14,40 +14,21 @@
 </script>
 
 {#if chat.fatal}
-	<p class="fatal">{chat.fatal}</p>
+	<p class="my-1 text-sm text-red-600 dark:text-red-400">{chat.fatal}</p>
 {/if}
 
 {#if isEmpty}
 	<!-- Пустой диалог (/new): поле вопроса по центру экрана, лента не нужна. -->
-	<div class="start">
-		<p class="hint">Задайте вопрос по документам базы знаний.</p>
-		<ChatComposer {onCreated} />
+	<div class="flex flex-1 flex-col items-center justify-center gap-3">
+		<p class="text-base text-stone-500 dark:text-stone-400">
+			Задайте вопрос по документам базы знаний.
+		</p>
+		<!-- Поле ввода в центре шире обычного — ему не тесно под лентой. -->
+		<div class="w-full max-w-[42rem]">
+			<ChatComposer {onCreated} />
+		</div>
 	</div>
 {:else}
 	<ChatFeed />
 	<ChatComposer {onCreated} />
 {/if}
-
-<style>
-	.fatal {
-		color: var(--error);
-		margin: 0.4rem 0 0;
-		font-size: 0.9rem;
-	}
-	.start {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		gap: 0.75rem;
-	}
-	.hint {
-		color: var(--muted);
-		font-size: 1.05rem;
-	}
-	/* Поле ввода в центре шире обычного — ему не тесно под лентой. */
-	.start :global(.composer) {
-		width: min(42rem, 100%);
-	}
-</style>
