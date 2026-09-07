@@ -106,6 +106,7 @@ AuthSvc = Annotated[AuthService, Depends(get_auth_service)]
 
 def cookie_secure(request: Request) -> bool:
     forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
+    
     return request.url.scheme == "https" or forwarded == "https"
 
 
