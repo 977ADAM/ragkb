@@ -1,45 +1,47 @@
+x-backend: &backend
+  build: ./backend
+  image: ragkb:local
+
+x-db-env: &db-env
+  RAGKB_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+
 services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-ragkb}
+      POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-ragkb}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - rag_pg:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ragkb} -d ${POSTGRES_DB:-ragkb}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 2s
       timeout: 5s
       retries: 20
 
   migrate:
-    build: ./backend
-    image: ragkb:local
+    <<: *backend
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      RAGKB_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ragkb}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ragkb}
+      <<: *db-env
     command: alembic upgrade head
-    restart: "no"
 
   ensure-admin:
-    build: ./backend
-    image: ragkb:local
+    <<: *backend
     depends_on:
       migrate:
         condition: service_completed_successfully
     environment:
-      RAGKB_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ragkb}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ragkb}
+      <<: *db-env
       ADMIN_LOGIN: ${ADMIN_LOGIN:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     command: python -m scripts.ensure_admin
-    restart: "no"
 
   rag:
-    build: ./backend
-    image: ragkb:local
+    <<: *backend
     depends_on:
       ensure-admin:
         condition: service_completed_successfully
@@ -51,19 +53,13 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
+      <<: *db-env
       RAGKB_AUTH_MODE: ${RAGKB_AUTH_MODE:-session}
       RAGKB_ORG_NAME: ${RAGKB_ORG_NAME:-}
       RAGKB_ORG_ID: ${RAGKB_ORG_ID:-}
-      RAGKB_EMBEDDING_BACKEND: ${RAGKB_EMBEDDING_BACKEND:-sentence-transformers}
-      RAGKB_EMBEDDING_MODEL: ${RAGKB_EMBEDDING_MODEL:-BAAI/bge-m3}
-      HF_HOME: /app/data/hf
-      RAGKB_LLM_BACKEND: ${RAGKB_LLM_BACKEND:-openai}
       RAGKB_LLM_MODEL: ${RAGKB_LLM_MODEL:-}
       RAGKB_LLM_URL: ${RAGKB_LLM_URL}
       RAGKB_LLM_API_KEY: ${RAGKB_LLM_API_KEY:-}
-      RAGKB_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ragkb}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ragkb}
-      RAGKB_STORE_BACKEND: chroma
-      RAGKB_LOG_DIR: /app/data/logs
 
   frontend:
     build: ./frontend
@@ -72,9 +68,6 @@ services:
     ports:
       - "3000:3000"
     environment:
-      RAGKB_BACKEND_URL: http://rag:8000
-      BODY_SIZE_LIMIT: "21M"
-      # Не заменяет сессию при RAGKB_AUTH_MODE=session. В бою не задавать.
       RAGKB_DEV_USER: ${RAGKB_DEV_USER:-}
       RAGKB_DEV_GROUPS: ${RAGKB_DEV_GROUPS:-}
 

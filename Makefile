@@ -43,7 +43,7 @@ check:
 	cd frontend && bun run check
 
 up:
-	docker compose up -d --build postgres migrate ensure-admin rag frontend
+	docker compose up -d --build
 
 down:
 	docker compose down
