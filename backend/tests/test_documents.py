@@ -173,3 +173,13 @@ def test_delete_on_chroma_is_point_removal(tmp_path):
     make_service(cfg).delete("keep.md")
     body = make_service(cfg).list_documents()
     assert all(r["name"] != "keep.md" for r in body["corpus"])
+
+
+def test_delete_last_doc_clears_chroma_index(tmp_path):
+    pytest.importorskip("chromadb")
+    cfg = make_cfg(tmp_path)
+    cfg.store.backend = "chroma"
+    build_index(cfg)
+    make_service(cfg).delete("policy.md")
+    body = make_service(cfg).list_documents()
+    assert body["index"] == "no_index"

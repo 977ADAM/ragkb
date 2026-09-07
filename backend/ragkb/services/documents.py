@@ -147,17 +147,17 @@ class DocumentsService:
         if not manifest_path.exists():
             self._invalidate()
             return
+        if not loaders.discover(Path(self.cfg.docs_dir)):
+            shutil.rmtree(Path(self.cfg.index_dir), ignore_errors=True)
+            self._invalidate()
+            return
         if self.cfg.store.backend.lower() == "chroma":
             remove_document(self.cfg, str(target))
         else:
-            remaining = loaders.discover(Path(self.cfg.docs_dir))
-            if not remaining:
-                shutil.rmtree(Path(self.cfg.index_dir), ignore_errors=True)
-            else:
-                try:
-                    build_index(self.cfg)
-                except ValueError as exc:
-                    raise InvalidRequest(f"Не удалось пересобрать индекс: {exc}") from exc
+            try:
+                build_index(self.cfg)
+            except ValueError as exc:
+                raise InvalidRequest(f"Не удалось пересобрать индекс: {exc}") from exc
         self._invalidate()
 
 
