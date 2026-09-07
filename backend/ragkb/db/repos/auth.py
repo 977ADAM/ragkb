@@ -85,6 +85,7 @@ class PostgresAccounts:
 
     async def delete_session(self, token_hash: str) -> None:
         async with self.session_factory() as session:
+            
             await session.execute(
                 delete(SessionRow).where(SessionRow.token_hash == token_hash)
             )
