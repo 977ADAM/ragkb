@@ -1,12 +1,21 @@
+import asyncio
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from alembic import command
+from alembic.config import Config as AlembicConfig
+from fastapi.testclient import TestClient
+from helpers import BACKEND_ROOT
 
-from ragkb.core.config import Config
+from ragkb.app import create_app
+from ragkb.core.config import Config, OrganizationConfig
+from ragkb.core.database import make_engine, make_session_factory
 from ragkb.core.errors import EngineUnavailable, InvalidRequest, NotFound, PayloadTooLarge
 from ragkb.core.pipeline import RAGPipeline, build_index
+from ragkb.db.repos.auth import PostgresAccounts
+from ragkb.services.auth import hash_password
 from ragkb.services.documents import MAX_UPLOAD_BYTES, DocumentsService
 
 
@@ -183,3 +192,126 @@ def test_delete_last_doc_clears_chroma_index(tmp_path):
     make_service(cfg).delete("policy.md")
     body = make_service(cfg).list_documents()
     assert body["index"] == "no_index"
+
+
+def _migrate_sqlite(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = AlembicConfig(str(BACKEND_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BACKEND_ROOT / "migrations"))
+    monkeypatch.setenv("RAGKB_DATABASE_URL", url)
+    command.upgrade(cfg, "head")
+
+
+async def _seed_admin_and_user(url: str) -> None:
+    engine = make_engine(url)
+    store = PostgresAccounts(make_session_factory(engine))
+    await store.ready()
+    await store.create_user("ada", hash_password("password1"), role="admin")
+    await store.create_user("bob", hash_password("password1"), role="user")
+    await engine.dispose()
+
+
+def _session_client_cfg(tmp_path: Path, url: str) -> Config:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "policy.md").write_text("# Политика\n\nТекст про отпуск: 28 дней.\n", encoding="utf-8")
+    cfg = Config(
+        docs_dir=str(docs),
+        index_dir=str(tmp_path / "index"),
+        organization=OrganizationConfig(name="Acme", id="acme"),
+    )
+    cfg.store.backend = "numpy"
+    cfg.database_url = url
+    cfg.auth.mode = "session"
+    cfg.history.enabled = True
+    cfg.logging.dir = str(tmp_path / "logs")
+    return cfg
+
+
+def _signin(client: TestClient, username: str) -> None:
+    res = client.post(
+        "/api/v1/auths/signin",
+        json={"username": username, "password": "password1"},
+    )
+    assert res.status_code == 200
+
+
+@pytest.fixture
+def sqlite_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    db = tmp_path / "ragkb.sqlite3"
+    url = f"sqlite+aiosqlite:///{db}"
+    _migrate_sqlite(url, monkeypatch)
+    asyncio.run(_seed_admin_and_user(url))
+    return url
+
+
+def test_non_admin_forbidden_on_documents(tmp_path, sqlite_url):
+    cfg = _session_client_cfg(tmp_path, sqlite_url)
+    with TestClient(create_app(cfg)) as client:
+        _signin(client, "bob")
+        assert client.get("/api/v1/admin/documents").status_code == 403
+        assert client.post(
+            "/api/v1/admin/documents", files={"file": ("x.md", b"# X", "text/markdown")}
+        ).status_code == 403
+        assert client.delete("/api/v1/admin/documents/x.md").status_code == 403
+
+
+def test_admin_gets_document_list(tmp_path, sqlite_url):
+    cfg = _session_client_cfg(tmp_path, sqlite_url)
+    with TestClient(create_app(cfg)) as client:
+        _signin(client, "ada")
+        body = client.get("/api/v1/admin/documents").json()
+        assert body["index"] == "no_index"
+        assert body["corpus"][0]["name"] == "policy.md"
+
+
+def test_admin_upload_and_list(tmp_path, sqlite_url):
+    cfg = _session_client_cfg(tmp_path, sqlite_url)
+    with TestClient(create_app(cfg)) as client:
+        _signin(client, "ada")
+        res = client.post(
+            "/api/v1/admin/documents",
+            files={"file": ("new.md", "# Новый\n\nПравило: 28 дней.\n".encode(), "text/markdown")},
+        )
+        assert res.status_code == 200
+        assert res.json()["chunks"] >= 1
+        body = client.get("/api/v1/admin/documents").json()
+        assert body["index"] == "ok"
+        assert len(body["corpus"]) == 2
+
+
+def test_admin_upload_bad_extension_is_400(tmp_path, sqlite_url):
+    cfg = _session_client_cfg(tmp_path, sqlite_url)
+    with TestClient(create_app(cfg)) as client:
+        _signin(client, "ada")
+        res = client.post(
+            "/api/v1/admin/documents",
+            files={"file": ("evil.exe", b"x", "application/octet-stream")},
+        )
+        assert res.status_code == 400
+
+
+def test_admin_upload_too_large_is_413(tmp_path, sqlite_url, monkeypatch):
+    import ragkb.services.documents as documents_module
+
+    monkeypatch.setattr(documents_module, "MAX_UPLOAD_BYTES", 10)
+    cfg = _session_client_cfg(tmp_path, sqlite_url)
+    with TestClient(create_app(cfg)) as client:
+        _signin(client, "ada")
+        res = client.post(
+            "/api/v1/admin/documents",
+            files={"file": ("big.md", b"a" * 20, "text/markdown")},
+        )
+        assert res.status_code == 413
+
+
+def test_admin_delete(tmp_path, sqlite_url):
+    cfg = _session_client_cfg(tmp_path, sqlite_url)
+    with TestClient(create_app(cfg)) as client:
+        _signin(client, "ada")
+        client.post(
+            "/api/v1/admin/documents",
+            files={"file": ("new.md", "# N\n\nТекст.\n".encode(), "text/markdown")},
+        )
+        res = client.delete("/api/v1/admin/documents/new.md")
+        assert res.status_code == 204
+        assert client.delete("/api/v1/admin/documents/new.md").status_code == 404

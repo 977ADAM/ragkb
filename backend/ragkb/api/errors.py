@@ -12,6 +12,7 @@ from ragkb.core.errors import (
     Forbidden,
     InvalidRequest,
     NotFound,
+    PayloadTooLarge,
     RagkbError,
     Unauthenticated,
 )
@@ -23,6 +24,7 @@ _STATUS = {
     Unauthenticated: 401,
     Forbidden: 403,
     InvalidRequest: 400,
+    PayloadTooLarge: 413,
     Conflict: 409,
     EngineUnavailable: 503,
 }

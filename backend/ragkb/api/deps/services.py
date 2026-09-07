@@ -7,6 +7,7 @@ from ragkb.container import Container
 from ragkb.services.bootstrap import BootstrapService
 from ragkb.services.chat_conversations import ChatConversationsService
 from ragkb.services.chat_sources import IndexSources
+from ragkb.services.documents import DocumentsService
 from ragkb.services.feedback import FeedbackService
 from ragkb.services.index import IndexService
 from ragkb.services.models import ModelsService
@@ -67,6 +68,11 @@ def feedback_service(request: Request) -> FeedbackService:
 def index_service(request: Request) -> IndexService:
     c = container(request)
     return IndexService(c.cfg, c.engine, c.invalidate_engine)
+
+
+def documents_service(request: Request) -> DocumentsService:
+    c = container(request)
+    return DocumentsService(c.cfg, c.engine, c.invalidate_engine)
 
 
 def bootstrap_service(request: Request) -> BootstrapService:
