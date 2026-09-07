@@ -129,6 +129,9 @@ ADMIN_PASSWORD=…
 Смена эмбеддера: `POST /api/v1/index/rebuild` (админ в интерфейсе).
 
 Или целиком в Docker: `docker compose up -d` (см. `docker-compose.yml`).
+Каталог корпуса `./data/docs` смонтирован в контейнер `rag` на запись
+(`./data/docs:/app/data/docs`), чтобы админ мог загружать документы через UI
+(`/admin/documents`).
 oauth2-proxy и **Keycloak в стеке нет**. На сервере TLS делает **Angie**
 (вне compose): он проксирует на `frontend:3000`. Личность — сессионная кука
 после форм `/login` и `/register`. Angie **не должен** требовать корпоративный
@@ -182,6 +185,9 @@ OIDC на `/login`, `/register`, `/api/auths`. Keycloak/Angie OIDC для ragkb
 | `POST .../chat_conversations/{cid}/messages` | вопрос, поток NDJSON |
 | `POST /api/v1/events` | телеметрия пачкой (до 100 событий) |
 | `POST /api/v1/index/rebuild` | переиндексация: в `session` роль `admin`; в `proxy` группа `auth.admin_group` (по умолчанию `ragkb-admins`) |
+| `GET /api/v1/admin/documents` | список файлов корпуса со статусом индексации (админ) |
+| `POST /api/v1/admin/documents` | загрузка документа multipart + переиндексация (админ) |
+| `DELETE /api/v1/admin/documents/{name}` | удаление документа: файл + индекс (админ) |
 
 При `RAGKB_AUTH_MODE=session` (compose) все эндпоинты, кроме `/health`,
 `POST /api/v1/auths/signup` и `POST /api/v1/auths/signin`, требуют сессионную куку и без
