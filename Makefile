@@ -49,7 +49,7 @@ down:
 	docker compose down
 
 logs:
-	docker compose logs -f postgres migrate ensure-admin rag frontend
+	docker compose logs -f
 
 deploy:
 	./deploy.sh
