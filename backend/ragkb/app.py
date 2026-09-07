@@ -13,8 +13,27 @@ from ragkb.container import Container
 from ragkb.core.config import DEFAULT_CONFIG, Config
 from ragkb.core.errors import EngineUnavailable, RagkbError
 from ragkb.core.logging_config import get_logger, setup_logging
+from ragkb.services.documents import MAX_UPLOAD_BYTES
 
 log = get_logger("ragkb")
+
+# Starlette 1.6: max_part_size=1 MiB; FastAPI вызывает request.form() без kwargs.
+_MULTIPART_MAX_PART_SIZE = MAX_UPLOAD_BYTES + 1024 * 1024
+
+
+def _raise_starlette_multipart_part_limit() -> None:
+    from starlette.requests import Request as StarletteRequest
+
+    if getattr(StarletteRequest.form, "_ragkb_max_part_size", None) == _MULTIPART_MAX_PART_SIZE:
+        return
+    original = StarletteRequest.form
+
+    def form(self, *args, **kwargs):
+        kwargs.setdefault("max_part_size", _MULTIPART_MAX_PART_SIZE)
+        return original(self, *args, **kwargs)
+
+    form._ragkb_max_part_size = _MULTIPART_MAX_PART_SIZE  # type: ignore[attr-defined]
+    StarletteRequest.form = form
 
 
 class _AccessLogMiddleware:
@@ -67,6 +86,7 @@ async def lifespan(app: FastAPI):
 
 
 def create_app(cfg: Config) -> FastAPI:
+    _raise_starlette_multipart_part_limit()
     setup_logging(level=cfg.logging.level, log_dir=cfg.logging.dir or None)
     app = FastAPI(
         title="RAG База знаний",

@@ -315,3 +315,20 @@ def test_admin_delete(tmp_path, sqlite_url):
         res = client.delete("/api/v1/admin/documents/new.md")
         assert res.status_code == 204
         assert client.delete("/api/v1/admin/documents/new.md").status_code == 404
+
+
+def test_request_form_wrapper_sets_max_part_size(monkeypatch):
+    from starlette.requests import Request as StarletteRequest
+
+    import ragkb.app as app_mod
+
+    seen: dict = {}
+
+    def fake(self, *args, **kwargs):
+        seen.update(kwargs)
+        return "ok"
+
+    monkeypatch.setattr(StarletteRequest, "form", fake)
+    app_mod._raise_starlette_multipart_part_limit()
+    assert StarletteRequest.form(object()) == "ok"
+    assert seen["max_part_size"] == app_mod._MULTIPART_MAX_PART_SIZE

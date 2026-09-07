@@ -80,6 +80,7 @@ services:
       - "3000:3000"
     environment:
       RAGKB_BACKEND_URL: http://rag:8000
+      BODY_SIZE_LIMIT: "21M"
       # Не заменяет сессию при RAGKB_AUTH_MODE=session. В бою не задавать.
       RAGKB_DEV_USER: ${RAGKB_DEV_USER:-}
       RAGKB_DEV_GROUPS: ${RAGKB_DEV_GROUPS:-}
