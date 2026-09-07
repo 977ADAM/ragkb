@@ -53,10 +53,19 @@ async def signout(
     response: Response,
     svc: AuthSvc,
 ) -> None:
-    user = await optional_name(svc, raw_cookie(request))
-    await svc.logout(raw_cookie(request))
+    cookie = raw_cookie(request)
+    if not cookie:
+        log.info("выход: без сессии")
+        return
+
+    user = await optional_name(svc, cookie)
+    if not user:
+        log.info("выход: неизвестный пользователь")
+        return
+
+    await svc.logout(cookie)
     clear_session_cookie(response, request)
-    log.info("выход: %s", user or "без сессии")
+    log.info("выход: %s", user)
 
 
 async def optional_name(svc, raw_token):
