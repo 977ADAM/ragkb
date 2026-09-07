@@ -1,6 +1,7 @@
 """Юнит-тесты. Запуск: python -m pytest tests/ -q (или python tests/test_pipeline.py)."""
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -239,6 +240,17 @@ def _chroma_available() -> bool:
         return True
     except ImportError:
         return False
+
+
+def test_manifest_has_built_at():
+    from ragkb.core.pipeline import build_index
+
+    cfg = _workspace("numpy")
+    build_index(cfg)
+    manifest = json.loads((Path(cfg.index_dir) / "manifest.json").read_text(encoding="utf-8"))
+    assert "built_at" in manifest
+    from datetime import datetime
+    datetime.fromisoformat(manifest["built_at"])  # не падает — валидный ISO
 
 
 def test_index_and_search_end_to_end_numpy():

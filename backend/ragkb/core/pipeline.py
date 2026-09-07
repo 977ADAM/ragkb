@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import time
+from datetime import datetime, timezone
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -107,6 +108,7 @@ def build_index(
         embedder_name=embedder.name,
         embedder_state=embedder.state(),
         extra={
+            "built_at": datetime.now(timezone.utc).isoformat(),
             "chunk_size": cfg.chunking.size,
             "chunk_overlap": cfg.chunking.overlap,
             "skipped": skipped,
