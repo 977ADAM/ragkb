@@ -6,6 +6,7 @@
 	<nav>
 		<a href="/admin">Организация</a>
 		<a href="/admin/users">Пользователи</a>
+		<a href="/admin/documents">Документы</a>
 		<a href="/admin/reports">Отчёты</a>
 		<a href="/new">К диалогам</a>
 	</nav>
