@@ -27,6 +27,10 @@ class InvalidRequest(RagkbError):
     pass
 
 
+class PayloadTooLarge(RagkbError):
+    pass
+
+
 class Conflict(RagkbError):
     pass
 
