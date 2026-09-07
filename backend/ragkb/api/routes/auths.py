@@ -67,7 +67,6 @@ async def signout(
     await svc.logout(cookie)
     clear_session_cookie(response, request)
     log.info("выход: %s", user)
-    return JSONResponse(status_code=200, content={'status': True}, headers=response.headers)
 
 
 async def optional_name(svc, raw_token):
