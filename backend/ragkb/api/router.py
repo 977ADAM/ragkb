@@ -3,7 +3,7 @@ from fastapi import APIRouter
 
 from ragkb.api.routes import (
     admin,
-    auth,
+    auths,
     bootstrap,
     chat_conversations,
     index,
@@ -15,7 +15,7 @@ from ragkb.api.routes import (
 )
 
 api_router = APIRouter()
-api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+api_router.include_router(auths.router, prefix="/auths", tags=["auths"])
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(models.router)
