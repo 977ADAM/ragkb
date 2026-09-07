@@ -27,6 +27,7 @@ COPY scripts ./scripts
 RUN uv sync --locked --extra migrations --extra local-models --no-editable
 
 ENV HF_HOME=/app/data/hf \
+    RAGKB_AUTH_MODE=session \
     RAGKB_EMBEDDING_BACKEND=sentence-transformers \
     RAGKB_LOG_DIR=/app/data/logs
 
