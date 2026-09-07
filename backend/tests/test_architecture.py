@@ -121,7 +121,7 @@ def test_each_alembic_revision_creates_one_table() -> None:
 
     found: list[str] = []
     for path in sorted((MIGRATIONS / "versions").glob("*.py")):
-        names = set(re.findall(r"CREATE TABLE (\w+)", path.read_text(), re.I))
+        names = set(re.findall(r"CREATE TABLE (\w+)", path.read_text(), re.IGNORECASE))
         if not names:
             continue
         assert len(names) == 1, f"{path.name} создаёт {sorted(names)}"

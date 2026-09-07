@@ -2,7 +2,6 @@
 import logging
 
 from fastapi import APIRouter, Request, Response
-from fastapi.responses import JSONResponse
 
 from ragkb.api.deps import AuthSvc
 from ragkb.api.deps.auth import (

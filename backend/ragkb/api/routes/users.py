@@ -1,8 +1,4 @@
-from fastapi import APIRouter, Depends, Request
-
-
-
-
+from fastapi import APIRouter, Request
 
 router = APIRouter()
 

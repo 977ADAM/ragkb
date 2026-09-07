@@ -10,7 +10,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 
-from .config import LLMConfig
+from .config import Settings
 
 
 class LLMError(RuntimeError):
@@ -30,7 +30,7 @@ class LLM(ABC):
         return True
 
 
-def build_llm(cfg: LLMConfig) -> LLM:
+def build_llm(cfg: Settings.LLMConfig) -> LLM:
     backend = cfg.backend.lower()
     if backend == "ollama":
         return OllamaLLM(cfg)
@@ -42,7 +42,7 @@ def build_llm(cfg: LLMConfig) -> LLM:
 
 
 class OllamaLLM(LLM):
-    def __init__(self, cfg: LLMConfig):
+    def __init__(self, cfg: Settings.LLMConfig):
         self.cfg = cfg
         self.name = f"ollama:{cfg.model}"
         self.base_url = cfg.base_url.rstrip("/")
@@ -111,7 +111,7 @@ class OllamaLLM(LLM):
 
 
 class OpenAILLM(LLM):
-    def __init__(self, cfg: LLMConfig):
+    def __init__(self, cfg: Settings.LLMConfig):
         self.cfg = cfg
         self.name = f"openai:{cfg.model}"
         self.base_url = cfg.base_url.rstrip("/")
@@ -172,8 +172,7 @@ class OpenAILLM(LLM):
                 for line in resp.iter_lines():
                     if not line:
                         continue
-                    if line.startswith("data: "):
-                        line = line[6:]
+                    line = line.removeprefix("data: ")
                     if line.strip() == "[DONE]":
                         return
                     try:
@@ -191,7 +190,7 @@ class OpenAILLM(LLM):
 class ExtractiveLLM(LLM):
     """Фолбэк без нейросети: возвращает найденные фрагменты как есть."""
 
-    def __init__(self, cfg: LLMConfig):
+    def __init__(self, cfg: Settings.LLMConfig):
         self.cfg = cfg
         self.name = "extractive"
 

@@ -13,7 +13,7 @@ class IndexSources:
 
     def document_paths(self) -> set[str] | None:
         try:
-            stats = self._get_engine().stats()
+            self._get_engine().stats()
         except EngineUnavailable:
             return None
         # stats() не несёт список путей — берём через pipeline.store, если есть.

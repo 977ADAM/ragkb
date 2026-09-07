@@ -1,11 +1,11 @@
-from ragkb.core.config import LLMConfig
+from ragkb.core.config import Settings
 from ragkb.services.models_ollama import OllamaCatalog
 from ragkb.services.models_openai import OpenAICatalog
 from ragkb.services.models_static import StaticCatalog
 
 
 def test_openai_catalog_short_name_for_gguf_path():
-    cfg = LLMConfig(
+    cfg = Settings.LLMConfig(
         backend="openai",
         model="/home/adminai/models/qwen.gguf",
     )
@@ -19,24 +19,24 @@ def test_openai_catalog_short_name_for_gguf_path():
 
 
 def test_openai_catalog_filters_and_falls_back():
-    cfg = LLMConfig(backend="openai", model="a", available=[{"name": "a"}])
+    cfg = Settings.LLMConfig(backend="openai", model="a", available=[{"name": "a"}])
     cat = OpenAICatalog(
         cfg,
         installed=[{"id": "a"}, {"id": "b"}],
     )
     assert {m.id for m in cat.list()} == {"a"}
-    empty = OpenAICatalog(LLMConfig(backend="openai", model="local"), installed=[])
+    empty = OpenAICatalog(Settings.LLMConfig(backend="openai", model="local"), installed=[])
     assert empty.list()[0].id == "local"
 
 
 def test_static_catalog_default():
-    cat = StaticCatalog(LLMConfig(model="local-gguf"))
+    cat = StaticCatalog(Settings.LLMConfig(model="local-gguf"))
     assert cat.list()[0].id == "local-gguf"
     assert cat.resolve(None) == "local-gguf"
 
 
 def test_ollama_catalog_filters_and_resolve():
-    cfg = LLMConfig(backend="ollama", model="a", available=[{"name": "a"}])
+    cfg = Settings.LLMConfig(backend="ollama", model="a", available=[{"name": "a"}])
     cat = OllamaCatalog(
         cfg,
         installed=[

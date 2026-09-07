@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ragkb.core.config import LLMConfig
+from ragkb.core.config import Settings
 from ragkb.services.models_labels import model_label
 from ragkb.services.models_schemas import ModelInfo
 
@@ -44,7 +44,7 @@ def installed_models(base_url: str) -> list[dict[str, Any]]:
 
 
 class OllamaCatalog:
-    def __init__(self, cfg: LLMConfig, installed: list[dict[str, Any]] | None = None):
+    def __init__(self, cfg: Settings.LLMConfig, installed: list[dict[str, Any]] | None = None):
         self.cfg = cfg
         self._installed = installed
 

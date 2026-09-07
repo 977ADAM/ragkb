@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ragkb.core import loaders
-from ragkb.core.config import Config
+from ragkb.core.config import Settings
 from ragkb.core.errors import EngineUnavailable, InvalidRequest, NotFound, PayloadTooLarge
 from ragkb.core.pipeline import build_index, remove_document
 from ragkb.core.ports import AnswerEngine
@@ -22,7 +22,7 @@ _HIDDEN_PREFIXES = (".", "~$")
 class DocumentsService:
     def __init__(
         self,
-        cfg: Config,
+        cfg: Settings,
         get_engine: Callable[[], AnswerEngine],
         invalidate: Callable[[], None],
     ):

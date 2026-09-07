@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from helpers import BACKEND_ROOT
 
 from ragkb.app import create_app
-from ragkb.core.config import Config, OrganizationConfig
+from ragkb.core.config import Settings
 from ragkb.core.database import make_engine, make_session_factory
 from ragkb.core.errors import EngineUnavailable, InvalidRequest, NotFound, PayloadTooLarge
 from ragkb.core.pipeline import RAGPipeline, build_index
@@ -19,19 +19,19 @@ from ragkb.services.auth import hash_password
 from ragkb.services.documents import MAX_UPLOAD_BYTES, DocumentsService
 
 
-def make_cfg(tmp_path: Path) -> Config:
+def make_cfg(tmp_path: Path) -> Settings:
     docs = tmp_path / "docs"
     docs.mkdir()
     (docs / "policy.md").write_text(
         "# Политика\n\n## Отпуск\n\nЕжегодный отпуск составляет 28 календарных дней.\n",
         encoding="utf-8",
     )
-    cfg = Config(docs_dir=str(docs), index_dir=str(tmp_path / "index"))
+    cfg = Settings(docs_dir=str(docs), index_dir=str(tmp_path / "index"))
     cfg.store.backend = "numpy"
     return cfg
 
 
-def make_service(cfg: Config) -> DocumentsService:
+def make_service(cfg: Settings) -> DocumentsService:
     def get_engine():
         try:
             return RAGPipeline(cfg)
@@ -210,14 +210,14 @@ async def _seed_admin_and_user(url: str) -> None:
     await engine.dispose()
 
 
-def _session_client_cfg(tmp_path: Path, url: str) -> Config:
+def _session_client_cfg(tmp_path: Path, url: str) -> Settings:
     docs = tmp_path / "docs"
     docs.mkdir()
     (docs / "policy.md").write_text("# Политика\n\nТекст про отпуск: 28 дней.\n", encoding="utf-8")
-    cfg = Config(
+    cfg = Settings(
         docs_dir=str(docs),
         index_dir=str(tmp_path / "index"),
-        organization=OrganizationConfig(name="Acme", id="acme"),
+        organization=Settings.OrganizationConfig(name="Acme", id="acme"),
     )
     cfg.store.backend = "numpy"
     cfg.database_url = url

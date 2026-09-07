@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ragkb.core.config import LLMConfig
+from ragkb.core.config import Settings
 from ragkb.services.models_labels import model_label
 from ragkb.services.models_schemas import ModelInfo
 from ragkb.services.models_static import StaticCatalog
@@ -30,7 +30,7 @@ def listed_models(base_url: str, api_key: str = "") -> list[dict[str, Any]]:
 
 
 class OpenAICatalog:
-    def __init__(self, cfg: LLMConfig, installed: list[dict[str, Any]] | None = None):
+    def __init__(self, cfg: Settings.LLMConfig, installed: list[dict[str, Any]] | None = None):
         self.cfg = cfg
         self._installed = installed
 

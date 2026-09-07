@@ -3,15 +3,15 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import datetime, timezone
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from . import loaders
 from .chunking import chunk_documents
-from .config import Config
+from .config import Settings
 from .embeddings import Embedder, TfidfEmbedder, build_embedder
 from .llm import LLM, LLMError, build_llm
 from .prompts import (
@@ -61,7 +61,7 @@ class IndexReport:
 
 
 def build_index(
-    cfg: Config,
+    cfg: Settings,
     *,
     docs_dir: str | Path | None = None,
     progress: Callable[[str], None] | None = None,
@@ -127,7 +127,7 @@ def build_index(
 
 
 def update_documents(
-    cfg: Config,
+    cfg: Settings,
     paths: list[str | Path],
     *,
     progress: Callable[[str], None] | None = None,
@@ -195,7 +195,7 @@ def update_documents(
     )
 
 
-def remove_document(cfg: Config, path: str | Path) -> int:
+def remove_document(cfg: Settings, path: str | Path) -> int:
     """Удаляет документ из индекса по исходному пути. Возвращает число чанков."""
     from .store import ChromaStore
 
@@ -216,7 +216,7 @@ def remove_document(cfg: Config, path: str | Path) -> int:
 # ------------------------------------------------------------------------ RAG
 
 class RAGPipeline:
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: Settings):
         self.cfg = cfg
         self.store: BaseStore = open_store(cfg)
         self.embedder = self._restore_embedder()

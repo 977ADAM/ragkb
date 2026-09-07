@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from ragkb.core.config import Config
+from ragkb.core.config import Settings
 from ragkb.core.database import make_engine, make_session_factory, needs_database
 from ragkb.core.errors import EngineUnavailable
 from ragkb.core.pipeline import RAGPipeline
@@ -21,7 +21,7 @@ from ragkb.services.stdout_sink import StdoutSink
 class Container:
     def __init__(
         self,
-        cfg: Config,
+        cfg: Settings,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
     ):
         self.cfg = cfg

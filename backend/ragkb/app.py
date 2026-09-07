@@ -10,10 +10,11 @@ from fastapi.responses import JSONResponse
 from ragkb.api.errors import ragkb_error_handler
 from ragkb.api.router import api_router
 from ragkb.container import Container
-from ragkb.core.config import DEFAULT_CONFIG, Config
+from ragkb.core.config import Settings
 from ragkb.core.errors import EngineUnavailable, RagkbError
 from ragkb.core.logging_config import get_logger, setup_logging
 from ragkb.services.documents import MAX_UPLOAD_BYTES
+from ragkb.version import __version__
 
 log = get_logger("ragkb")
 
@@ -85,12 +86,12 @@ async def lifespan(app: FastAPI):
     await c.dispose()
 
 
-def create_app(cfg: Config) -> FastAPI:
+def create_app(cfg: Settings) -> FastAPI:
     _raise_starlette_multipart_part_limit()
     setup_logging(level=cfg.logging.level, log_dir=cfg.logging.dir or None)
     app = FastAPI(
         title="RAG База знаний",
-        version="1.1.0",
+        version=__version__,
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
@@ -138,4 +139,4 @@ def create_app(cfg: Config) -> FastAPI:
 
 
 def build() -> FastAPI:
-    return create_app(Config.load(DEFAULT_CONFIG))
+    return create_app(Settings())

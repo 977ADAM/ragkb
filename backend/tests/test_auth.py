@@ -6,10 +6,10 @@ from types import SimpleNamespace
 import pytest
 from starlette.datastructures import Headers
 
-from ragkb.core.config import AuthConfig
 from ragkb.api.deps.auth import parse_groups, user_from_headers
-from ragkb.domain.entities import User
+from ragkb.core.config import Settings
 from ragkb.core.errors import Forbidden, Unauthenticated
+from ragkb.domain.entities import User
 
 
 def test_parse_groups_comma_and_repeats():
@@ -17,7 +17,7 @@ def test_parse_groups_comma_and_repeats():
 
 
 def test_user_from_headers():
-    cfg = AuthConfig()
+    cfg = Settings.AuthConfig()
     user = user_from_headers(
         Headers(
             {
@@ -34,7 +34,7 @@ def test_user_from_headers():
 
 
 def test_missing_header_is_none():
-    assert user_from_headers(Headers({}), AuthConfig()) is None
+    assert user_from_headers(Headers({}), Settings.AuthConfig()) is None
 
 
 def test_admin_forbidden(indexed):

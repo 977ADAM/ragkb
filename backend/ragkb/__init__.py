@@ -1,6 +1,6 @@
 """ragkb — локальная RAG-система над корпоративной базой знаний."""
 
-from ragkb.core.config import Config
+from ragkb.core.config import Settings
 from ragkb.core.pipeline import (
     Answer,
     IndexReport,
@@ -11,17 +11,18 @@ from ragkb.core.pipeline import (
 )
 from ragkb.core.retrieval import Hit
 from ragkb.core.store import BaseStore, ChromaStore, NumpyStore, create_store, open_store
+from ragkb.version import __version__
 
-__version__ = "1.1.0"
 __all__ = [
     "Answer",
     "BaseStore",
     "ChromaStore",
-    "Config",
     "Hit",
     "IndexReport",
     "NumpyStore",
     "RAGPipeline",
+    "Settings",
+    "__version__",
     "build_index",
     "create_store",
     "open_store",

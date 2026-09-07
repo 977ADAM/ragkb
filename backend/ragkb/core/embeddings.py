@@ -20,7 +20,7 @@ from typing import Any
 
 import numpy as np
 
-from .config import EmbeddingConfig
+from .config import Settings
 from .text import tokenize
 
 
@@ -42,7 +42,7 @@ class Embedder(ABC):
         return None
 
 
-def build_embedder(cfg: EmbeddingConfig) -> Embedder:
+def build_embedder(cfg: Settings.EmbeddingConfig) -> Embedder:
     backend = cfg.backend.lower()
     if backend == "ollama":
         return OllamaEmbedder(cfg)
@@ -69,7 +69,7 @@ def normalize_rows(matrix: np.ndarray) -> np.ndarray:
 class OllamaEmbedder(Embedder):
     """Локальный Ollama. Модели: bge-m3, nomic-embed-text, multilingual-e5-large."""
 
-    def __init__(self, cfg: EmbeddingConfig):
+    def __init__(self, cfg: Settings.EmbeddingConfig):
         self.cfg = cfg
         self.name = f"ollama:{cfg.model}"
         self.base_url = cfg.base_url.rstrip("/")
@@ -106,7 +106,7 @@ class OllamaEmbedder(Embedder):
 # ------------------------------------------------------- sentence-transformers
 
 class SentenceTransformerEmbedder(Embedder):
-    def __init__(self, cfg: EmbeddingConfig):
+    def __init__(self, cfg: Settings.EmbeddingConfig):
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError as exc:  # pragma: no cover
@@ -135,7 +135,7 @@ class SentenceTransformerEmbedder(Embedder):
 # ------------------------------------------------------------------- OpenAI-like
 
 class OpenAIEmbedder(Embedder):
-    def __init__(self, cfg: EmbeddingConfig):
+    def __init__(self, cfg: Settings.EmbeddingConfig):
         self.cfg = cfg
         self.name = f"openai:{cfg.model}"
         self.base_url = cfg.base_url.rstrip("/")
@@ -181,7 +181,7 @@ class TfidfEmbedder(Embedder):
     как baseline и как способ прогнать пайплайн в CI без GPU и без интернета.
     """
 
-    def __init__(self, cfg: EmbeddingConfig):
+    def __init__(self, cfg: Settings.EmbeddingConfig):
         self.cfg = cfg
         self.name = "tfidf"
         self.dim = cfg.tfidf_dim

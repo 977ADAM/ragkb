@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from ragkb.domain.ports import AccountStore
 from ragkb.core.errors import Forbidden, InvalidRequest, NotFound
+from ragkb.domain.ports import AccountStore
 
 _ROLES = frozenset({"user", "admin"})
 
@@ -32,9 +32,8 @@ class AdminUsersService:
         if row is None:
             raise NotFound("Пользователь не найден")
         _uid, canonical, _hash, current_role = row
-        if current_role == "admin" and role == "user":
-            if await self._store.count_admins() <= 1:
-                raise Forbidden("нельзя разжаловать последнего админа")
+        if current_role == "admin" and role == "user" and await self._store.count_admins() <= 1:
+            raise Forbidden("нельзя разжаловать последнего админа")
         updated = await self._store.set_role(canonical, role)
         if updated is None:
             raise NotFound("Пользователь не найден")

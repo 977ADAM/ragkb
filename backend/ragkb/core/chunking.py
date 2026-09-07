@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from .config import ChunkConfig
+from .config import Settings
 from .loaders import Block, Document
 
 
@@ -43,7 +43,7 @@ class Chunk:
         return " / ".join(p for p in parts if p)
 
 
-def chunk_document(doc: Document, cfg: ChunkConfig) -> list[Chunk]:
+def chunk_document(doc: Document, cfg: Settings.ChunkConfig) -> list[Chunk]:
     """Делит документ на чанки, отслеживая иерархию заголовков."""
     chunks: list[Chunk] = []
     heading_stack: list[tuple[int, str]] = []
@@ -96,7 +96,7 @@ def chunk_document(doc: Document, cfg: ChunkConfig) -> list[Chunk]:
     return _merge_tiny(chunks, cfg.min_size)
 
 
-def chunk_documents(docs: list[Document], cfg: ChunkConfig) -> list[Chunk]:
+def chunk_documents(docs: list[Document], cfg: Settings.ChunkConfig) -> list[Chunk]:
     out: list[Chunk] = []
     for doc in docs:
         out.extend(chunk_document(doc, cfg))

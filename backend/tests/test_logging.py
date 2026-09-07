@@ -1,9 +1,9 @@
 import logging
 from pathlib import Path
 
-from ragkb.core.config import Config, LoggingConfig, OrganizationConfig
-from ragkb.core.logging_config import get_logger, setup_logging
 from ragkb.app import create_app
+from ragkb.core.config import Settings
+from ragkb.core.logging_config import get_logger, setup_logging
 
 
 def _flush() -> None:
@@ -39,9 +39,9 @@ def test_setup_logging_rebinds_directory(tmp_path: Path) -> None:
 
 def test_create_app_logs_disabled_auth_to_configured_dir(tmp_path: Path) -> None:
     log_dir = tmp_path / "logs"
-    cfg = Config(
-        organization=OrganizationConfig(name="Acme", id="acme"),
-        logging=LoggingConfig(level="INFO", dir=str(log_dir)),
+    cfg = Settings(
+        organization=Settings.OrganizationConfig(name="Acme", id="acme"),
+        logging=Settings.LoggingConfig(level="INFO", dir=str(log_dir)),
     )
     cfg.auth.mode = "disabled"
     cfg.history.enabled = False
@@ -54,7 +54,7 @@ def test_create_app_logs_disabled_auth_to_configured_dir(tmp_path: Path) -> None
 def test_access_log_writes_method_status_and_ms(tmp_path: Path) -> None:
     """Каждый HTTP-запрос пишет access-строку с методом, статусом и временем."""
     log_dir = tmp_path / "logs"
-    cfg = Config(logging=LoggingConfig(level="INFO", dir=str(log_dir)))
+    cfg = Settings(logging=Settings.LoggingConfig(level="INFO", dir=str(log_dir)))
     cfg.auth.mode = "disabled"
     cfg.history.enabled = False
     from fastapi.testclient import TestClient
@@ -74,7 +74,7 @@ def test_access_log_writes_method_status_and_ms(tmp_path: Path) -> None:
 def test_unhandled_exception_returns_json_500(tmp_path: Path) -> None:
     """Неперехваченное исключение даёт JSON 500 и попадает в errors.log."""
     log_dir = tmp_path / "logs"
-    cfg = Config(logging=LoggingConfig(level="INFO", dir=str(log_dir)))
+    cfg = Settings(logging=Settings.LoggingConfig(level="INFO", dir=str(log_dir)))
     cfg.auth.mode = "disabled"
     cfg.history.enabled = False
     from fastapi.testclient import TestClient

@@ -10,10 +10,10 @@ from alembic.config import Config as AlembicConfig
 from fastapi.testclient import TestClient
 from helpers import BACKEND_ROOT
 
-from ragkb.core.config import Config, OrganizationConfig
-from ragkb.db.repos.auth import PostgresAccounts
 from ragkb.app import create_app
+from ragkb.core.config import Settings
 from ragkb.core.database import make_engine, make_session_factory
+from ragkb.db.repos.auth import PostgresAccounts
 from ragkb.services.auth import hash_password
 
 
@@ -33,13 +33,15 @@ async def _seed_admin_and_user(url: str) -> None:
     await engine.dispose()
 
 
-def _session_cfg(tmp_path: Path, url: str, org: OrganizationConfig | None = None) -> Config:
+def _session_cfg(
+    tmp_path: Path, url: str, org: Settings.OrganizationConfig | None = None
+) -> Settings:
     docs = tmp_path / "docs"
     docs.mkdir(exist_ok=True)
-    cfg = Config(
+    cfg = Settings(
         docs_dir=str(docs),
         index_dir=str(tmp_path / "index"),
-        organization=org or OrganizationConfig(name="Acme", id="acme"),
+        organization=org or Settings.OrganizationConfig(name="Acme", id="acme"),
     )
     cfg.store.backend = "numpy"
     cfg.database_url = url
@@ -50,7 +52,7 @@ def _session_cfg(tmp_path: Path, url: str, org: OrganizationConfig | None = None
 
 
 @contextmanager
-def _admin_client(cfg: Config):
+def _admin_client(cfg: Settings):
     with TestClient(create_app(cfg)) as client:
         yield client
 
@@ -145,7 +147,7 @@ def test_organization_hub_empty_when_unconfigured(
     cfg = _session_cfg(
         tmp_path,
         sqlite_url,
-        org=OrganizationConfig(name="", id="", description=""),
+        org=Settings.OrganizationConfig(name="", id="", description=""),
     )
     with _admin_client(cfg) as client:
         _signin(client, "ada")

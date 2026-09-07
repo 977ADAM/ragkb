@@ -1,13 +1,13 @@
 """Каталог: одна модель из настроек."""
 from __future__ import annotations
 
-from ragkb.core.config import LLMConfig
+from ragkb.core.config import Settings
 from ragkb.services.models_labels import model_label
 from ragkb.services.models_schemas import ModelInfo
 
 
 class StaticCatalog:
-    def __init__(self, cfg: LLMConfig):
+    def __init__(self, cfg: Settings.LLMConfig):
         self.cfg = cfg
 
     def list(self) -> list[ModelInfo]:

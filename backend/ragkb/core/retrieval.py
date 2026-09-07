@@ -17,7 +17,7 @@ from typing import Any
 import numpy as np
 
 from .chunking import Chunk
-from .config import RetrievalConfig
+from .config import Settings
 from .embeddings import Embedder
 from .store import BaseStore
 
@@ -48,7 +48,7 @@ class Hit:
 
 
 class Retriever:
-    def __init__(self, store: BaseStore, embedder: Embedder, cfg: RetrievalConfig):
+    def __init__(self, store: BaseStore, embedder: Embedder, cfg: Settings.RetrievalConfig):
         self.store = store
         self.embedder = embedder
         self.cfg = cfg

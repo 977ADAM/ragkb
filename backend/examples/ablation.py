@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ragkb.core.config import Config
+from ragkb.core.config import Settings
 from ragkb.core.evaluation import evaluate, load_cases
 from ragkb.core.pipeline import RAGPipeline
 
@@ -26,7 +26,7 @@ MODES = [
 
 
 def main() -> int:
-    cfg = Config.load("config.yaml")
+    cfg = Settings()
     cases = load_cases("examples/eval_set.jsonl")
 
     print(f"{'режим':<18} {'Hit@1':>7} {'Hit@3':>7} {'Hit@5':>7} {'MRR':>7}")

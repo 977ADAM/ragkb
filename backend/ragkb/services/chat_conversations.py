@@ -7,7 +7,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any, Literal
 
-from ragkb.core.config import LLMConfig
+from ragkb.core.config import Settings
 from ragkb.core.errors import InvalidRequest, NotFound
 from ragkb.core.llm import ExtractiveLLM
 from ragkb.core.pipeline import RAGPipeline
@@ -35,7 +35,7 @@ class ChatConversationsService:
         resolve_model: Callable[[str | None], str],
         require_org: Callable[[str], None],
         window: int,
-        llm_cfg: LLMConfig,
+        llm_cfg: Settings.LLMConfig,
         persist: bool = True,
     ):
         self.conversations = conversations

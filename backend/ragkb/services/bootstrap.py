@@ -6,13 +6,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from ragkb.core.config import Config
+from ragkb.core.config import Settings
 from ragkb.core.errors import NotFound
 from ragkb.domain.entities import User
 from ragkb.services.chat_conversations import ChatConversationsService
 from ragkb.services.index import IndexService
 from ragkb.services.models import ModelsService
 from ragkb.services.organization import OrganizationService
+from ragkb.version import __version__
 
 log = logging.getLogger("ragkb")
 
@@ -31,6 +32,7 @@ class Capabilities(BaseModel):
 
 class BootstrapResponse(BaseModel):
     session_id: str
+    version: str = __version__
     user: UserInfo
     organization: dict[str, str] | None = None
     models: list
@@ -43,7 +45,7 @@ class BootstrapResponse(BaseModel):
 class BootstrapService:
     def __init__(
         self,
-        cfg: Config,
+        cfg: Settings,
         models: ModelsService,
         chats: ChatConversationsService,
         organization: OrganizationService,

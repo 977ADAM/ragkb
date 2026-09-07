@@ -13,7 +13,7 @@ from fastapi import Depends, Request, Response
 from starlette.datastructures import Headers
 
 from ragkb.container import Container
-from ragkb.core.config import AuthConfig
+from ragkb.core.config import Settings
 from ragkb.core.errors import Forbidden, Unauthenticated
 from ragkb.domain.entities import ANONYMOUS, User
 from ragkb.services.auth import COOKIE_NAME, SESSION_DAYS, AuthService
@@ -29,7 +29,7 @@ def parse_groups(values: Iterable[str]) -> tuple[str, ...]:
     return tuple(groups)
 
 
-def user_from_headers(headers: Headers, cfg: AuthConfig) -> User | None:
+def user_from_headers(headers: Headers, cfg: Settings.AuthConfig) -> User | None:
     name = (headers.get(cfg.header) or "").strip()
     if not name:
         return None
@@ -47,7 +47,7 @@ def _remember_user(request: Request, user: User) -> User:
 
 
 async def current_user(request: Request) -> User:
-    cfg: AuthConfig = request.app.state.auth
+    cfg: Settings.AuthConfig = request.app.state.auth
     if cfg.mode == "disabled":
         return _remember_user(request, User(name=ANONYMOUS))
     if cfg.mode == "session":
@@ -80,7 +80,7 @@ async def optional_user(request: Request) -> User | None:
 
 
 async def require_admin(request: Request) -> User:
-    cfg: AuthConfig = request.app.state.auth
+    cfg: Settings.AuthConfig = request.app.state.auth
     user = await current_user(request)
     if cfg.mode == "disabled":
         return user

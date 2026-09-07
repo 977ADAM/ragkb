@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from helpers import BACKEND_ROOT
 
 from ragkb.app import create_app
-from ragkb.core.config import Config, OrganizationConfig
+from ragkb.core.config import Settings
 from ragkb.core.database import make_engine, make_session_factory
 from ragkb.db.repos.auth import PostgresAccounts
 from ragkb.db.repos.postgres_history import PostgresHistory
@@ -41,13 +41,13 @@ async def _seed(url: str) -> tuple[str, int, str]:
     return cid, mid
 
 
-def _cfg(tmp_path: Path, url: str) -> Config:
+def _cfg(tmp_path: Path, url: str) -> Settings:
     docs = tmp_path / "docs"
     docs.mkdir(exist_ok=True)
-    cfg = Config(
+    cfg = Settings(
         docs_dir=str(docs),
         index_dir=str(tmp_path / "index"),
-        organization=OrganizationConfig(name="Acme", id="acme"),
+        organization=Settings.OrganizationConfig(name="Acme", id="acme"),
     )
     cfg.store.backend = "numpy"
     cfg.database_url = url
@@ -58,7 +58,7 @@ def _cfg(tmp_path: Path, url: str) -> Config:
 
 
 @contextmanager
-def _client(cfg: Config):
+def _client(cfg: Settings):
     with TestClient(create_app(cfg)) as client:
         yield client
 

@@ -4,8 +4,8 @@ import uuid
 
 import pytest
 
-from ragkb.db.repos.auth import PostgresAccounts
 from ragkb.core.database import make_engine, make_session_factory
+from ragkb.db.repos.auth import PostgresAccounts
 from ragkb.services.auth import hash_password, verify_password
 
 

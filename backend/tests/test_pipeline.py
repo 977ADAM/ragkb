@@ -11,8 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
 
 from ragkb.core.bm25 import BM25Index
-from ragkb.core.chunking import Chunk, ChunkConfig, chunk_document
-from ragkb.core.config import ChunkConfig, Config, EmbeddingConfig
+from ragkb.core.chunking import Chunk, chunk_document
+from ragkb.core.config import Settings
 from ragkb.core.embeddings import TfidfEmbedder
 from ragkb.core.loaders import Block, Document, load
 from ragkb.core.pipeline import RAGPipeline
@@ -60,7 +60,7 @@ def test_chunk_carries_heading_breadcrumb():
         Block("Раздел 1", kind="heading", level=1),
         Block("Оплата производится в течение трёх дней."),
     ])
-    chunks = chunk_document(doc, ChunkConfig(size=900, overlap=0, min_size=1))
+    chunks = chunk_document(doc, Settings.ChunkConfig(size=900, overlap=0, min_size=1))
     assert chunks[0].section == "Раздел 1"
     assert "Раздел 1" in chunks[0].embed_text
     # В text заголовка нет — LLM видит только содержательный текст.
@@ -69,7 +69,8 @@ def test_chunk_carries_heading_breadcrumb():
 
 def test_chunks_respect_size_limit():
     long_text = " ".join(f"Предложение номер {i} с некоторым текстом." for i in range(200))
-    chunks = chunk_document(_doc([Block(long_text)]), ChunkConfig(size=400, overlap=50, min_size=1))
+    cfg = Settings.ChunkConfig(size=400, overlap=50, min_size=1)
+    chunks = chunk_document(_doc([Block(long_text)]), cfg)
     assert len(chunks) > 1
     assert all(len(c.text) <= 900 for c in chunks), [len(c.text) for c in chunks]
 
@@ -77,7 +78,7 @@ def test_chunks_respect_size_limit():
 def test_chunking_terminates_on_pathological_input():
     """Регрессия: оверлап не должен приводить к бесконечному циклу."""
     blocks = [Block("Короткая строка.") for _ in range(50)]
-    chunks = chunk_document(_doc(blocks), ChunkConfig(size=100, overlap=90, min_size=1))
+    chunks = chunk_document(_doc(blocks), Settings.ChunkConfig(size=100, overlap=90, min_size=1))
     assert 0 < len(chunks) < 200
 
 
@@ -87,7 +88,7 @@ def test_citation_does_not_duplicate_title():
         Block("Пункт 1", kind="heading", level=2),
         Block("Текст пункта достаточной длины для чанка."),
     ])
-    chunk = chunk_document(doc, ChunkConfig(min_size=1))[0]
+    chunk = chunk_document(doc, Settings.ChunkConfig(min_size=1))[0]
     assert chunk.citation().count("Регламент") == 1
 
 
@@ -106,7 +107,6 @@ def _chunk(text: str, *, title: str = "Документ", source: str = "data/do
 
 
 def test_cited_sources_carry_snapshot_text():
-    from ragkb.core.pipeline import RAGPipeline
 
     hits = [
         Hit(chunk=_chunk("Первый фрагмент про отпуск."), score=0.9),
@@ -124,7 +124,6 @@ def test_cited_sources_carry_snapshot_text():
 
 
 def test_cited_sources_skip_uncited_hits():
-    from ragkb.core.pipeline import RAGPipeline
 
     hits = [
         Hit(chunk=_chunk("Цитируется."), score=0.9),
@@ -167,14 +166,14 @@ def test_bm25_roundtrip(tmp_path=None):
 # ------------------------------------------------------------------ эмбеддинги
 
 def test_embeddings_are_normalized():
-    emb = TfidfEmbedder(EmbeddingConfig(tfidf_dim=256))
+    emb = TfidfEmbedder(Settings.EmbeddingConfig(tfidf_dim=256))
     vectors = emb.embed_documents(["первый текст", "второй текст про отпуск"])
     norms = np.linalg.norm(vectors, axis=1)
     assert np.allclose(norms, 1.0, atol=1e-5)
 
 
 def test_similar_texts_score_higher():
-    emb = TfidfEmbedder(EmbeddingConfig(tfidf_dim=2048))
+    emb = TfidfEmbedder(Settings.EmbeddingConfig(tfidf_dim=2048))
     docs = ["Суточные в командировке составляют 1200 рублей",
             "Пароль должен содержать 12 символов"]
     matrix = emb.embed_documents(docs)
@@ -184,9 +183,9 @@ def test_similar_texts_score_higher():
 
 
 def test_tfidf_state_roundtrip():
-    emb = TfidfEmbedder(EmbeddingConfig(tfidf_dim=512))
+    emb = TfidfEmbedder(Settings.EmbeddingConfig(tfidf_dim=512))
     emb.embed_documents(["отпуск и командировки", "закупки и тендеры"])
-    restored = TfidfEmbedder(EmbeddingConfig(tfidf_dim=512))
+    restored = TfidfEmbedder(Settings.EmbeddingConfig(tfidf_dim=512))
     restored.load_state(emb.state())
     assert np.allclose(emb.embed_query("отпуск"), restored.embed_query("отпуск"))
 
@@ -224,12 +223,12 @@ SAMPLE_DOC = (
 )
 
 
-def _workspace(backend: str) -> Config:
+def _workspace(backend: str) -> Settings:
     workdir = Path(tempfile.mkdtemp())
     docs = workdir / "docs"
     docs.mkdir()
     (docs / "policy.md").write_text(SAMPLE_DOC, encoding="utf-8")
-    cfg = Config(docs_dir=str(docs), index_dir=str(workdir / "index"))
+    cfg = Settings(docs_dir=str(docs), index_dir=str(workdir / "index"))
     cfg.store.backend = backend
     return cfg
 
@@ -265,7 +264,7 @@ def test_index_and_search_end_to_end_chroma():
 
 
 def _assert_end_to_end(backend: str) -> None:
-    from ragkb.core.pipeline import RAGPipeline, build_index
+    from ragkb.core.pipeline import build_index
 
     cfg = _workspace(backend)
     report = build_index(cfg)
@@ -290,7 +289,7 @@ def test_backends_agree_on_ranking():
     if not _chroma_available():
         import pytest
         pytest.skip("chromadb не установлена")
-    from ragkb.core.pipeline import RAGPipeline, build_index
+    from ragkb.core.pipeline import build_index
 
     queries = ["длина пароля", "сколько дней отпуска", "требования безопасности"]
     results = {}
@@ -309,7 +308,7 @@ def test_chroma_returns_similarity_not_distance():
     if not _chroma_available():
         import pytest
         pytest.skip("chromadb не установлена")
-    from ragkb.core.pipeline import RAGPipeline, build_index
+    from ragkb.core.pipeline import build_index
 
     cfg = _workspace("chroma")
     build_index(cfg)
@@ -323,7 +322,7 @@ def test_chroma_incremental_update_and_delete():
     if not _chroma_available():
         import pytest
         pytest.skip("chromadb не установлена")
-    from ragkb.core.pipeline import RAGPipeline, build_index, remove_document, update_documents
+    from ragkb.core.pipeline import build_index, remove_document, update_documents
 
     cfg = _workspace("chroma")
     build_index(cfg)
@@ -364,7 +363,7 @@ def test_numpy_rejects_incremental_update():
 
 def test_store_backend_mismatch_is_detected():
     """Индекс Chroma нельзя открыть numpy-бэкендом и наоборот."""
-    from ragkb.core.pipeline import RAGPipeline, build_index
+    from ragkb.core.pipeline import build_index
 
     cfg = _workspace("numpy")
     build_index(cfg)
@@ -392,7 +391,7 @@ def test_invalid_collection_name_is_rejected_early():
 
 def test_pipeline_rejects_mismatched_embedder():
     """Индекс, построенный одной моделью, нельзя опрашивать другой."""
-    from ragkb.core.pipeline import RAGPipeline, build_index
+    from ragkb.core.pipeline import build_index
 
     cfg = _workspace("numpy")
     build_index(cfg)
@@ -417,55 +416,45 @@ def test_loaders_read_all_formats():
         assert doc.title
 
 
-# ------------------------------------------------------------- загрузка .env
 
-def test_dotenv_repo_root_is_loaded_when_config_is_nested():
+
+# ------------------------------------------------------------- окружение RAGKB_*
+
+def test_env_overrides_nested_section():
     import os
 
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / ".env").write_text(
-            "RAGKB_LLM_URL=http://10.0.0.2:1/v1\n", encoding="utf-8"
-        )
-        nested = root / "backend"
-        nested.mkdir()
-        try:
-            cfg = Config.load(nested / "config.yaml")
-            assert cfg.llm.base_url == "http://10.0.0.2:1/v1"
-        finally:
-            os.environ.pop("RAGKB_LLM_URL", None)
-
-
-def test_dotenv_next_to_config_is_loaded():
-    import os
-
-    with tempfile.TemporaryDirectory() as tmp:
-        Path(tmp, ".env").write_text(
-            "RAGKB_LLM_URL=http://10.0.0.1:9999/v1\n", encoding="utf-8"
-        )
-        try:
-            cfg = Config.load(Path(tmp) / "config.yaml")
-            assert cfg.llm.base_url == "http://10.0.0.1:9999/v1"
-        finally:
-            os.environ.pop("RAGKB_LLM_URL", None)
-
-
-def test_dotenv_does_not_override_real_environment():
-    import os
-
-    os.environ["RAGKB_LLM_URL"] = "http://127.0.0.1:1234"
+    os.environ["RAGKB_LLM_URL"] = "http://10.0.0.2:1/v1"
     try:
-        with tempfile.TemporaryDirectory() as tmp:
-            Path(tmp, ".env").write_text(
-                "RAGKB_LLM_URL=http://10.0.0.1:9999/v1\n", encoding="utf-8"
-            )
-            cfg = Config.load(Path(tmp) / "config.yaml")
-            assert cfg.llm.base_url == "http://127.0.0.1:1234"
+        assert Settings().llm.base_url == "http://10.0.0.2:1/v1"
     finally:
         os.environ.pop("RAGKB_LLM_URL", None)
 
 
-def test_dotenv_absent_means_defaults():
-    with tempfile.TemporaryDirectory() as tmp:
-        cfg = Config.load(Path(tmp) / "config.yaml")
-        assert cfg.llm.base_url == ""
+def test_env_overrides_auth_mode():
+    import os
+
+    os.environ["RAGKB_AUTH_MODE"] = "session"
+    try:
+        assert Settings().auth.mode == "session"
+    finally:
+        os.environ.pop("RAGKB_AUTH_MODE", None)
+
+
+def test_empty_env_keeps_default():
+    import os
+
+    os.environ["RAGKB_LLM_MODEL"] = ""
+    try:
+        assert Settings().llm.model == "qwen2.5-instruct"
+    finally:
+        os.environ.pop("RAGKB_LLM_MODEL", None)
+
+
+def test_history_enabled_env_parsing():
+    import os
+
+    os.environ["RAGKB_HISTORY_ENABLED"] = "false"
+    try:
+        assert Settings().history.enabled is False
+    finally:
+        os.environ.pop("RAGKB_HISTORY_ENABLED", None)

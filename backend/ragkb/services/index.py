@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from ragkb.core.config import Config
+from ragkb.core.config import Settings
 from ragkb.core.errors import EngineUnavailable
 from ragkb.core.pipeline import build_index
 from ragkb.core.ports import AnswerEngine
@@ -12,7 +12,7 @@ from ragkb.core.ports import AnswerEngine
 class IndexService:
     def __init__(
         self,
-        cfg: Config,
+        cfg: Settings,
         get_engine: Callable[[], AnswerEngine],
         invalidate: Callable[[], None],
     ):

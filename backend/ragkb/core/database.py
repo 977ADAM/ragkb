@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase
 
-from ragkb.core.config import Config
+from ragkb.core.config import Settings
 
 EXPECTED_REVISION = "0007_message_feedback"
 
@@ -19,7 +19,7 @@ class Base(DeclarativeBase):
     pass
 
 
-def needs_database(cfg: Config) -> bool:
+def needs_database(cfg: Settings) -> bool:
     return cfg.history.enabled or cfg.auth.mode == "session"
 
 

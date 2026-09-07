@@ -1,12 +1,12 @@
 """Организация установки."""
 from __future__ import annotations
 
-from ragkb.core.config import Config
+from ragkb.core.config import Settings
 from ragkb.core.errors import NotFound
 
 
 class OrganizationService:
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: Settings):
         self.cfg = cfg
 
     def get(self) -> dict[str, str]:

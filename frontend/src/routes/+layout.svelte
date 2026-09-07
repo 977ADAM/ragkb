@@ -288,6 +288,12 @@
 			</header>
 
 			{@render children()}
+
+			{#if chat.version}
+				<footer class="text-center text-xs text-stone-400 dark:text-stone-500">
+					версия {chat.version}
+				</footer>
+			{/if}
 		</main>
 	</div>
 {/if}

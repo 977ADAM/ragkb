@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ragkb"
-version = "1.1.0"
+version = "1.2.0"
 description = "Локальная RAG-система над корпоративной базой знаний"
 requires-python = ">=3.10"
 dependencies = [
@@ -13,6 +13,7 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.27",
     "pydantic>=2.0",
+    "pydantic-settings>=2.0",
     "pyyaml>=6.0",
     "chromadb>=0.5",
     "pypdf>=3.17",
@@ -57,6 +58,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "ragkb/core/prompts.py" = ["E501"]
+"migrations/env.py" = ["E402"]
 "tests/*.py" = ["E402"]
 
 [tool.mypy]

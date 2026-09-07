@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from helpers import BACKEND_ROOT
 
 from ragkb.app import create_app
-from ragkb.core.config import Config, OrganizationConfig
+from ragkb.core.config import Settings
 from ragkb.core.database import make_engine, make_session_factory
 from ragkb.db.repos.auth import PostgresAccounts
 from ragkb.db.repos.postgres_history import PostgresHistory
@@ -50,13 +50,13 @@ async def _seed(url: str) -> None:
     await engine.dispose()
 
 
-def _cfg(tmp_path: Path, url: str) -> Config:
+def _cfg(tmp_path: Path, url: str) -> Settings:
     docs = tmp_path / "docs"
     docs.mkdir(exist_ok=True)
-    cfg = Config(
+    cfg = Settings(
         docs_dir=str(docs),
         index_dir=str(tmp_path / "index"),
-        organization=OrganizationConfig(name="Acme", id="acme"),
+        organization=Settings.OrganizationConfig(name="Acme", id="acme"),
     )
     cfg.store.backend = "numpy"
     cfg.database_url = url
@@ -99,7 +99,7 @@ def _ask(client: TestClient, cid: str, question: str, engine: _FakeEngine) -> in
         import json
 
         raw = b"".join(resp.iter_bytes()).decode()
-    lines = [json.loads(l) for l in raw.strip().splitlines() if l.strip()]
+    lines = [json.loads(ln) for ln in raw.strip().splitlines() if ln.strip()]
     assert lines[-1]["type"] == "done"
     assert lines[-1]["message_id"] is not None
     assert engine.answered >= 1
@@ -134,7 +134,7 @@ def test_regenerate_replaces_last_answer(seeded) -> None:
             import json
 
             raw = b"".join(resp.iter_bytes()).decode()
-        lines = [json.loads(l) for l in raw.strip().splitlines() if l.strip()]
+        lines = [json.loads(ln) for ln in raw.strip().splitlines() if ln.strip()]
         done = lines[-1]
         assert done["type"] == "done"
         mid2 = done["message_id"]
@@ -185,7 +185,7 @@ def test_regenerate_foreign_dialog_is_404(seeded) -> None:
 
 def test_remove_message_only_owner() -> None:
     import asyncio as _asyncio
-    import os
+
     from ragkb.core.database import make_engine as _make_engine
 
     async def _run(url: str) -> None:

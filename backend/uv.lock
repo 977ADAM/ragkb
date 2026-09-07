@@ -3739,7 +3739,7 @@ wheels = [
 
 [[package]]
 name = "ragkb"
-version = "1.1.0"
+version = "1.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
@@ -3753,6 +3753,7 @@ dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pydantic" },
+    { name = "pydantic-settings" },
     { name = "pypdf" },
     { name = "python-docx" },
     { name = "python-multipart" },
@@ -3799,6 +3800,7 @@ requires-dist = [
     { name = "pdfplumber", marker = "extra == 'better-pdf'", specifier = ">=0.11" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'migrations'", specifier = ">=3.1" },
     { name = "pydantic", specifier = ">=2.0" },
+    { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "pymorphy3", marker = "extra == 'morphology'", specifier = ">=2.0" },
     { name = "pypdf", specifier = ">=3.17" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },

@@ -14,14 +14,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ragkb.core.config import Config
+from ragkb.core.config import Settings
 from ragkb.core.pipeline import RAGPipeline
 
 DATASET = "examples/threshold_cases.jsonl"
 
 
 def main() -> int:
-    cfg = Config.load("config.yaml")
+    cfg = Settings()
     if len(sys.argv) > 1:
         cfg.llm.backend, cfg.llm.model = "ollama", sys.argv[1]
     rag = RAGPipeline(cfg)

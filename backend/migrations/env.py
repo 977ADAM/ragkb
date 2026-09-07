@@ -13,9 +13,9 @@ _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
 
-from ragkb.core.config import DEFAULT_CONFIG, Config
-from ragkb.core.database import alembic_sync_url, Base
-from ragkb.db.models import ConversationRow, UserRow
+from ragkb.core.config import Settings
+from ragkb.core.database import Base, alembic_sync_url
+from ragkb.db.models import UserRow
 
 config = context.config
 target_metadata = Base.metadata
@@ -32,7 +32,7 @@ def _async_url() -> str:
     env = os.environ.get("RAGKB_DATABASE_URL")
     if env:
         return env
-    return Config.load(DEFAULT_CONFIG).database_url
+    return Settings().database_url
 
 
 def _sync_url(url: str) -> str:

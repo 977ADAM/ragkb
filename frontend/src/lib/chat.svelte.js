@@ -43,6 +43,8 @@ export const chat = $state({
 	user: null,
 	/** @type {{id: string, name: string, description?: string} | null} */
 	organization: null,
+	/** Версия сервиса из bootstrap — показываем внизу страницы. */
+	version: '',
 	busy: false,
 	fatal: '',
 	/** Стартовый запрос уже выполнен — при переходах между страницами не повторяем. */
@@ -81,6 +83,7 @@ export async function start() {
 		chat.user = body.user ?? null;
 		chat.isAdmin = Boolean(body.user?.is_admin) || body.user?.role === 'admin';
 		chat.organization = body.organization ?? null;
+		chat.version = body.version ?? '';
 		chat.models = body.models ?? [];
 		chat.model = (chat.models.find((m) => m.is_default) ?? chat.models[0])?.id ?? '';
 		chat.historyEnabled = body.capabilities?.history !== false;

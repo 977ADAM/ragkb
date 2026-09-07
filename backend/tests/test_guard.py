@@ -2,13 +2,13 @@ from pathlib import Path
 
 import pytest
 
-from ragkb.core.config import Config
 from ragkb.app import create_app
+from ragkb.core.config import Settings
 
 
 def test_history_enabled_env_false_zero_no(monkeypatch: pytest.MonkeyPatch) -> None:
     for raw in ("false", "0", "no", "FALSE"):
-        cfg = Config()
+        cfg = Settings()
         cfg.history.enabled = True
         monkeypatch.setenv("RAGKB_HISTORY_ENABLED", raw)
         cfg._apply_env()
@@ -16,7 +16,7 @@ def test_history_enabled_env_false_zero_no(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_history_enabled_env_true_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
-    cfg = Config()
+    cfg = Settings()
     cfg.history.enabled = False
     monkeypatch.setenv("RAGKB_HISTORY_ENABLED", "true")
     cfg._apply_env()
@@ -24,7 +24,7 @@ def test_history_enabled_env_true_when_set(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_create_app_requires_database_url_when_history_enabled() -> None:
-    cfg = Config()
+    cfg = Settings()
     cfg.auth.mode = "disabled"
     cfg.database_url = ""
     cfg.store.backend = "numpy"
@@ -34,7 +34,7 @@ def test_create_app_requires_database_url_when_history_enabled() -> None:
 
 def test_create_app_does_not_touch_repo_history(tmp_path: Path) -> None:
     """disabled + история выкл. не требует URL и не пишет sqlite."""
-    cfg = Config()
+    cfg = Settings()
     cfg.auth.mode = "disabled"
     cfg.history.enabled = False
     cfg.database_url = ""
@@ -49,7 +49,7 @@ def test_create_app_does_not_touch_repo_history(tmp_path: Path) -> None:
 def test_me_disabled_without_database(tmp_path: Path) -> None:
     from fastapi.testclient import TestClient
 
-    cfg = Config()
+    cfg = Settings()
     cfg.auth.mode = "disabled"
     cfg.history.enabled = False
     cfg.database_url = ""
@@ -86,7 +86,7 @@ def test_session_auth_on_sqlite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     cfg_alembic.set_main_option("script_location", str(BACKEND_ROOT / "migrations"))
     monkeypatch.setenv("RAGKB_DATABASE_URL", url)
     command.upgrade(cfg_alembic, "head")
-    cfg = Config()
+    cfg = Settings()
     cfg.database_url = url
     cfg.auth.mode = "session"
     cfg.history.enabled = True

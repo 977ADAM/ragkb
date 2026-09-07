@@ -30,7 +30,7 @@ import numpy as np
 
 from .bm25 import BM25Index
 from .chunking import Chunk
-from .config import Config, StoreConfig
+from .config import Settings
 
 MANIFEST = "manifest.json"
 VECTORS = "vectors.npy"
@@ -220,9 +220,9 @@ class ChromaStore(BaseStore):
 
     backend_name = "chroma"
 
-    def __init__(self, index_dir: str | Path, cfg: StoreConfig | None = None):
+    def __init__(self, index_dir: str | Path, cfg: Settings.StoreConfig | None = None):
         super().__init__(index_dir)
-        self.cfg = cfg or StoreConfig()
+        self.cfg = cfg or Settings.StoreConfig()
         self._client = None
         self._collection = None
 
@@ -317,7 +317,7 @@ class ChromaStore(BaseStore):
         self._write_common()
 
     @classmethod
-    def load(cls, index_dir: str | Path, cfg: StoreConfig | None = None) -> ChromaStore:
+    def load(cls, index_dir: str | Path, cfg: Settings.StoreConfig | None = None) -> ChromaStore:
         store = cls(index_dir, cfg)
         store._read_common()
         store._get_collection(create=False)
@@ -392,7 +392,7 @@ class ChromaStore(BaseStore):
 
 # ----------------------------------------------------------------- фабрика
 
-def create_store(cfg: Config) -> BaseStore:
+def create_store(cfg: Settings) -> BaseStore:
     """Пустое хранилище для индексации."""
     backend = cfg.store.backend.lower()
     if backend == "chroma":
@@ -402,7 +402,7 @@ def create_store(cfg: Config) -> BaseStore:
     raise ValueError(f"Неизвестный бэкенд хранилища: {cfg.store.backend}")
 
 
-def open_store(cfg: Config) -> BaseStore:
+def open_store(cfg: Settings) -> BaseStore:
     """Загружает существующий индекс, сверяя бэкенд с манифестом."""
     manifest_path = Path(cfg.index_dir) / MANIFEST
     if not manifest_path.exists():
@@ -433,7 +433,7 @@ def _validate_collection_name(name: str) -> None:
         raise ValueError(
             f"Недопустимое имя коллекции «{name}»: нужно 3–512 символов из "
             f"[a-zA-Z0-9._-], начинается и заканчивается буквой или цифрой. "
-            f"Исправьте store.collection в config.yaml."
+            f"Исправьте store.collection."
         )
 
 # Chroma принимает в метаданных только скаляры, поэтому вложенный dict

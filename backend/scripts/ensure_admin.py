@@ -6,7 +6,7 @@ import logging
 import sys
 from datetime import datetime, timezone
 
-from ragkb.core.config import DEFAULT_CONFIG, Config
+from ragkb.core.config import Settings
 from ragkb.core.database import make_engine, make_session_factory
 from ragkb.core.security import get_admin_credentials
 from ragkb.db.repos.auth import PostgresAccounts
@@ -30,7 +30,7 @@ async def ensure_admin(store: AccountStore) -> None:
 
 
 async def main() -> None:
-    cfg = Config.load(DEFAULT_CONFIG)
+    cfg = Settings()
     engine = make_engine(cfg.database_url)
     try:
         store = PostgresAccounts(make_session_factory(engine))
