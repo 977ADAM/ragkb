@@ -39,6 +39,27 @@ def test_package_root_py_files():
     assert files == ALLOWED_TOP_PY
 
 
+def test_package_version_comes_from_pyproject():
+    in_project = False
+    expected = ""
+    for line in (ROOT / "pyproject.toml").read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped == "[project]":
+            in_project = True
+            continue
+        if stripped.startswith("["):
+            in_project = False
+            continue
+        if in_project and stripped.startswith("version"):
+            expected = stripped.split("=", 1)[1].strip().strip('"').strip("'")
+            break
+    assert expected
+    assert expected not in (PKG / "version.py").read_text(encoding="utf-8")
+    from ragkb.version import __version__
+
+    assert __version__ == expected
+
+
 def test_core_does_not_import_upper_layers():
     forbidden = ("ragkb.api", "ragkb.db", "ragkb.domain", "ragkb.services")
     for path in _py_files(PKG / "core"):
