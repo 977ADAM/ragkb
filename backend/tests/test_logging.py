@@ -1,9 +1,10 @@
 import logging
 from pathlib import Path
 
+from helpers import make_app
+
 from ragkb.core.config import Settings
 from ragkb.core.logging_config import get_logger, setup_logging
-from ragkb.main import create_app
 
 
 def _flush() -> None:
@@ -37,20 +38,6 @@ def test_setup_logging_rebinds_directory(tmp_path: Path) -> None:
     assert "in-second" not in (first / "app.log").read_text(encoding="utf-8")
 
 
-def test_create_app_logs_disabled_auth_to_configured_dir(tmp_path: Path) -> None:
-    log_dir = tmp_path / "logs"
-    cfg = Settings(
-        organization=Settings.OrganizationConfig(name="Acme", id="acme"),
-        logging=Settings.LoggingConfig(level="INFO", dir=str(log_dir)),
-    )
-    cfg.auth.mode = "disabled"
-    cfg.history.enabled = False
-    create_app(cfg)
-    _flush()
-    text = (log_dir / "app.log").read_text(encoding="utf-8")
-    assert "аутентификация выключена" in text
-
-
 def test_access_log_writes_method_status_and_ms(tmp_path: Path) -> None:
     """Каждый HTTP-запрос пишет access-строку с методом, статусом и временем."""
     log_dir = tmp_path / "logs"
@@ -59,7 +46,7 @@ def test_access_log_writes_method_status_and_ms(tmp_path: Path) -> None:
     cfg.history.enabled = False
     from fastapi.testclient import TestClient
 
-    with TestClient(create_app(cfg)) as client:
+    with TestClient(make_app(cfg)) as client:
         client.get("/health")
         client.get("/definitely-missing-route")
     _flush()
@@ -79,7 +66,7 @@ def test_unhandled_exception_returns_json_500(tmp_path: Path) -> None:
     cfg.history.enabled = False
     from fastapi.testclient import TestClient
 
-    app = create_app(cfg)
+    app = make_app(cfg)
 
     @app.get("/boom")
     async def boom() -> None:

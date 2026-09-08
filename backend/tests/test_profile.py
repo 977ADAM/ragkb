@@ -8,12 +8,11 @@ import pytest
 from alembic import command
 from alembic.config import Config as AlembicConfig
 from fastapi.testclient import TestClient
-from helpers import BACKEND_ROOT
+from helpers import BACKEND_ROOT, make_app
 
 from ragkb.core.config import Settings
 from ragkb.core.database import make_engine, make_session_factory
 from ragkb.db.repos.auth import PostgresAccounts
-from ragkb.main import create_app
 from ragkb.services.auth import hash_password
 
 
@@ -51,7 +50,7 @@ def _cfg(tmp_path: Path, url: str) -> Settings:
 
 @contextmanager
 def _client(tmp_path: Path, url: str):
-    with TestClient(create_app(_cfg(tmp_path, url))) as client:
+    with TestClient(make_app(_cfg(tmp_path, url))) as client:
         yield client
 
 
@@ -120,7 +119,7 @@ def test_change_password_other_sessions_invalidated(seeded) -> None:
     with _client(tmp_path, url) as client:
         _signin(client, "bob")
         # Вторая «вкладка»: ещё одна сессия.
-        second = TestClient(create_app(_cfg(tmp_path, url)))
+        second = TestClient(make_app(_cfg(tmp_path, url)))
         second.post(
             "/api/v1/auths/signin",
             json={"username": "bob", "password": "password1"},
@@ -180,7 +179,7 @@ def test_proxy_mode_profile_and_password(
     _migrate_sqlite(url, monkeypatch)
     cfg = _cfg(tmp_path, url)
     cfg.auth.mode = "proxy"
-    with TestClient(create_app(cfg)) as client:
+    with TestClient(make_app(cfg)) as client:
         headers = {"X-Forwarded-Preferred-Username": "ada"}
         res = client.get("/api/v1/auths/profile", headers=headers)
         assert res.status_code == 200

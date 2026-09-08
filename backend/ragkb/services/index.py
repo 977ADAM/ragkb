@@ -3,31 +3,23 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from ragkb.core.config import Settings
 from ragkb.core.errors import EngineUnavailable
-from ragkb.core.pipeline import build_index
-from ragkb.core.ports import AnswerEngine
+from ragkb.core.ports import IndexEngine
 
 
 class IndexService:
-    def __init__(
-        self,
-        cfg: Settings,
-        get_engine: Callable[[], AnswerEngine],
-        invalidate: Callable[[], None],
-    ):
-        self.cfg = cfg
-        self._engine = get_engine
+    def __init__(self, index: IndexEngine, invalidate: Callable[[], None]):
+        self._index = index
         self._invalidate = invalidate
 
     def status(self) -> dict[str, Any]:
         try:
-            return {"status": "ok", **self._engine().stats()}
+            return {"status": "ok", **self._index.stats()}
         except EngineUnavailable as exc:
             return {"status": "no_index", "detail": exc.detail}
 
     def rebuild(self) -> dict[str, Any]:
-        report = build_index(self.cfg)
+        report = self._index.rebuild()
         self._invalidate()
         return {
             "files": report.files,

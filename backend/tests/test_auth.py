@@ -40,10 +40,10 @@ def test_missing_header_is_none():
 def test_admin_forbidden(indexed):
     from fastapi.testclient import TestClient
 
-    from ragkb.main import create_app
+    from helpers import make_app
 
     indexed.auth.mode = "proxy"
-    with TestClient(create_app(indexed)) as client:
+    with TestClient(make_app(indexed)) as client:
         headers = {"X-Forwarded-Preferred-Username": "bob"}
         assert client.post("/api/v1/index/rebuild", headers=headers).status_code == 403
     assert isinstance(Forbidden("x"), Exception)
@@ -56,8 +56,8 @@ def test_auth_service_rejects_missing_accounts():
     request = SimpleNamespace(
         app=SimpleNamespace(
             state=SimpleNamespace(
-                container=SimpleNamespace(
-                    accounts=None, _ensure_postgres=lambda: None
+                storage=SimpleNamespace(
+                    accounts=None, ensure=lambda: None
                 )
             )
         )

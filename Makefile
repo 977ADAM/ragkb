@@ -25,13 +25,8 @@ sync-frontend:
 migrate:
 	cd backend && uv run alembic upgrade head
 
-backend:
-	@set -a; [ -f .env ] && . ./.env; set +a; \
-	export RAGKB_DATABASE_URL="sqlite+aiosqlite:///$(abspath data/ragkb.sqlite3)"; \
-	export RAGKB_AUTH_MODE="$${RAGKB_AUTH_MODE:-session}"; \
-	mkdir -p data; \
-	cd backend && uv run alembic upgrade head && \
-	uv run uvicorn ragkb.main:build --factory --host 127.0.0.1 --port 8000
+api:
+	cd backend && uv run uvicorn ragkb.main:app --host 127.0.0.1 --port 8000
 
 frontend:
 	cd frontend && bun run dev

@@ -8,12 +8,11 @@ import pytest
 from alembic import command
 from alembic.config import Config as AlembicConfig
 from fastapi.testclient import TestClient
-from helpers import BACKEND_ROOT
+from helpers import BACKEND_ROOT, make_app
 
 from ragkb.core.config import Settings
 from ragkb.core.database import make_engine, make_session_factory
 from ragkb.db.repos.auth import PostgresAccounts
-from ragkb.main import create_app
 from ragkb.services.auth import hash_password
 
 
@@ -53,7 +52,7 @@ def _session_cfg(
 
 @contextmanager
 def _admin_client(cfg: Settings):
-    with TestClient(create_app(cfg)) as client:
+    with TestClient(make_app(cfg)) as client:
         yield client
 
 

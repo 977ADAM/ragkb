@@ -7,12 +7,8 @@ import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any, Literal
 
-from ragkb.core.config import Settings
 from ragkb.core.errors import InvalidRequest, NotFound
-from ragkb.core.llm import ExtractiveLLM
-from ragkb.core.pipeline import RAGPipeline
 from ragkb.core.ports import AnswerEngine
-from ragkb.core.prompts import ANSWER_TEMPLATE, SYSTEM_PROMPT, format_context
 from ragkb.domain.entities import User, make_title
 from ragkb.domain.ports import (
     AnswerHistory,
@@ -35,7 +31,6 @@ class ChatConversationsService:
         resolve_model: Callable[[str | None], str],
         require_org: Callable[[str], None],
         window: int,
-        llm_cfg: Settings.LLMConfig,
         persist: bool = True,
     ):
         self.conversations = conversations
@@ -45,7 +40,6 @@ class ChatConversationsService:
         self.resolve_model = resolve_model
         self.require_org = require_org
         self.window = window
-        self.llm_cfg = llm_cfg
         self.persist = persist
         self.cache = EventualCache()
 
@@ -234,17 +228,14 @@ class ChatConversationsService:
                 warnings.append("Ответ оборвался и сохранён неполностью")
             else:
                 warnings.append(f"{exc} — ответ собран экстрактивно")
-                prompt = ANSWER_TEMPLATE.format(
-                    context=format_context(hits), question=question
-                )
-                fallback = ExtractiveLLM(self.llm_cfg).generate(SYSTEM_PROMPT, prompt)
+                fallback = engine.fallback_text(question, hits)
                 collected.append(fallback)
                 yield json.dumps(
                     {"type": "token", "text": fallback}, ensure_ascii=False
                 ) + "\n"
 
         text = "".join(collected)
-        sources = RAGPipeline._cited_sources(text, hits)
+        sources = engine.cited_sources(text, hits)
         if not hits:
             warnings.append("Поиск не вернул ни одного релевантного фрагмента")
         if not sources and "нет информации" not in text.lower():

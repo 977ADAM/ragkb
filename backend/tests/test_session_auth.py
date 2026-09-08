@@ -5,13 +5,12 @@ from contextlib import contextmanager
 
 import pytest
 from fastapi.testclient import TestClient
-from helpers import alembic_sync_url, database_url, migrate
+from helpers import alembic_sync_url, database_url, make_app, migrate
 from sqlalchemy import create_engine, select, text
 
 from ragkb.core.database import EXPECTED_REVISION, make_engine, make_session_factory
 from ragkb.db.models import UserRow
 from ragkb.db.repos.auth import PostgresAccounts
-from ragkb.main import create_app
 from ragkb.services.auth import hash_password, verify_password
 
 
@@ -146,7 +145,7 @@ def _session_client(cfg):
     cfg.database_url = database_url()
     cfg.auth.mode = "session"
     cfg.history.enabled = True
-    with TestClient(create_app(cfg)) as client:
+    with TestClient(make_app(cfg)) as client:
         yield client
 
 
@@ -267,7 +266,7 @@ def test_session_admin_rebuild_and_bootstrap(indexed):
 
 def test_me_disabled_is_anonymous(indexed):
     indexed.auth.mode = "disabled"
-    with TestClient(create_app(indexed)) as client:
+    with TestClient(make_app(indexed)) as client:
         assert client.get("/api/v1/auths/me").json() == {
             "username": "anonymous",
             "role": "user",
@@ -278,7 +277,7 @@ def test_session_history_disabled_does_not_persist_chats(indexed):
     indexed.database_url = database_url()
     indexed.auth.mode = "session"
     indexed.history.enabled = False
-    with TestClient(create_app(indexed)) as client:
+    with TestClient(make_app(indexed)) as client:
         assert (
             client.post(
                 "/api/v1/auths/signup",

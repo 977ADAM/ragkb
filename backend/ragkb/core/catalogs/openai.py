@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from ragkb.core.catalogs.info import ModelInfo
+from ragkb.core.catalogs.labels import model_label
+from ragkb.core.catalogs.static import StaticCatalog
 from ragkb.core.config import Settings
-from ragkb.services.models_labels import model_label
-from ragkb.services.models_schemas import ModelInfo
-from ragkb.services.models_static import StaticCatalog
 
 
 def listed_models(base_url: str, api_key: str = "") -> list[dict[str, Any]]:

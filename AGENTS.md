@@ -15,11 +15,12 @@
   (Postgres и память: `PostgresAccounts`, `PostgresHistory`,
   `EphemeralHistory`).
 - `domain/` — чистые сущности и порты без SQLAlchemy/pydantic/FastAPI.
-- `services/` — сценарии приложения без FastAPI и SQLAlchemy
-  (auth, admin_users, search, models, index, organization, chat,
-  telemetry, bootstrap + каталоги моделей).
-- Сборка: `backend/ragkb/main.py` (`create_app`, `build` и композиционный
-  корень `Container`).
+- `services/` — сценарии (use cases) без FastAPI, SQLAlchemy, пайплайна и
+  каталогов моделей. Данные и LLM приходят через порты
+  (`domain/ports.py`, `core/ports.py`).
+- Сборка: `backend/ragkb/main.py` кладёт на
+  `app.state` отдельные объекты: `db/storage.py`, `core/engine.py`,
+  `core/index.py`, `core/catalogs/`. Класса `Container` нет.
 
 - История диалогов и локальные аккаунты: Postgres (SQLAlchemy async в
   `db/`). Схема — Alembic в `backend/migrations/`. Приложение схему не
@@ -40,7 +41,7 @@
 cd backend
 uv sync --extra migrations --extra dev
 alembic upgrade head
-uv run uvicorn ragkb.main:build --factory
+uv run uvicorn ragkb.main:app
 cd ../frontend && bun run dev
 ```
 

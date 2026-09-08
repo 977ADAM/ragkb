@@ -7,4 +7,13 @@ class ModelsService:
         self.catalog = catalog
 
     def list(self) -> list[ModelInfo]:
-        return self.catalog.list()
+        return [
+            ModelInfo(
+                id=item.id,
+                display_name=item.display_name,
+                context_window=item.context_window,
+                supports_tools=item.supports_tools,
+                is_default=item.is_default,
+            )
+            for item in self.catalog.list()
+        ]

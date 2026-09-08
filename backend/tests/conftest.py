@@ -5,12 +5,11 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from helpers import alembic_sync_url, database_url, migrate
+from helpers import alembic_sync_url, database_url, make_app, migrate
 from sqlalchemy import create_engine, text
 
 from ragkb.core.config import Settings
 from ragkb.core.pipeline import build_index
-from ragkb.main import create_app
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -81,5 +80,5 @@ def indexed(cfg: Settings) -> Settings:
 
 @pytest.fixture
 def client(indexed: Settings):
-    with TestClient(create_app(indexed)) as test_client:
+    with TestClient(make_app(indexed)) as test_client:
         yield test_client

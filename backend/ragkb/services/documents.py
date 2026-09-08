@@ -1,7 +1,6 @@
 """Состояние корпуса документов и операции над ним (загрузка/удаление)."""
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,9 +9,7 @@ from typing import Any
 from ragkb.core import loaders
 from ragkb.core.config import Settings
 from ragkb.core.errors import EngineUnavailable, InvalidRequest, NotFound, PayloadTooLarge
-from ragkb.core.pipeline import build_index, remove_document
-from ragkb.core.ports import AnswerEngine
-from ragkb.core.store import MANIFEST
+from ragkb.core.ports import IndexEngine
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
@@ -23,18 +20,18 @@ class DocumentsService:
     def __init__(
         self,
         cfg: Settings,
-        get_engine: Callable[[], AnswerEngine],
+        index: IndexEngine,
         invalidate: Callable[[], None],
     ):
         self.cfg = cfg
-        self._engine = get_engine
+        self._index = index
         self._invalidate = invalidate
 
     def list_documents(self) -> dict[str, Any]:
         docs_dir = Path(self.cfg.docs_dir)
         files = loaders.discover(docs_dir)
         try:
-            manifest = self._engine().store.manifest
+            manifest = self._index.manifest()
         except EngineUnavailable:
             return self._no_index_view(files)
         return self._view_with_index(files, manifest)
@@ -124,9 +121,8 @@ class DocumentsService:
         target = docs_dir / name
         target.write_bytes(content)
         try:
-            report = build_index(self.cfg)
+            report = self._index.rebuild()
         except (ValueError, FileNotFoundError) as exc:
-            # Корпус после загрузки пуст (файл не дал текста) — откатываем файл.
             target.unlink(missing_ok=True)
             raise InvalidRequest(f"Не удалось проиндексировать: {exc}") from exc
         self._invalidate()
@@ -143,21 +139,7 @@ class DocumentsService:
         if not target.is_file():
             raise NotFound(f"Файл «{safe}» не найден в каталоге документов")
         target.unlink()
-        manifest_path = Path(self.cfg.index_dir) / MANIFEST
-        if not manifest_path.exists():
-            self._invalidate()
-            return
-        if not loaders.discover(Path(self.cfg.docs_dir)):
-            shutil.rmtree(Path(self.cfg.index_dir), ignore_errors=True)
-            self._invalidate()
-            return
-        if self.cfg.store.backend.lower() == "chroma":
-            remove_document(self.cfg, str(target))
-        else:
-            try:
-                build_index(self.cfg)
-            except ValueError as exc:
-                raise InvalidRequest(f"Не удалось пересобрать индекс: {exc}") from exc
+        self._index.reindex_after_delete(str(target))
         self._invalidate()
 
 

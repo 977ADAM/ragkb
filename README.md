@@ -303,7 +303,7 @@ backend/ragkb/
   db/          ORM-модели и адаптеры хранения (Postgres и память)
   domain/      сущности и порты
   services/    сценарии приложения (без FastAPI и SQLAlchemy)
-  main.py      create_app/build — вход uvicorn и композиционный корень
+  main.py      app — вход uvicorn и композиционный корень
 frontend/       SvelteKit, BFF
 ```
 

@@ -1,9 +1,9 @@
 """Каталог: одна модель из настроек."""
 from __future__ import annotations
 
+from ragkb.core.catalogs.info import ModelInfo
+from ragkb.core.catalogs.labels import model_label
 from ragkb.core.config import Settings
-from ragkb.services.models_labels import model_label
-from ragkb.services.models_schemas import ModelInfo
 
 
 class StaticCatalog:

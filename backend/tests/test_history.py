@@ -9,7 +9,6 @@ import pytest
 from helpers import alembic_sync_url, database_url, migrate
 from sqlalchemy import create_engine, text
 
-from ragkb.core.config import Settings
 from ragkb.core.database import EXPECTED_REVISION, make_engine, make_session_factory
 from ragkb.core.errors import NotFound
 from ragkb.db.repos.ephemeral_history import EphemeralHistory
@@ -39,7 +38,6 @@ async def test_stream_message_unknown_conversation_raises_before_iterator() -> N
         resolve_model=lambda model: "m",
         require_org=lambda _org: None,
         window=4,
-        llm_cfg=Settings.LLMConfig(),
     )
     with pytest.raises(NotFound):
         await svc.stream_message(

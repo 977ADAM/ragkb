@@ -1,4 +1,4 @@
-"""Зависимости FastAPI: сервисы из контейнера."""
+"""Зависимости FastAPI: use case из app.state."""
 from __future__ import annotations
 
 from fastapi import Request
@@ -15,74 +15,75 @@ from ragkb.services.search import SearchService
 from ragkb.services.telemetry import TelemetryService
 
 
-def container(request: Request):
-    return request.app.state.container
+def _storage(request: Request):
+    storage = request.app.state.storage
+    storage.ensure()
+    return storage
 
 
-def _chats(c) -> ChatConversationsService:
-    org = OrganizationService(c.cfg)
+def _chats(request: Request) -> ChatConversationsService:
+    cfg = request.app.state.cfg
+    storage = _storage(request)
+    org = OrganizationService(cfg)
     return ChatConversationsService(
-        conversations=c.conversations,
-        history=c.answer_history,
-        sources=IndexSources(c.engine),
-        engine=c.engine,
-        resolve_model=c.models.resolve,
+        conversations=storage.conversations,
+        history=storage.answer_history,
+        sources=IndexSources(request.app.state.engine),
+        engine=request.app.state.engine,
+        resolve_model=request.app.state.models.resolve,
         require_org=org.require_id,
-        window=c.history_window,
-        llm_cfg=c.cfg.llm,
-        persist=c.history_enabled,
+        window=cfg.history.window,
+        persist=cfg.history.enabled,
     )
 
 
 def chat_conversations_service(request: Request) -> ChatConversationsService:
-    c = container(request)
-    c._ensure_postgres()
-    return _chats(c)
+    return _chats(request)
 
 
 def search_service(request: Request) -> SearchService:
-    return SearchService(container(request).engine)
+    return SearchService(request.app.state.engine)
 
 
 def models_service(request: Request) -> ModelsService:
-    return ModelsService(container(request).models)
+    return ModelsService(request.app.state.models)
 
 
 def organization_service(request: Request) -> OrganizationService:
-    return OrganizationService(container(request).cfg)
+    return OrganizationService(request.app.state.cfg)
 
 
 def telemetry_service(request: Request) -> TelemetryService:
-    return TelemetryService(container(request).events)
+    return TelemetryService(request.app.state.events)
 
 
 def feedback_service(request: Request) -> FeedbackService:
-    c = container(request)
-    c._ensure_postgres()
-    if c.feedback is None:
+    storage = _storage(request)
+    if storage.feedback is None:
         raise RuntimeError("Оценки недоступны: Postgres не подключён")
-    return FeedbackService(c.feedback)
+    return FeedbackService(storage.feedback)
 
 
 def index_service(request: Request) -> IndexService:
-    c = container(request)
-    return IndexService(c.cfg, c.engine, c.invalidate_engine)
+    return IndexService(request.app.state.index, request.app.state.engine.invalidate)
 
 
 def documents_service(request: Request) -> DocumentsService:
-    c = container(request)
-    return DocumentsService(c.cfg, c.engine, c.invalidate_engine)
+    return DocumentsService(
+        request.app.state.cfg,
+        request.app.state.index,
+        request.app.state.engine.invalidate,
+    )
 
 
 def bootstrap_service(request: Request) -> BootstrapService:
-    c = container(request)
-    c._ensure_postgres()
-    org = OrganizationService(c.cfg)
+    cfg = request.app.state.cfg
+    org = OrganizationService(cfg)
     return BootstrapService(
-        cfg=c.cfg,
-        models=ModelsService(c.models),
-        chats=_chats(c),
+        cfg=cfg,
+        models=ModelsService(request.app.state.models),
+        chats=_chats(request),
         organization=org,
-        index=IndexService(c.cfg, c.engine, c.invalidate_engine),
-        history_enabled=c.history_enabled,
+        index=IndexService(request.app.state.index, request.app.state.engine.invalidate),
+        history_enabled=cfg.history.enabled,
     )

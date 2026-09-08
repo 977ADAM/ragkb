@@ -31,11 +31,11 @@ class RoleBody(BaseModel):
 
 
 def get_admin_users(request: Request) -> AdminUsersService:
-    c = request.app.state.container
-    c._ensure_postgres()
-    if c.accounts is None:
+    storage = request.app.state.storage
+    storage.ensure()
+    if storage.accounts is None:
         raise RuntimeError("Хранилище учёток недоступно: Postgres не подключён")
-    return AdminUsersService(c.accounts)
+    return AdminUsersService(storage.accounts)
 
 
 AdminUsers = Annotated[AdminUsersService, Depends(get_admin_users)]

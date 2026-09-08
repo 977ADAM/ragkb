@@ -70,6 +70,39 @@ def test_services_do_not_import_http_or_orm():
     )
 
 
+def test_services_are_use_cases_without_adapters():
+    _assert_not_imported(
+        PKG / "services",
+        (
+            "ragkb.core.pipeline",
+            "ragkb.core.llm",
+            "ragkb.core.prompts",
+            "ragkb.core.store",
+        ),
+    )
+    for name in (
+        "models_openai.py",
+        "models_ollama.py",
+        "models_static.py",
+        "models_labels.py",
+    ):
+        assert not (PKG / "services" / name).exists(), name
+    catalogs = PKG / "core" / "catalogs"
+    assert (catalogs / "openai.py").is_file()
+    assert (catalogs / "ollama.py").is_file()
+    assert (catalogs / "static.py").is_file()
+
+
+def test_no_process_container():
+    main = (PKG / "main.py").read_text(encoding="utf-8")
+    assert "class Container" not in main
+    assert "app.state.container" not in main
+    assert "def create_app" not in main
+    assert "_warn_misconfig" not in main
+    assert (PKG / "db" / "storage.py").is_file()
+    assert (PKG / "core" / "engine.py").is_file()
+
+
 def test_api_does_not_import_orm():
     _assert_not_imported(PKG / "api", ("sqlalchemy", "ragkb.db"))
 

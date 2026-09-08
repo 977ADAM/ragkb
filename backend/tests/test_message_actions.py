@@ -8,13 +8,12 @@ import pytest
 from alembic import command
 from alembic.config import Config as AlembicConfig
 from fastapi.testclient import TestClient
-from helpers import BACKEND_ROOT
+from helpers import BACKEND_ROOT, make_app
 
 from ragkb.core.config import Settings
 from ragkb.core.database import make_engine, make_session_factory
 from ragkb.db.repos.auth import PostgresAccounts
 from ragkb.db.repos.postgres_history import PostgresHistory
-from ragkb.main import create_app
 from ragkb.services.auth import hash_password
 
 
@@ -32,6 +31,15 @@ class _FakeEngine:
     def stream_answer(self, question, top_k=None, history=None, expand=False, model=None):
         self.answered += 1
         return [], iter([self._answer])
+
+    def cited_sources(self, text, hits):
+        return []
+
+    def fallback_text(self, question, hits):
+        return self._answer
+
+    def document_paths(self):
+        return None
 
 
 def _migrate_sqlite(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -69,9 +77,9 @@ def _cfg(tmp_path: Path, url: str) -> Settings:
 @contextmanager
 def _client(tmp_path: Path, url: str, engine: _FakeEngine | None = None):
     cfg = _cfg(tmp_path, url)
-    app = create_app(cfg)
+    app = make_app(cfg)
     if engine is not None:
-        app.state.container._engine = engine
+        app.state.engine._engine = engine
     with TestClient(app) as client:
         yield client
 

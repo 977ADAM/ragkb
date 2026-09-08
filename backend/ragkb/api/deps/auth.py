@@ -54,11 +54,11 @@ async def current_user(request: Request) -> User:
         if not raw:
             raise Unauthenticated("Не аутентифицирован")
         digest = hashlib.sha256(raw.encode()).hexdigest()
-        container = request.app.state.container
-        accounts = container.accounts
+        storage = request.app.state.storage
+        accounts = storage.accounts
         if accounts is None:
-            container._ensure_postgres()
-            accounts = container.accounts
+            storage.ensure()
+            accounts = storage.accounts
         if accounts is None:
             raise Unauthenticated("Не аутентифицирован")
         row = await accounts.user_for_token_hash(digest)
@@ -93,11 +93,11 @@ async def require_admin(request: Request) -> User:
 
 
 def get_auth_service(request: Request) -> AuthService:
-    c = request.app.state.container
-    c._ensure_postgres()
-    if c.accounts is None:
+    storage = request.app.state.storage
+    storage.ensure()
+    if storage.accounts is None:
         raise RuntimeError("Хранилище учёток недоступно: Postgres не подключён")
-    return AuthService(c.accounts)
+    return AuthService(storage.accounts)
 
 
 AuthSvc = Annotated[AuthService, Depends(get_auth_service)]

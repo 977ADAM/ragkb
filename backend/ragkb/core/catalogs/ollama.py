@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from ragkb.core.catalogs.info import ModelInfo
+from ragkb.core.catalogs.labels import model_label
 from ragkb.core.config import Settings
-from ragkb.services.models_labels import model_label
-from ragkb.services.models_schemas import ModelInfo
 
 
 def installed_models(base_url: str) -> list[dict[str, Any]]:

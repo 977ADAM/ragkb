@@ -2,8 +2,9 @@ from pathlib import Path
 
 import pytest
 
+from helpers import BACKEND_ROOT, make_app
 from ragkb.core.config import Settings
-from ragkb.main import create_app
+from ragkb.db.storage import Storage
 
 
 def test_history_enabled_env_false_zero_no(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -23,16 +24,16 @@ def test_history_enabled_env_true_when_set(monkeypatch: pytest.MonkeyPatch) -> N
     assert cfg.history.enabled is True
 
 
-def test_create_app_requires_database_url_when_history_enabled() -> None:
+def test_storage_requires_database_url_when_history_enabled() -> None:
     cfg = Settings()
     cfg.auth.mode = "disabled"
     cfg.database_url = ""
     cfg.store.backend = "numpy"
     with pytest.raises(RuntimeError, match="Задайте RAGKB_DATABASE_URL"):
-        create_app(cfg)
+        Storage(cfg)
 
 
-def test_create_app_does_not_touch_repo_history(tmp_path: Path) -> None:
+def test_storage_does_not_touch_repo_history(tmp_path: Path) -> None:
     """disabled + история выкл. не требует URL и не пишет sqlite."""
     cfg = Settings()
     cfg.auth.mode = "disabled"
@@ -40,7 +41,7 @@ def test_create_app_does_not_touch_repo_history(tmp_path: Path) -> None:
     cfg.database_url = ""
     cfg.store.backend = "numpy"
     cfg.index_dir = str(tmp_path / "idx")
-    create_app(cfg)
+    Storage(cfg)
     backend_default = Path(__file__).resolve().parents[1].parent / "data" / "history.sqlite3"
     assert not (tmp_path / "h.sqlite3").exists()
     _ = backend_default
@@ -55,7 +56,7 @@ def test_me_disabled_without_database(tmp_path: Path) -> None:
     cfg.database_url = ""
     cfg.store.backend = "numpy"
     cfg.index_dir = str(tmp_path / "idx")
-    with TestClient(create_app(cfg)) as client:
+    with TestClient(make_app(cfg)) as client:
         assert client.get("/auths/me").status_code == 404
         assert client.get("/api/v1/auths/me").json() == {
             "username": "anonymous",
@@ -78,7 +79,6 @@ def test_session_auth_on_sqlite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     from alembic import command
     from alembic.config import Config as AlembicConfig
     from fastapi.testclient import TestClient
-    from helpers import BACKEND_ROOT
 
     db = tmp_path / "ragkb.sqlite3"
     url = f"sqlite+aiosqlite:///{db}"
@@ -92,7 +92,7 @@ def test_session_auth_on_sqlite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     cfg.history.enabled = True
     cfg.store.backend = "numpy"
     cfg.index_dir = str(tmp_path / "idx")
-    with TestClient(create_app(cfg)) as client:
+    with TestClient(make_app(cfg)) as client:
         r = client.post(
             "/api/v1/auths/signup", json={"username": "ada", "password": "password1"}
         )

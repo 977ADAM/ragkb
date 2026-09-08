@@ -10,7 +10,7 @@ async def get_users(
     request: Request
 ) -> dict[str, list[dict[str, str]]]:
     """Возвращает список пользователей."""
-    svc = request.app.state.container.accounts
+    svc = request.app.state.storage.accounts
     if svc is None:
         raise RuntimeError("Хранилище учёток недоступно: Postgres не подключён")
     return {"users": await svc.list()}

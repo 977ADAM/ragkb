@@ -322,7 +322,7 @@ class RAGPipeline:
 
             text = ExtractiveLLM(self.cfg.llm).generate(SYSTEM_PROMPT, prompt)
 
-        used = self._cited_sources(text, hits)
+        used = self.cited_sources(text, hits)
         if not used and "нет информации" not in text.lower():
             warnings.append("Модель не проставила ссылки на источники — ответ стоит проверить")
 
@@ -348,7 +348,7 @@ class RAGPipeline:
         """Готовит поток ответа и отдаёт найденные фрагменты сразу.
 
         Кортеж, а не генератор, по одной причине: источники вычисляются
-        по готовому тексту через _cited_sources, но список Hit нужен
+        по готовому тексту через cited_sources, но список Hit нужен
         вызывающему коду раньше — до того, как поток закончится. Генератор
         отдать его не может, не смешивая типы событий в одном потоке.
 
@@ -383,6 +383,24 @@ class RAGPipeline:
             ).strip()
         except Exception:
             return None
+
+    def cited_sources(self, text: str, hits: list[Hit]) -> list[dict[str, Any]]:
+        """Собирает список реально процитированных источников по маркерам [N].
+
+        `text` — снапшот чанка на момент ответа (то, что видел LLM):
+        если документ позже удалили, фрагмент остаётся виден.
+        """
+        return self._cited_sources(text, hits)
+
+    def fallback_text(self, question: str, hits: list[Hit]) -> str:
+        prompt = ANSWER_TEMPLATE.format(context=format_context(hits), question=question)
+        from .llm import ExtractiveLLM
+
+        return ExtractiveLLM(self.cfg.llm).generate(SYSTEM_PROMPT, prompt)
+
+    def document_paths(self) -> set[str] | None:
+        documents = self.store.manifest.get("documents", [])
+        return {d.get("source", "") for d in documents}
 
     @staticmethod
     def _cited_sources(text: str, hits: list[Hit]) -> list[dict[str, Any]]:

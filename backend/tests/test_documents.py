@@ -7,14 +7,14 @@ import pytest
 from alembic import command
 from alembic.config import Config as AlembicConfig
 from fastapi.testclient import TestClient
-from helpers import BACKEND_ROOT
+from helpers import BACKEND_ROOT, make_app
 
 from ragkb.core.config import Settings
 from ragkb.core.database import make_engine, make_session_factory
 from ragkb.core.errors import EngineUnavailable, InvalidRequest, NotFound, PayloadTooLarge
+from ragkb.core.index import ConfigIndex
 from ragkb.core.pipeline import RAGPipeline, build_index
 from ragkb.db.repos.auth import PostgresAccounts
-from ragkb.main import create_app
 from ragkb.services.auth import hash_password
 from ragkb.services.documents import MAX_UPLOAD_BYTES, DocumentsService
 
@@ -38,7 +38,7 @@ def make_service(cfg: Settings) -> DocumentsService:
         except (FileNotFoundError, ValueError) as exc:
             raise EngineUnavailable(str(exc)) from exc
 
-    return DocumentsService(cfg, get_engine, lambda: None)
+    return DocumentsService(cfg, ConfigIndex(cfg, get_engine), lambda: None)
 
 
 def test_list_after_build(tmp_path):
@@ -246,7 +246,7 @@ def sqlite_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
 
 def test_non_admin_forbidden_on_documents(tmp_path, sqlite_url):
     cfg = _session_client_cfg(tmp_path, sqlite_url)
-    with TestClient(create_app(cfg)) as client:
+    with TestClient(make_app(cfg)) as client:
         _signin(client, "bob")
         assert client.get("/api/v1/admin/documents").status_code == 403
         assert client.post(
@@ -257,7 +257,7 @@ def test_non_admin_forbidden_on_documents(tmp_path, sqlite_url):
 
 def test_admin_gets_document_list(tmp_path, sqlite_url):
     cfg = _session_client_cfg(tmp_path, sqlite_url)
-    with TestClient(create_app(cfg)) as client:
+    with TestClient(make_app(cfg)) as client:
         _signin(client, "ada")
         body = client.get("/api/v1/admin/documents").json()
         assert body["index"] == "no_index"
@@ -266,7 +266,7 @@ def test_admin_gets_document_list(tmp_path, sqlite_url):
 
 def test_admin_upload_and_list(tmp_path, sqlite_url):
     cfg = _session_client_cfg(tmp_path, sqlite_url)
-    with TestClient(create_app(cfg)) as client:
+    with TestClient(make_app(cfg)) as client:
         _signin(client, "ada")
         res = client.post(
             "/api/v1/admin/documents",
@@ -281,7 +281,7 @@ def test_admin_upload_and_list(tmp_path, sqlite_url):
 
 def test_admin_upload_bad_extension_is_400(tmp_path, sqlite_url):
     cfg = _session_client_cfg(tmp_path, sqlite_url)
-    with TestClient(create_app(cfg)) as client:
+    with TestClient(make_app(cfg)) as client:
         _signin(client, "ada")
         res = client.post(
             "/api/v1/admin/documents",
@@ -295,7 +295,7 @@ def test_admin_upload_too_large_is_413(tmp_path, sqlite_url, monkeypatch):
 
     monkeypatch.setattr(documents_module, "MAX_UPLOAD_BYTES", 10)
     cfg = _session_client_cfg(tmp_path, sqlite_url)
-    with TestClient(create_app(cfg)) as client:
+    with TestClient(make_app(cfg)) as client:
         _signin(client, "ada")
         res = client.post(
             "/api/v1/admin/documents",
@@ -306,7 +306,7 @@ def test_admin_upload_too_large_is_413(tmp_path, sqlite_url, monkeypatch):
 
 def test_admin_delete(tmp_path, sqlite_url):
     cfg = _session_client_cfg(tmp_path, sqlite_url)
-    with TestClient(create_app(cfg)) as client:
+    with TestClient(make_app(cfg)) as client:
         _signin(client, "ada")
         client.post(
             "/api/v1/admin/documents",
