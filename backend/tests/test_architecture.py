@@ -11,6 +11,7 @@ PKG = ROOT / "ragkb"
 MIGRATIONS = ROOT / "migrations"
 
 ALLOWED_TOP_DIRS = {"api", "core", "db", "domain", "services"}
+ALLOWED_TOP_PY = {"__init__.py", "main.py", "version.py"}
 
 
 def _imports(path: Path) -> list[str]:
@@ -31,6 +32,11 @@ def _py_files(root: Path) -> list[Path]:
 def test_package_has_only_five_layer_dirs():
     top = {p.name for p in PKG.iterdir() if p.is_dir() and "__pycache__" not in p.name}
     assert top == ALLOWED_TOP_DIRS
+
+
+def test_package_root_py_files():
+    files = {p.name for p in PKG.iterdir() if p.is_file() and p.suffix == ".py"}
+    assert files == ALLOWED_TOP_PY
 
 
 def test_core_does_not_import_upper_layers():

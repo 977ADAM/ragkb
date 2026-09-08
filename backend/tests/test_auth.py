@@ -40,7 +40,7 @@ def test_missing_header_is_none():
 def test_admin_forbidden(indexed):
     from fastapi.testclient import TestClient
 
-    from ragkb.app import create_app
+    from ragkb.main import create_app
 
     indexed.auth.mode = "proxy"
     with TestClient(create_app(indexed)) as client:

@@ -9,12 +9,12 @@ from alembic.config import Config as AlembicConfig
 from fastapi.testclient import TestClient
 from helpers import BACKEND_ROOT
 
-from ragkb.app import create_app
 from ragkb.core.config import Settings
 from ragkb.core.database import make_engine, make_session_factory
 from ragkb.core.errors import EngineUnavailable, InvalidRequest, NotFound, PayloadTooLarge
 from ragkb.core.pipeline import RAGPipeline, build_index
 from ragkb.db.repos.auth import PostgresAccounts
+from ragkb.main import create_app
 from ragkb.services.auth import hash_password
 from ragkb.services.documents import MAX_UPLOAD_BYTES, DocumentsService
 
@@ -320,7 +320,7 @@ def test_admin_delete(tmp_path, sqlite_url):
 def test_request_form_wrapper_sets_max_part_size(monkeypatch):
     from starlette.requests import Request as StarletteRequest
 
-    import ragkb.app as app_mod
+    import ragkb.api.multipart as multipart
 
     seen: dict = {}
 
@@ -329,6 +329,6 @@ def test_request_form_wrapper_sets_max_part_size(monkeypatch):
         return "ok"
 
     monkeypatch.setattr(StarletteRequest, "form", fake)
-    app_mod._raise_starlette_multipart_part_limit()
+    multipart.raise_multipart_part_limit()
     assert StarletteRequest.form(object()) == "ok"
-    assert seen["max_part_size"] == app_mod._MULTIPART_MAX_PART_SIZE
+    assert seen["max_part_size"] == multipart.MULTIPART_MAX_PART_SIZE

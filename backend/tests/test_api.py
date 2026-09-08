@@ -14,7 +14,7 @@ def test_health_anonymous(client):
 def test_unauthenticated_when_proxy_mode(indexed):
     from fastapi.testclient import TestClient
 
-    from ragkb.app import create_app
+    from ragkb.main import create_app
 
     indexed.auth.mode = "proxy"
     with TestClient(create_app(indexed)) as client:

@@ -18,8 +18,8 @@
 - `services/` — сценарии приложения без FastAPI и SQLAlchemy
   (auth, admin_users, search, models, index, organization, chat,
   telemetry, bootstrap + каталоги моделей).
-- Сборка: `backend/ragkb/app.py` (`create_app`, `build`) и
-  `backend/ragkb/container.py` (композиционный корень).
+- Сборка: `backend/ragkb/main.py` (`create_app`, `build` и композиционный
+  корень `Container`).
 
 - История диалогов и локальные аккаунты: Postgres (SQLAlchemy async в
   `db/`). Схема — Alembic в `backend/migrations/`. Приложение схему не
@@ -40,7 +40,7 @@
 cd backend
 uv sync --extra migrations --extra dev
 alembic upgrade head
-uv run uvicorn ragkb.app:build --factory
+uv run uvicorn ragkb.main:build --factory
 cd ../frontend && bun run dev
 ```
 

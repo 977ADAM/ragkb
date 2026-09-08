@@ -7,11 +7,11 @@ alwaysApply: true
 
 - Код сервиса только в `backend/`. Пакет `ragkb` — пять каталогов по слоям:
   `api/`, `core/`, `db/`, `domain/`, `services/` (плюс файлы верхнего уровня
-  `app.py` — вход uvicorn, `container.py` — композиционный корень).
+  `main.py` — вход uvicorn (`create_app`/`build`) и композиционный корень).
   Каталогов `features/` и `platform/` нет.
 - Интерфейс только в `frontend/` (SvelteKit + BFF). FastAPI не отдаёт HTML.
   Ручки сервиса кроме `GET /health` — префикс `/api/v1`.
-- Точка входа: `uvicorn ragkb.app:build --factory`. Конфиг:
+- Точка входа: `uvicorn ragkb.main:build --factory`. Конфиг:
   `backend/config.yaml`.
 - Миграции истории и аккаунтов: Postgres, `backend/migrations/`,
   `alembic upgrade head`. URL: `RAGKB_DATABASE_URL`.

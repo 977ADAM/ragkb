@@ -12,7 +12,6 @@ from typing import Annotated
 from fastapi import Depends, Request, Response
 from starlette.datastructures import Headers
 
-from ragkb.container import Container
 from ragkb.core.config import Settings
 from ragkb.core.errors import Forbidden, Unauthenticated
 from ragkb.domain.entities import ANONYMOUS, User
@@ -55,7 +54,7 @@ async def current_user(request: Request) -> User:
         if not raw:
             raise Unauthenticated("Не аутентифицирован")
         digest = hashlib.sha256(raw.encode()).hexdigest()
-        container: Container = request.app.state.container
+        container = request.app.state.container
         accounts = container.accounts
         if accounts is None:
             container._ensure_postgres()
@@ -94,7 +93,7 @@ async def require_admin(request: Request) -> User:
 
 
 def get_auth_service(request: Request) -> AuthService:
-    c: Container = request.app.state.container
+    c = request.app.state.container
     c._ensure_postgres()
     if c.accounts is None:
         raise RuntimeError("Хранилище учёток недоступно: Postgres не подключён")

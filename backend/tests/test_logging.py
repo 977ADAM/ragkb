@@ -1,9 +1,9 @@
 import logging
 from pathlib import Path
 
-from ragkb.app import create_app
 from ragkb.core.config import Settings
 from ragkb.core.logging_config import get_logger, setup_logging
+from ragkb.main import create_app
 
 
 def _flush() -> None:

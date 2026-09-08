@@ -56,7 +56,7 @@ def setup_logging(*, level: str = "INFO", log_dir: Path | str | None = None) -> 
         errors.setFormatter(formatter)
         root.addHandler(errors)
 
-    # Свои access-строки пишет middleware в app.py; логгер uvicorn.access
+    # Свои access-строки пишет AccessLogMiddleware; логгер uvicorn.access
     # только дублирует их в другом формате — глушим.
     for name in (
         "httpx",

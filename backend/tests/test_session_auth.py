@@ -8,10 +8,10 @@ from fastapi.testclient import TestClient
 from helpers import alembic_sync_url, database_url, migrate
 from sqlalchemy import create_engine, select, text
 
-from ragkb.app import create_app
 from ragkb.core.database import EXPECTED_REVISION, make_engine, make_session_factory
 from ragkb.db.models import UserRow
 from ragkb.db.repos.auth import PostgresAccounts
+from ragkb.main import create_app
 from ragkb.services.auth import hash_password, verify_password
 
 

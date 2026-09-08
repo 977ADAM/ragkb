@@ -37,3 +37,8 @@ async def ragkb_error_handler(request: Request, exc: RagkbError) -> JSONResponse
     else:
         log.info("%s %s: %s", request.method, request.url.path, exc.detail)
     return JSONResponse({"detail": exc.detail}, status_code=status)
+
+
+async def unhandled_exception(request: Request, exc: Exception) -> JSONResponse:
+    log.exception("необработанная ошибка %s %s", request.method, request.url.path)
+    return JSONResponse({"detail": "Внутренняя ошибка сервера"}, status_code=500)

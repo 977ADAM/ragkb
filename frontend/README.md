@@ -13,7 +13,7 @@ uv sync --extra migrations --extra dev
 alembic upgrade head
 export RAGKB_AUTH_MODE=disabled
 export RAGKB_HISTORY_ENABLED=false   # make backend: без форм и без Postgres
-uv run uvicorn ragkb.platform.app:build --factory --port 8000
+uv run uvicorn ragkb.main:build --factory --port 8000
 
 cd frontend
 bun install

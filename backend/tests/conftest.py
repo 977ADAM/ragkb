@@ -8,9 +8,9 @@ from fastapi.testclient import TestClient
 from helpers import alembic_sync_url, database_url, migrate
 from sqlalchemy import create_engine, text
 
-from ragkb.app import create_app
 from ragkb.core.config import Settings
 from ragkb.core.pipeline import build_index
+from ragkb.main import create_app
 
 
 @pytest.fixture(scope="session", autouse=True)

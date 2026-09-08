@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from fastapi import Request
 
-from ragkb.container import Container
 from ragkb.services.bootstrap import BootstrapService
 from ragkb.services.chat_conversations import ChatConversationsService
 from ragkb.services.chat_sources import IndexSources
@@ -16,11 +15,11 @@ from ragkb.services.search import SearchService
 from ragkb.services.telemetry import TelemetryService
 
 
-def container(request: Request) -> Container:
+def container(request: Request):
     return request.app.state.container
 
 
-def _chats(c: Container) -> ChatConversationsService:
+def _chats(c) -> ChatConversationsService:
     org = OrganizationService(c.cfg)
     return ChatConversationsService(
         conversations=c.conversations,
