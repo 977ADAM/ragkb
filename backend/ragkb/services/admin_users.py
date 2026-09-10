@@ -5,6 +5,7 @@ from datetime import datetime
 
 from ragkb.core.errors import Forbidden, InvalidRequest, NotFound
 from ragkb.domain.ports import AccountStore
+from ragkb.services.auth import hash_password
 
 _ROLES = frozenset({"user", "admin"})
 
@@ -24,6 +25,16 @@ class AdminUsersService:
     async def list(self) -> list[dict[str, str]]:
         rows = await self._store.list_users()
         return [_user_payload(name, role, created) for name, role, created in rows]
+
+    async def create(self, username: str, password: str, role: str) -> dict[str, str]:
+        if role not in _ROLES:
+            raise InvalidRequest("роль только user или admin")
+        await self._store.create_user(username, hash_password(password), role=role)
+        profile = await self._store.get_profile(username)
+        if profile is None:
+            raise NotFound("Пользователь не найден")
+        new_role, created_at = profile
+        return _user_payload(username, new_role, created_at)
 
     async def set_role(self, username: str, role: str) -> dict[str, str]:
         if role not in _ROLES:

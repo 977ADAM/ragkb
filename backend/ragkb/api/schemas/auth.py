@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import re
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 _USERNAME = re.compile(r"^[a-z0-9._-]+$")
@@ -21,6 +23,10 @@ class Credentials(BaseModel):
         if not (3 <= len(value) <= 32):
             raise ValueError("некорректный логин")
         return value
+
+
+class CreateUser(Credentials):
+    role: Literal["user", "admin"]
 
 
 class ChangePassword(BaseModel):

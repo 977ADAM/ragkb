@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from ragkb.api.deps.auth import require_admin
+from ragkb.api.schemas.auth import CreateUser
 from ragkb.api.deps.services import feedback_service, organization_service
 from ragkb.core.errors import NotFound
 from ragkb.domain.entities import User
@@ -44,6 +45,22 @@ AdminUsers = Annotated[AdminUsersService, Depends(get_admin_users)]
 @router.get("/users")
 async def list_users(svc: AdminUsers) -> dict[str, list[dict[str, str]]]:
     return {"users": await svc.list()}
+
+
+@router.post("/users", status_code=201)
+async def create_user(
+    body: CreateUser,
+    svc: AdminUsers,
+    actor: User = Depends(require_admin),
+) -> dict[str, str]:
+    result = await svc.create(body.username, body.password, body.role)
+    log.info(
+        "админ %s: создан пользователь %s роль %s",
+        actor.name,
+        result["username"],
+        result["role"],
+    )
+    return result
 
 
 @router.patch("/users/{username}")

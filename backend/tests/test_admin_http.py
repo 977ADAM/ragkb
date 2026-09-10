@@ -161,3 +161,69 @@ def test_organization_hub_empty_when_unconfigured(
             "reports": "/admin/reports",
             "feedback": "/admin/feedback",
         }
+
+
+def test_admin_creates_user(tmp_path: Path, sqlite_url: str) -> None:
+    with _admin_client(_session_cfg(tmp_path, sqlite_url)) as client:
+        _signin(client, "ada")
+        res = client.post(
+            "/api/v1/admin/users",
+            json={"username": "Eve", "password": "password1", "role": "user"},
+        )
+        assert res.status_code == 201
+        body = res.json()
+        assert body["username"] == "eve"
+        assert body["role"] == "user"
+        assert body["created_at"]
+        users = {(u["username"], u["role"]) for u in client.get("/api/v1/admin/users").json()["users"]}
+        assert ("eve", "user") in users
+        assert client.get("/api/v1/auths/me").json() == {"username": "ada", "role": "admin"}
+
+
+def test_admin_creates_admin(tmp_path: Path, sqlite_url: str) -> None:
+    with _admin_client(_session_cfg(tmp_path, sqlite_url)) as client:
+        _signin(client, "ada")
+        res = client.post(
+            "/api/v1/admin/users",
+            json={"username": "root", "password": "password1", "role": "admin"},
+        )
+        assert res.status_code == 201
+        assert res.json()["role"] == "admin"
+
+
+def test_plain_user_cannot_create(tmp_path: Path, sqlite_url: str) -> None:
+    with _admin_client(_session_cfg(tmp_path, sqlite_url)) as client:
+        _signin(client, "bob")
+        res = client.post(
+            "/api/v1/admin/users",
+            json={"username": "eve", "password": "password1", "role": "user"},
+        )
+        assert res.status_code == 403
+
+
+def test_create_duplicate_username_is_409(tmp_path: Path, sqlite_url: str) -> None:
+    with _admin_client(_session_cfg(tmp_path, sqlite_url)) as client:
+        _signin(client, "ada")
+        res = client.post(
+            "/api/v1/admin/users",
+            json={"username": "bob", "password": "password1", "role": "user"},
+        )
+        assert res.status_code == 409
+        assert res.json()["detail"] == "Такой логин уже занят"
+
+
+def test_create_rejects_short_password_and_bad_role(
+    tmp_path: Path, sqlite_url: str
+) -> None:
+    with _admin_client(_session_cfg(tmp_path, sqlite_url)) as client:
+        _signin(client, "ada")
+        short = client.post(
+            "/api/v1/admin/users",
+            json={"username": "sam", "password": "short", "role": "user"},
+        )
+        assert short.status_code == 422
+        bad_role = client.post(
+            "/api/v1/admin/users",
+            json={"username": "sam", "password": "password1", "role": "owner"},
+        )
+        assert bad_role.status_code == 422
