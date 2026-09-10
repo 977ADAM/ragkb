@@ -5,7 +5,7 @@ import json
 import re
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -364,7 +364,10 @@ class RAGPipeline:
         """
         if not model or model == self.cfg.llm.model:
             return self.llm
-        return build_llm(replace(self.cfg.llm, model=model))
+        # Конфиг — pydantic-модель, а не dataclass: копию делаем её же
+        # средством. Иначе запрос с выбранной в интерфейсе моделью падает —
+        # dataclasses.replace отказывается работать с BaseModel.
+        return build_llm(self.cfg.llm.model_copy(update={"model": model}))
 
     # --------------------------------------------------------------- поиск
 

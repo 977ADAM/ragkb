@@ -307,6 +307,25 @@ def _assert_end_to_end(backend: str) -> None:
     assert answer.hits
 
 
+def test_llm_uses_model_selected_in_ui():
+    """Выбор модели в интерфейсе не должен ронять запрос.
+
+    Конфиг — pydantic-модель; попытка сделать копию через dataclasses.replace
+    роняла каждое обращение к чату с выбранной моделью (TypeError → 500).
+    """
+    from ragkb.core.pipeline import build_index
+
+    cfg = _workspace("numpy")
+    cfg.llm.backend = "openai"
+    cfg.llm.base_url = "http://127.0.0.1:9/v1"
+    build_index(cfg)
+    pipeline = RAGPipeline(cfg)
+    llm = pipeline._llm_for("qwen2.5:7b-instruct")
+    assert llm.name == "openai:qwen2.5:7b-instruct"
+    assert pipeline.cfg.llm.model != "qwen2.5:7b-instruct", "конфиг не должен меняться"
+    assert pipeline._llm_for(None) is pipeline.llm
+
+
 def test_backends_agree_on_ranking():
     """Chroma и numpy должны выдавать одинаковый порядок на одних данных.
 
