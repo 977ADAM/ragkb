@@ -7,7 +7,7 @@ help:
 	@echo "sync            uv sync (backend, migrations + dev)"
 	@echo "sync-frontend   bun install (frontend)"
 	@echo "migrate         alembic upgrade head"
-	@echo "backend         uvicorn :8000, session + SQLite data/ragkb.sqlite3"
+	@echo "api			   uvicorn ragkb.main:app --host 127.0.0.1 --port 8000"
 	@echo "frontend        bun run dev, BFF → 127.0.0.1:8000"
 	@echo "test            pytest (backend); нужна RAGKB_TEST_DATABASE_URL"
 	@echo "check           svelte-check (frontend)"
