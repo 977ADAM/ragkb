@@ -1,6 +1,8 @@
 x-backend: &backend
   build: ./backend
   image: ragkb:local
+  environment:
+    RAGKB_AUTH_MODE: disabled
 
 services:
   postgres:
