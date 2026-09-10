@@ -22,8 +22,13 @@ class ConfigIndex:
     def stats(self) -> dict[str, Any]:
         return self._engine().stats()
 
-    def rebuild(self):
-        return build_index(self.cfg)
+    def rebuild(self, allow: frozenset[str] | None = None):
+        """Полная переиндексация документов, принятых в корпус.
+
+        `allow` — имена из реестра документов; None значит «индексировать
+        всё, что нашлось в каталоге» (режим без реестра).
+        """
+        return build_index(self.cfg, allow=_by_registry(allow))
 
     def manifest(self) -> dict[str, Any]:
         engine = self._engine()
@@ -32,17 +37,34 @@ class ConfigIndex:
             raise EngineUnavailable("Индекс недоступен")
         return store.manifest
 
-    def reindex_after_delete(self, path: str) -> None:
+    def reindex_after_delete(self, path: str, allow: frozenset[str] | None = None) -> None:
         manifest_path = Path(self.cfg.index_dir) / MANIFEST
         if not manifest_path.exists():
             return
-        if not loaders.discover(Path(self.cfg.docs_dir)):
+        root = Path(self.cfg.docs_dir)
+        predicate = _by_registry(allow)
+        # «Корпус опустел» считаем по принятым документам, а не по каталогу:
+        # файлы мимо интерфейса в индексе не участвуют, и оставшийся из них
+        # каталог не повод держать индекс, которого больше не на чем собрать.
+        remaining = [
+            candidate
+            for candidate in loaders.discover(root)
+            if predicate is None or predicate(loaders.relative_name(candidate, root))
+        ]
+        if not remaining:
             shutil.rmtree(Path(self.cfg.index_dir), ignore_errors=True)
             return
         if self.cfg.store.backend.lower() == "chroma":
             remove_document(self.cfg, path)
             return
         try:
-            build_index(self.cfg)
+            build_index(self.cfg, allow=predicate)
         except ValueError as exc:
             raise InvalidRequest(f"Не удалось пересобрать индекс: {exc}") from exc
+
+
+def _by_registry(allow: frozenset[str] | None):
+    """Предикат «документ принят в корпус» для ядра индексации."""
+    if allow is None:
+        return None
+    return lambda name: name in allow

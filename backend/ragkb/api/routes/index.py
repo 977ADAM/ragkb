@@ -21,11 +21,11 @@ def status(
 
 
 @router.post("/index/rebuild")
-def rebuild(
+async def rebuild(
     user: User = Depends(require_admin),
     svc: IndexService = Depends(index_service),
 ) -> dict:
-    result = svc.rebuild()
+    result = await svc.rebuild()
     log.info(
         "перестроение индекса: %s (%s файлов, %s чанков, %s с)",
         user.name,

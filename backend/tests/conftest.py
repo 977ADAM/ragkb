@@ -33,7 +33,7 @@ def _truncate() -> None:
     with engine.begin() as conn:
         conn.execute(
             text(
-                "TRUNCATE messages, conversations, sessions, users "
+                "TRUNCATE messages, conversations, sessions, users, corpus_documents "
                 "RESTART IDENTITY CASCADE"
             )
         )

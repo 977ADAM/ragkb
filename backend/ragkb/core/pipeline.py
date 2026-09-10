@@ -1,6 +1,7 @@
 """Оркестрация: индексация и вопрос-ответ."""
 from __future__ import annotations
 
+import json
 import re
 import time
 from collections.abc import Callable, Iterator
@@ -58,6 +59,10 @@ class IndexReport:
     embedder: str
     store_backend: str = ""
     warnings: list[str] = field(default_factory=list)
+    # Файлы, которые лежат в каталоге, но в корпус не приняты: их индексация
+    # не касается. Показываем их вызывающему коду — иначе пропажа документов
+    # из выдачи выглядела бы необъяснимой.
+    excluded: list[str] = field(default_factory=list)
 
 
 def build_index(
@@ -65,18 +70,33 @@ def build_index(
     *,
     docs_dir: str | Path | None = None,
     progress: Callable[[str], None] | None = None,
+    allow: Callable[[str], bool] | None = None,
 ) -> IndexReport:
-    """Полная переиндексация каталога документов."""
+    """Полная переиндексация каталога документов.
+
+    `allow` — предикат по имени файла относительно каталога корпуса:
+    индексируются только те документы, которые приняты в корпус (реестр
+    ведёт прикладной слой). Без предиката берётся всё, что нашлось.
+    """
     started = time.time()
     say = progress or (lambda _msg: None)
     source = Path(docs_dir or cfg.docs_dir)
 
-    files = loaders.discover(source)
+    files, excluded = _accepted_only(loaders.discover(source), source, allow)
+    for path in excluded:
+        say(f"  × вне корпуса, пропущен {path.name}")
     if not files:
+        if excluded:
+            raise ValueError(
+                f"Ни один файл не принят в корпус: {len(excluded)} файл(ов) лежат "
+                f"в каталоге {source} мимо интерфейса. Примите их на странице "
+                f"«Документы» или загрузите документы через интерфейс."
+            )
         raise FileNotFoundError(f"В каталоге {source} не найдено поддерживаемых файлов")
 
     documents = []
     skipped: list[tuple[str, str]] = []
+    facts: dict[str, dict[str, Any]] = {}
     for path in files:
         try:
             doc = loaders.load(path)
@@ -88,6 +108,7 @@ def build_index(
             skipped.append((str(path), "не удалось извлечь текст (возможно, скан без OCR)"))
             say(f"  ! пустой текст: {path.name}")
             continue
+        facts[doc.path] = _file_facts(path, doc.checksum)
         documents.append(doc)
         say(f"  + {path.name}: {len(doc.blocks)} блоков")
 
@@ -114,6 +135,9 @@ def build_index(
             "skipped": skipped,
         },
     )
+    # Факты о файлах кладём после сборки: манифест описывает индекс, а
+    # mtime/sha256 относятся к исходникам и берутся из файловой системы.
+    store.set_document_facts(facts)
     store.save()
 
     return IndexReport(
@@ -123,6 +147,7 @@ def build_index(
         elapsed=time.time() - started,
         embedder=embedder.name,
         store_backend=store.backend_name,
+        excluded=[str(path) for path in excluded],
     )
 
 
@@ -131,6 +156,7 @@ def update_documents(
     paths: list[str | Path],
     *,
     progress: Callable[[str], None] | None = None,
+    allow: Callable[[str], bool] | None = None,
 ) -> IndexReport:
     """Добавляет или обновляет отдельные документы без полной переиндексации.
 
@@ -167,8 +193,14 @@ def update_documents(
 
     total_chunks = 0
     skipped: list[tuple[str, str]] = []
+    facts: dict[str, dict[str, Any]] = {}
     for path in paths:
         for file_path in loaders.discover(path):
+            if allow is not None and not allow(
+                loaders.relative_name(file_path, Path(cfg.docs_dir))
+            ):
+                skipped.append((str(file_path), "вне корпуса: не принят через интерфейс"))
+                continue
             try:
                 doc = loaders.load(file_path)
             except Exception as exc:
@@ -180,9 +212,11 @@ def update_documents(
                 continue
             vectors = embedder.embed_documents([c.embed_text for c in chunks])
             store.upsert_document(chunks, vectors)
+            facts[doc.path] = _file_facts(file_path, doc.checksum)
             total_chunks += len(chunks)
             say(f"  ~ {file_path.name}: {len(chunks)} чанков обновлено")
 
+    store.set_document_facts(facts)
     store.save()
     return IndexReport(
         files=len(paths),
@@ -193,6 +227,88 @@ def update_documents(
         store_backend=store.backend_name,
         warnings=warnings,
     )
+
+
+def _accepted_only(
+    files: list[Path], source: Path, allow: Callable[[str], bool] | None
+) -> tuple[list[Path], list[Path]]:
+    """Делит найденные файлы на принятые в корпус и оставшиеся в стороне."""
+    if allow is None:
+        return list(files), []
+    accepted: list[Path] = []
+    excluded: list[Path] = []
+    for path in files:
+        name = loaders.relative_name(path, source)
+        (accepted if allow(name) else excluded).append(path)
+    return accepted, excluded
+
+
+def _file_facts(path: str | Path, checksum: str) -> dict[str, Any]:
+    """Факты о файле для манифеста.
+
+    Хэш содержимого и размер отвечают на вопрос «тот ли это документ», а
+    mtime — «менялся ли он после индексации». Вместе они надёжнее, чем
+    сравнение с временем сборки индекса: переиндексация соседнего файла
+    больше не делает вид, что изменились все.
+    """
+    stat = Path(path).stat()
+    return {
+        "mtime": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+        "size": stat.st_size,
+        "sha256": checksum,
+    }
+
+
+def parse_expanded_queries(raw: str, question: str, n: int) -> list[str]:
+    """Достаёт перефразировки вопроса из ответа модели.
+
+    Контракт — JSON `{"queries": [...]}`: он переживает и нумерацию, и
+    вводные пояснения. Модели поменьше его нарушают, поэтому есть запасной
+    разбор по строкам: одна кривая перефразировка полезнее, чем ни одной.
+    Исходный вопрос и повторы отбрасываем — они уже есть в поиске.
+    """
+    queries = _queries_from_json(raw)
+    if not queries:
+        queries = [
+            re.sub(r"^[\d\-.)\s]+", "", line).strip() for line in raw.splitlines()
+        ]
+    out: list[str] = []
+    seen = {_normalized(question)}
+    for query in queries:
+        candidate = " ".join(query.split())
+        key = _normalized(candidate)
+        if len(candidate) <= 5 or key in seen:
+            continue
+        seen.add(key)
+        out.append(candidate)
+        if len(out) >= n:
+            break
+    return out
+
+
+def _queries_from_json(raw: str) -> list[str]:
+    """Вырезает список перефразировок из ответа, если он похож на JSON.
+
+    Ищем по внешним фигурным скобкам, а не парсим строку целиком: модель
+    часто обрамляет JSON пояснением или блоком ```json.
+    """
+    start, end = raw.find("{"), raw.rfind("}")
+    if start < 0 or end <= start:
+        return []
+    try:
+        body = json.loads(raw[start : end + 1])
+    except ValueError:
+        return []
+    if not isinstance(body, dict):
+        return []
+    values = body.get("queries") or body.get("questions") or []
+    if not isinstance(values, list):
+        return []
+    return [value for value in values if isinstance(value, str)]
+
+
+def _normalized(text: str) -> str:
+    return " ".join(text.split()).casefold()
 
 
 def remove_document(cfg: Settings, path: str | Path) -> int:
@@ -277,10 +393,9 @@ class RAGPipeline:
                 "Ты помогаешь искать по базе документов.",
                 QUERY_EXPANSION_PROMPT.format(n=n, question=question),
             )
-        except (LLMError, Exception):
+        except Exception:
             return []
-        lines = [re.sub(r"^[\d\-\.\)\s]+", "", ln).strip() for ln in raw.splitlines()]
-        return [ln for ln in lines if len(ln) > 5][:n]
+        return parse_expanded_queries(raw, question, n)
 
     # ---------------------------------------------------------------- ответ
 

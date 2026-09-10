@@ -63,6 +63,7 @@ def test_migrate_creates_postgres_tables() -> None:
         assert "sessions" in names
         assert "conversations" in names
         assert "messages" in names
+        assert "corpus_documents" in names
         rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
         assert rev == EXPECTED_REVISION
         owner = conn.execute(
@@ -254,6 +255,13 @@ def test_session_admin_rebuild_and_bootstrap(indexed):
             conn.execute(text("UPDATE users SET role = 'admin' WHERE username = 'ada'"))
         engine.dispose()
         assert client.get("/api/v1/auths/me").json() == {"username": "ada", "role": "admin"}
+        # Индекс собирается по реестру документов: файлы, лежащие в каталоге
+        # корпуса, сначала нужно принять — иначе пересборка честно откажет.
+        names = [
+            row["name"] for row in client.get("/api/v1/admin/documents").json()["corpus"]
+        ]
+        accepted = client.post("/api/v1/admin/documents/accept", json={"names": names})
+        assert accepted.status_code == 200
         assert client.post("/api/v1/index/rebuild").status_code == 200
         boot = client.get(
             "/api/v1/bootstrap",

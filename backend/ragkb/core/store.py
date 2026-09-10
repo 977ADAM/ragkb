@@ -92,6 +92,24 @@ class BaseStore(ABC):
     def embedder_state(self) -> dict[str, Any]:
         return self._embedder_state
 
+    def set_document_facts(self, facts: dict[str, dict[str, Any]]) -> None:
+        """Дописывает в манифест факты о файлах: mtime, размер, sha256.
+
+        Ключ — путь к файлу (он же `source` чанков), поэтому запись находится
+        без дополнительных индексов. Факты нужны, чтобы отличить «файл
+        проиндексирован» от «файл подменили, дата осталась прежней».
+        """
+        if not facts:
+            return
+        for entry in self.manifest.get("documents", []):
+            fact = facts.get(entry.get("source", ""))
+            if fact:
+                entry.update(fact)
+
+    def _summary(self) -> list[dict[str, Any]]:
+        """Сводка о документах с сохранением уже известных фактов о файлах."""
+        return _document_summary(self.chunks, self.manifest.get("documents", []))
+
     def exists(self) -> bool:
         return (self.dir / MANIFEST).exists()
 
@@ -359,7 +377,7 @@ class ChromaStore(BaseStore):
         self.chunks = [c for c in self.chunks if c.doc_id != doc_id]
         self.bm25 = BM25Index().build([c.embed_text for c in self.chunks])
         self.manifest["n_chunks"] = len(self.chunks)
-        self.manifest["documents"] = _document_summary(self.chunks)
+        self.manifest["documents"] = self._summary()
         self._reindex_lookup()
         return len(victims)
 
@@ -378,7 +396,7 @@ class ChromaStore(BaseStore):
         self.chunks.extend(chunks)
         self.bm25 = BM25Index().build([c.embed_text for c in self.chunks])
         self.manifest["n_chunks"] = len(self.chunks)
-        self.manifest["documents"] = _document_summary(self.chunks)
+        self.manifest["documents"] = self._summary()
         self._reindex_lookup()
 
     def clear(self) -> None:
@@ -452,14 +470,34 @@ def _to_metadata(chunk: Chunk) -> dict[str, Any]:
     }
 
 
-def _document_summary(chunks: Iterable[Chunk]) -> list[dict[str, Any]]:
+def _document_summary(
+    chunks: Iterable[Chunk], previous: Iterable[dict[str, Any]] | None = None
+) -> list[dict[str, Any]]:
+    """Записи о документах для манифеста.
+
+    Кроме заголовка и числа чанков несём факты о файле (`mtime`, `size`,
+    `sha256`): они известны при индексации и позволяют потом отличить
+    свежий документ от подменённого. Сами чанки фактов не знают, поэтому
+    берём их из прежних записей — при инкрементальном обновлении они
+    иначе потерялись бы.
+    """
+    facts = {entry.get("source", ""): entry for entry in previous or []}
     seen: dict[str, dict[str, Any]] = {}
     for chunk in chunks:
         entry = seen.setdefault(
             chunk.doc_id, {"title": chunk.title, "source": chunk.source, "chunks": 0}
         )
         entry["chunks"] += 1
+    for entry in seen.values():
+        old = facts.get(entry["source"], {})
+        for key in _DOCUMENT_FACTS:
+            if key in old:
+                entry[key] = old[key]
     return list(seen.values())
+
+
+# Поля записи манифеста, которые описывают файл, а не его содержимое в индексе.
+_DOCUMENT_FACTS = ("mtime", "size", "sha256")
 
 
 # Обратная совместимость: раньше класс назывался VectorStore.

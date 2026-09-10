@@ -252,6 +252,33 @@ def test_manifest_has_built_at():
     datetime.fromisoformat(manifest["built_at"])  # не падает — валидный ISO
 
 
+# ------------------------------------------------ корпус только из реестра
+
+
+def test_build_index_skips_documents_outside_corpus():
+    """Индексируются только принятые документы, остальные перечисляются."""
+    from ragkb.core.pipeline import build_index
+
+    cfg = _workspace("numpy")
+    (Path(cfg.docs_dir) / "extra.md").write_text("# Extra\n\nТекст.\n", encoding="utf-8")
+    report = build_index(cfg, allow=lambda name: name == "policy.md")
+    assert report.files == 1
+    assert [Path(p).name for p in report.excluded] == ["extra.md"]
+    manifest = json.loads((Path(cfg.index_dir) / "manifest.json").read_text(encoding="utf-8"))
+    assert [Path(d["source"]).name for d in manifest["documents"]] == ["policy.md"]
+
+
+def test_build_index_refuses_when_nothing_accepted():
+    """Пустой корпус — понятная ошибка, а не пустой индекс."""
+    import pytest
+
+    from ragkb.core.pipeline import build_index
+
+    cfg = _workspace("numpy")
+    with pytest.raises(ValueError, match="Примите"):
+        build_index(cfg, allow=lambda _name: False)
+
+
 def test_index_and_search_end_to_end_numpy():
     _assert_end_to_end("numpy")
 
@@ -445,7 +472,7 @@ def test_empty_env_keeps_default():
 
     os.environ["RAGKB_LLM_MODEL"] = ""
     try:
-        assert Settings().llm.model == "qwen2.5-instruct"
+        assert Settings().llm.model == ""
     finally:
         os.environ.pop("RAGKB_LLM_MODEL", None)
 

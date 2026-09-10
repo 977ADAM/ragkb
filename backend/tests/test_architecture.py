@@ -193,6 +193,7 @@ def test_each_alembic_revision_creates_one_table() -> None:
         "users",
         "sessions",
         "message_feedback",
+        "corpus_documents",
     ]
 
 

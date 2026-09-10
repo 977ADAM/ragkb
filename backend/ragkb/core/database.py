@@ -12,7 +12,7 @@ from sqlalchemy.orm import DeclarativeBase
 
 from ragkb.core.config import Settings
 
-EXPECTED_REVISION = "0007_message_feedback"
+EXPECTED_REVISION = "0008_corpus_documents"
 
 
 class Base(DeclarativeBase):

@@ -40,6 +40,19 @@ class UnsupportedFormat(Exception):
     pass
 
 
+def relative_name(path: str | Path, root: str | Path) -> str:
+    """Имя документа для реестра: путь относительно каталога корпуса.
+
+    Именно относительный путь, а не имя файла: в подкаталогах корпуса могут
+    лежать одноимённые документы, и реестр не должен их путать.
+    """
+    path, root = Path(path), Path(root)
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.name
+
+
 def discover(root: str | Path) -> list[Path]:
     """Рекурсивно находит все поддерживаемые файлы, игнорируя служебные."""
     root = Path(root)
@@ -73,7 +86,9 @@ def load(path: str | Path) -> Document:
         raise UnsupportedFormat(f"Формат не поддерживается: {path.suffix}")
 
     blocks = [b for b in blocks if b.text.strip()]
-    checksum = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+    # Полный хэш, а не обрезанный: по нему сверяем содержимое файла с тем,
+    # что лежит в индексе, и по нему же ловим дубликаты документов.
+    checksum = hashlib.sha256(path.read_bytes()).hexdigest()
     title = meta.pop("title", None) or _guess_title(blocks) or path.stem
     return Document(
         doc_id=hashlib.sha1(str(path.resolve()).encode()).hexdigest()[:12],

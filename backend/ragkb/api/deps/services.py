@@ -65,14 +65,20 @@ def feedback_service(request: Request) -> FeedbackService:
 
 
 def index_service(request: Request) -> IndexService:
-    return IndexService(request.app.state.index, request.app.state.engine.invalidate)
+    return IndexService(
+        request.app.state.index,
+        request.app.state.engine.invalidate,
+        registry=_storage(request).corpus,
+    )
 
 
 def documents_service(request: Request) -> DocumentsService:
+    storage = _storage(request)
     return DocumentsService(
         request.app.state.cfg,
         request.app.state.index,
         request.app.state.engine.invalidate,
+        registry=storage.corpus,
     )
 
 
@@ -84,6 +90,10 @@ def bootstrap_service(request: Request) -> BootstrapService:
         models=ModelsService(request.app.state.models),
         chats=_chats(request),
         organization=org,
-        index=IndexService(request.app.state.index, request.app.state.engine.invalidate),
+        index=IndexService(
+            request.app.state.index,
+            request.app.state.engine.invalidate,
+            registry=_storage(request).corpus,
+        ),
         history_enabled=cfg.history.enabled,
     )

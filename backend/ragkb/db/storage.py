@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from ragkb.core.config import Settings
 from ragkb.core.database import make_engine, make_session_factory, needs_database
 from ragkb.db.repos.auth import PostgresAccounts
+from ragkb.db.repos.corpus_documents import PostgresCorpusDocuments
 from ragkb.db.repos.ephemeral_history import EphemeralHistory
 from ragkb.db.repos.feedback import PostgresFeedback
 from ragkb.db.repos.postgres_history import PostgresHistory
@@ -24,6 +25,9 @@ class Storage:
         self.answer_history: EphemeralHistory | PostgresHistory | None = None
         self.accounts: PostgresAccounts | None = None
         self.feedback: PostgresFeedback | None = None
+        # Реестр документов корпуса: без него индекс собирается из всего
+        # каталога, как было до появления загрузки через интерфейс.
+        self.corpus: PostgresCorpusDocuments | None = None
         self._bind(session_factory)
 
     def _bind(
@@ -55,6 +59,7 @@ class Storage:
             self.answer_history = ephemeral
         self.accounts = PostgresAccounts(session_factory)
         self.feedback = PostgresFeedback(session_factory)
+        self.corpus = PostgresCorpusDocuments(session_factory)
 
     def ensure(self) -> None:
         if self._database_url and self.engine_obj is None:

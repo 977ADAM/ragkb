@@ -40,12 +40,28 @@ class Settings(BaseSettings):
         candidates: int = 30
         use_bm25: bool = True
         use_dense: bool = True
+        # Веса источников в слиянии RRF. Единица у обоих — прежнее поведение:
+        # вклад лексического и плотного поиска равный.
+        bm25_weight: float = 1.0
+        dense_weight: float = 1.0
         rrf_k: int = 60
         use_mmr: bool = True
         mmr_lambda: float = 0.7
         min_score: float = 0.0
-        reranker: str = "none"
+        # Одинаковый текст из двух файлов не должен занимать в выдаче две
+        # позиции: он вытесняет альтернативные формулировки.
+        dedupe_text: bool = True
+        reranker: str = "none"          # none | sentence-transformers | http
         reranker_model: str = "BAAI/bge-reranker-v2-m3"
+        # Адрес реранкера по HTTP: корень OpenAI-совместимого API (…/v1) или
+        # полный адрес до /rerank. Пустой адрес при reranker: http — ошибка
+        # настройки, о ней пишем в лог, а не молчим.
+        reranker_url: str = ""
+        reranker_api_key: str = ""
+        reranker_timeout: int = 60
+        # Порог по оценке реранкера: шкала у каждой модели своя, поэтому по
+        # умолчанию выключен — включать только после замера на своём наборе.
+        min_rerank_score: float = 0.0
 
     class LLMConfig(BaseModel):
         backend: str = "extractive"
@@ -116,6 +132,15 @@ class Settings(BaseSettings):
         "RAGKB_LLM_MODEL": ("llm", "model"),
         "RAGKB_LLM_URL": ("llm", "base_url"),
         "RAGKB_LLM_API_KEY": ("llm", "api_key"),
+        "RAGKB_BM25_WEIGHT": ("retrieval", "bm25_weight"),
+        "RAGKB_DENSE_WEIGHT": ("retrieval", "dense_weight"),
+        "RAGKB_RRF_K": ("retrieval", "rrf_k"),
+        "RAGKB_DEDUPE_TEXT": ("retrieval", "dedupe_text"),
+        "RAGKB_RERANKER": ("retrieval", "reranker"),
+        "RAGKB_RERANKER_MODEL": ("retrieval", "reranker_model"),
+        "RAGKB_RERANKER_URL": ("retrieval", "reranker_url"),
+        "RAGKB_RERANKER_API_KEY": ("retrieval", "reranker_api_key"),
+        "RAGKB_MIN_RERANK_SCORE": ("retrieval", "min_rerank_score"),
         "RAGKB_AUTH_MODE": ("auth", "mode"),
         "RAGKB_AUTH_HEADER": ("auth", "header"),
         "RAGKB_AUTH_GROUPS_HEADER": ("auth", "groups_header"),
@@ -136,7 +161,9 @@ class Settings(BaseSettings):
             if not value:
                 continue
             target = self if section is None else getattr(self, section)
-            setattr(target, attr, value)
+            # Значение приходит строкой, а поле может быть числом или флагом:
+            # без приведения «0.7» из окружения сломало бы арифметику.
+            setattr(target, attr, _coerce(getattr(target, attr), value))
         raw_history = os.environ.get("RAGKB_HISTORY_ENABLED")
         if raw_history not in (None, ""):
             self.history.enabled = raw_history.strip().lower() not in {
@@ -166,3 +193,25 @@ class Settings(BaseSettings):
     @database_url.setter
     def database_url(self, value: str) -> None:
         self._database_url = value
+
+
+def _coerce(current: Any, value: str) -> Any:
+    """Приводит строку окружения к типу текущего значения поля.
+
+    Некорректное значение не роняет старт сервиса: переменная окружения —
+    не то место, где стоит падать, оставим прежнее значение и продолжим.
+    """
+    text = value.strip()
+    if isinstance(current, bool):
+        return text.lower() not in {"false", "0", "no", "off"}
+    if isinstance(current, int):
+        try:
+            return int(text)
+        except ValueError:
+            return current
+    if isinstance(current, float):
+        try:
+            return float(text)
+        except ValueError:
+            return current
+    return value
