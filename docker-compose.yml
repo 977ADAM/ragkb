@@ -2,7 +2,9 @@ x-backend: &backend
   build: ./backend
   image: ragkb:local
   environment:
-    RAGKB_AUTH_MODE: disabled
+    # Вход обязателен: учётку заводит ensure-admin (ADMIN_LOGIN/ADMIN_PASSWORD)
+    # или админ на /admin/users. Публичной регистрации нет.
+    RAGKB_AUTH_MODE: session
 
 services:
   postgres:
