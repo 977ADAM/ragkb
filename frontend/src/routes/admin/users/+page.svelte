@@ -8,6 +8,9 @@
 	let error = $state('');
 	/** @type {string | null} */
 	let pending = $state(null);
+	let newName = $state('');
+	let newPassword = $state('');
+	let newRole = $state('user');
 
 	onMount(load);
 
@@ -23,6 +26,37 @@
 			users = body.users ?? [];
 		} catch (err) {
 			error = String(err);
+		}
+	}
+
+	async function create() {
+		if (pending) return;
+		pending = 'create';
+		error = '';
+		try {
+			const response = await fetch('/api/admin/users', {
+				method: 'POST',
+				credentials: 'include',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					username: newName,
+					password: newPassword,
+					role: newRole
+				})
+			});
+			const body = await response.json().catch(() => ({}));
+			if (!response.ok) {
+				error = typeof body.detail === 'string' ? body.detail : 'Не удалось создать пользователя';
+				return;
+			}
+			users = [...users, body];
+			newName = '';
+			newPassword = '';
+			newRole = 'user';
+		} catch (err) {
+			error = String(err);
+		} finally {
+			pending = null;
 		}
 	}
 
@@ -59,6 +93,38 @@
 {#if error}
 	<p class="text-red-600 dark:text-red-400">{error}</p>
 {/if}
+<form
+	class="mb-4 flex max-w-lg flex-col gap-2"
+	onsubmit={(event) => {
+		event.preventDefault();
+		create();
+	}}
+>
+	<h2 class="text-base font-medium">Создать</h2>
+	<label class="flex flex-col gap-1 text-sm text-stone-500 dark:text-stone-400">
+		Имя пользователя
+		<input class="field" name="username" autocomplete="off" bind:value={newName} required />
+	</label>
+	<label class="flex flex-col gap-1 text-sm text-stone-500 dark:text-stone-400">
+		Пароль
+		<input
+			class="field"
+			name="password"
+			type="password"
+			autocomplete="new-password"
+			bind:value={newPassword}
+			required
+		/>
+	</label>
+	<label class="flex flex-col gap-1 text-sm text-stone-500 dark:text-stone-400">
+		Роль
+		<select class="field" bind:value={newRole}>
+			<option value="user">user</option>
+			<option value="admin">admin</option>
+		</select>
+	</label>
+	<button class="btn-accent self-start" type="submit" disabled={pending !== null}>Создать</button>
+</form>
 <table class="w-full border-collapse text-left">
 	<thead>
 		<tr>

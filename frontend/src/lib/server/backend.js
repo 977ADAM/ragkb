@@ -129,7 +129,7 @@ export async function proxyJson(path, request, init = {}) {
 	if (!upstream.ok) {
 		return json({ detail: await failureText(upstream) }, { status: upstream.status });
 	}
-	return json(await upstream.json());
+	return json(await upstream.json(), { status: upstream.status });
 }
 
 /**
