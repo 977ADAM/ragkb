@@ -49,7 +49,7 @@ class Settings(BaseSettings):
 
     class LLMConfig(BaseModel):
         backend: str = "extractive"
-        model: str = "qwen2.5-instruct"
+        model: str = ""
         base_url: str = ""
         api_key: str = ""
         temperature: float = 0.1
