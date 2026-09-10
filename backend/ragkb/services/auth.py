@@ -46,12 +46,6 @@ class AuthService:
         await self._store.create_session(user_id, _token_hash(raw), expires_at)
         return raw
 
-    async def register(self, username: str, password: str) -> tuple[str, str]:
-        user_id = await self._store.create_user(
-            username, hash_password(password), role="user"
-        )
-        return username, await self._new_session(user_id)
-
     async def login(self, username: str, password: str) -> tuple[str, str]:
         row = await self._store.get_by_username(username)
         if row is None or not verify_password(password, row[2]):

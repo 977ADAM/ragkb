@@ -1,8 +1,8 @@
 from pathlib import Path
 
 import pytest
-
 from helpers import BACKEND_ROOT, make_app
+
 from ragkb.core.config import Settings
 from ragkb.db.storage import Storage
 
@@ -75,10 +75,15 @@ def test_alembic_sync_url_sqlite_and_postgres() -> None:
     )
 
 
-def test_session_auth_on_sqlite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_signup_is_closed_on_sqlite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from alembic import command
     from alembic.config import Config as AlembicConfig
     from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine, text
+
+    from ragkb.core.database import alembic_sync_url
 
     db = tmp_path / "ragkb.sqlite3"
     url = f"sqlite+aiosqlite:///{db}"
@@ -96,6 +101,55 @@ def test_session_auth_on_sqlite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         r = client.post(
             "/api/v1/auths/signup", json={"username": "ada", "password": "password1"}
         )
+        assert r.status_code == 403
+        assert r.json()["detail"] == "регистрация закрыта, учётку создаёт администратор"
+        assert r.cookies.get("ragkb_session") is None
+        assert client.get("/api/v1/auths/me").status_code == 401
+    engine = create_engine(alembic_sync_url(url))
+    with engine.connect() as conn:
+        n = conn.execute(text("SELECT COUNT(*) FROM users")).scalar()
+    engine.dispose()
+    assert n == 0
+
+
+def test_session_auth_on_sqlite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    from alembic import command
+    from alembic.config import Config as AlembicConfig
+    from fastapi.testclient import TestClient
+
+    from ragkb.core.database import make_engine, make_session_factory
+    from ragkb.db.repos.auth import PostgresAccounts
+    from ragkb.services.auth import hash_password
+
+    db = tmp_path / "ragkb.sqlite3"
+    url = f"sqlite+aiosqlite:///{db}"
+    cfg_alembic = AlembicConfig(str(BACKEND_ROOT / "alembic.ini"))
+    cfg_alembic.set_main_option("script_location", str(BACKEND_ROOT / "migrations"))
+    monkeypatch.setenv("RAGKB_DATABASE_URL", url)
+    command.upgrade(cfg_alembic, "head")
+
+    async def _seed() -> None:
+        engine = make_engine(url)
+        store = PostgresAccounts(make_session_factory(engine))
+        await store.create_user("ada", hash_password("password1"), role="user")
+        await engine.dispose()
+
+    asyncio.run(_seed())
+    cfg = Settings()
+    cfg.database_url = url
+    cfg.auth.mode = "session"
+    cfg.history.enabled = True
+    cfg.store.backend = "numpy"
+    cfg.index_dir = str(tmp_path / "idx")
+    with TestClient(make_app(cfg)) as client:
+        r = client.post(
+            "/api/v1/auths/signin",
+            json={"username": "ada", "password": "password1"},
+        )
         assert r.status_code == 200
-        assert r.json() == {"username": "ada"}
-        assert client.get("/api/v1/auths/me").json() == {"username": "ada", "role": "user"}
+        assert client.get("/api/v1/auths/me").json() == {
+            "username": "ada",
+            "role": "user",
+        }

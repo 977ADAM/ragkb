@@ -20,17 +20,8 @@ router = APIRouter()
 
 
 @router.post("/signup")
-async def signup(
-    body: Credentials,
-    request: Request,
-    response: Response,
-    svc: AuthSvc,
-) -> dict[str, str]:
-    username, token = await svc.register(body.username, body.password)
-    await svc.logout(raw_cookie(request))
-    set_session_cookie(response, request, token)
-    log.info("регистрация: %s", username)
-    return {"username": username}
+async def signup() -> dict[str, str]:
+    raise Forbidden("регистрация закрыта, учётку создаёт администратор")
 
 
 @router.post("/signin")

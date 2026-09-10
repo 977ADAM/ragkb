@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from contextlib import contextmanager
 
@@ -150,10 +151,23 @@ def _session_client(cfg):
         yield client
 
 
-def test_register_login_me_logout_bootstrap(indexed):
+def _seed_user(
+    url: str, username: str, password: str = "password1", role: str = "user"
+) -> None:
+    async def _run() -> None:
+        engine = make_engine(url)
+        store = PostgresAccounts(make_session_factory(engine))
+        await store.create_user(username, hash_password(password), role=role)
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
+def test_login_me_logout_bootstrap(indexed):
+    _seed_user(database_url(), "ada")
     with _session_client(indexed) as client:
         r = client.post(
-            "/api/v1/auths/signup",
+            "/api/v1/auths/signin",
             json={"username": "Ada", "password": "password1"},
         )
         assert r.status_code == 200
@@ -175,30 +189,35 @@ def test_register_login_me_logout_bootstrap(indexed):
 
 
 def test_duplicate_username(indexed):
+    _seed_user(database_url(), "ada", role="admin")
     with _session_client(indexed) as client:
-        body = {"username": "bob", "password": "password1"}
-        assert client.post("/api/v1/auths/signup", json=body).status_code == 200
-        client.post("/api/v1/auths/signout")
-        assert client.post("/api/v1/auths/signup", json=body).status_code == 409
+        _signin = client.post(
+            "/api/v1/auths/signin",
+            json={"username": "ada", "password": "password1"},
+        )
+        assert _signin.status_code == 200
+        body = {"username": "bob", "password": "password1", "role": "user"}
+        assert client.post("/api/v1/admin/users", json=body).status_code == 201
+        assert client.post("/api/v1/admin/users", json=body).status_code == 409
 
 
 def test_bad_login_same_message(indexed):
+    _seed_user(database_url(), "eve")
     with _session_client(indexed) as client:
         a = client.post(
             "/api/v1/auths/signin", json={"username": "nobody", "password": "password1"}
         )
-        client.post("/api/v1/auths/signup", json={"username": "eve", "password": "password1"})
-        client.post("/api/v1/auths/signout")
         b = client.post("/api/v1/auths/signin", json={"username": "eve", "password": "wrongpass"})
         assert a.status_code == b.status_code == 401
         assert a.json()["detail"] == b.json()["detail"]
 
 
 def test_failed_login_keeps_existing_session(indexed):
+    _seed_user(database_url(), "ada")
     with _session_client(indexed) as client:
         assert (
             client.post(
-                "/api/v1/auths/signup",
+                "/api/v1/auths/signin",
                 json={"username": "ada", "password": "password1"},
             ).status_code
             == 200
@@ -218,18 +237,15 @@ def test_failed_login_keeps_existing_session(indexed):
         assert client.get("/api/v1/auths/me").json() == {"username": "ada", "role": "user"}
 
 
-def test_duplicate_register_keeps_existing_session(indexed):
+def test_signup_does_not_create_or_set_cookie(indexed):
     with _session_client(indexed) as client:
-        body = {"username": "ada", "password": "password1"}
-        assert client.post("/api/v1/auths/signup", json=body).status_code == 200
-        assert client.post("/api/v1/auths/signup", json=body).status_code == 409
-        assert client.get("/api/v1/auths/me").json() == {"username": "ada", "role": "user"}
-
-
-def test_short_password_rejected(indexed):
-    with _session_client(indexed) as client:
-        r = client.post("/api/v1/auths/signup", json={"username": "sam", "password": "short"})
-        assert r.status_code == 422
+        r = client.post(
+            "/api/v1/auths/signup",
+            json={"username": "ada", "password": "password1"},
+        )
+        assert r.status_code == 403
+        assert r.cookies.get("ragkb_session") is None
+        assert client.get("/api/v1/auths/me").status_code == 401
 
 
 def test_bootstrap_unauthorized_without_cookie(indexed):
@@ -242,18 +258,15 @@ def test_bootstrap_unauthorized_without_cookie(indexed):
 
 
 def test_session_admin_rebuild_and_bootstrap(indexed):
+    _seed_user(database_url(), "ada", role="admin")
     with _session_client(indexed) as client:
         assert (
             client.post(
-                "/api/v1/auths/signup",
+                "/api/v1/auths/signin",
                 json={"username": "ada", "password": "password1"},
             ).status_code
             == 200
         )
-        engine = create_engine(alembic_sync_url(database_url()))
-        with engine.begin() as conn:
-            conn.execute(text("UPDATE users SET role = 'admin' WHERE username = 'ada'"))
-        engine.dispose()
         assert client.get("/api/v1/auths/me").json() == {"username": "ada", "role": "admin"}
         # Индекс собирается по реестру документов: файлы, лежащие в каталоге
         # корпуса, сначала нужно принять — иначе пересборка честно откажет.
@@ -285,10 +298,11 @@ def test_session_history_disabled_does_not_persist_chats(indexed):
     indexed.database_url = database_url()
     indexed.auth.mode = "session"
     indexed.history.enabled = False
+    _seed_user(database_url(), "ada")
     with TestClient(make_app(indexed)) as client:
         assert (
             client.post(
-                "/api/v1/auths/signup",
+                "/api/v1/auths/signin",
                 json={"username": "ada", "password": "password1"},
             ).status_code
             == 200
