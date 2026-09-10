@@ -374,7 +374,8 @@
 		disabled={uploading || indexing}
 		onchange={(event) => {
 			const input = /** @type {HTMLInputElement} */ (event.currentTarget);
-			const files = input.files;
+			// FileList живой: после input.value = '' он уже пустой.
+			const files = Array.from(input.files ?? []);
 			input.value = '';
 			enqueue(files);
 		}}
