@@ -37,6 +37,9 @@ class AnswerEngine(Protocol):
 class IndexEngine(Protocol):
     def stats(self) -> dict[str, Any]: ...
 
+    def probe(self) -> str:
+        """«ok» или «no_index» — дешёвая проверка без сборки движка."""
+
     def rebuild(self, allow: frozenset[str] | None = None) -> Any:
         """Переиндексация; `allow` — имена документов, принятых в корпус."""
 

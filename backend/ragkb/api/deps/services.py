@@ -28,7 +28,7 @@ def _chats(request: Request) -> ChatConversationsService:
     return ChatConversationsService(
         conversations=storage.conversations,
         history=storage.answer_history,
-        sources=IndexSources(request.app.state.engine),
+        sources=IndexSources(request.app.state.index),
         engine=request.app.state.engine,
         resolve_model=request.app.state.models.resolve,
         require_org=org.require_id,

@@ -12,7 +12,7 @@ from ragkb.api.router import api_router
 from ragkb.core.catalogs import make_catalog
 from ragkb.core.config import Settings
 from ragkb.core.engine import EngineCache
-from ragkb.core.errors import EngineUnavailable, RagkbError
+from ragkb.core.errors import RagkbError
 from ragkb.core.index import ConfigIndex
 from ragkb.core.logging_config import setup_logging
 from ragkb.db.storage import Storage
@@ -28,11 +28,10 @@ async def lifespan(app: FastAPI):
 
 
 def health(request: Request) -> dict[str, str]:
-    try:
-        request.app.state.engine()
-    except EngineUnavailable:
-        return {"status": "no_index"}
-    return {"status": "ok"}
+    # Проверка живости смотрит на манифест индекса, а не на движок: движок
+    # поднимает модель эмбеддингов, а docker healthcheck стучит сюда каждые
+    # 30 секунд — загружать модель ради ответа «ok» незачем.
+    return {"status": request.app.state.index.probe()}
 
 
 cfg = Settings()

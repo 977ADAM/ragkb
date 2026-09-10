@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import math
+import threading
 from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Sequence
@@ -43,6 +44,35 @@ class Embedder(ABC):
 
 
 def build_embedder(cfg: Settings.EmbeddingConfig) -> Embedder:
+    """Эмбеддер для конфигурации — один на процесс.
+
+    Модель весит гигабайты и грузится десятки секунд на CPU. Движок при этом
+    пересобирается после каждой переиндексации, и без кеша каждая пересборка
+    (и каждое открытие страницы документов) поднимала модель заново. Ключ —
+    параметры эмбеддинга: смена модели в конфиге даёт свой объект.
+
+    Состояние (словарь TF-IDF) эмбеддер получает из индекса при сборке
+    движка, поэтому переиспользование объекта не мешает.
+    """
+    key = (
+        cfg.backend.lower(),
+        cfg.model,
+        cfg.base_url,
+        cfg.api_key,
+        cfg.doc_prefix,
+        cfg.query_prefix,
+        cfg.tfidf_dim,
+        cfg.batch_size,
+    )
+    with _EMBEDDER_LOCK:
+        embedder = _EMBEDDERS.get(key)
+        if embedder is None:
+            embedder = _create_embedder(cfg)
+            _EMBEDDERS[key] = embedder
+        return embedder
+
+
+def _create_embedder(cfg: Settings.EmbeddingConfig) -> Embedder:
     backend = cfg.backend.lower()
     if backend == "ollama":
         return OllamaEmbedder(cfg)
@@ -53,6 +83,12 @@ def build_embedder(cfg: Settings.EmbeddingConfig) -> Embedder:
     if backend == "tfidf":
         return TfidfEmbedder(cfg)
     raise ValueError(f"Неизвестный бэкенд эмбеддингов: {cfg.backend}")
+
+
+# Кеш живёт на процесс: uvicorn держит один интерпретатор, потоков может быть
+# несколько, поэтому доступ под замком.
+_EMBEDDERS: dict[tuple[Any, ...], Embedder] = {}
+_EMBEDDER_LOCK = threading.Lock()
 
 
 def normalize_rows(matrix: np.ndarray) -> np.ndarray:

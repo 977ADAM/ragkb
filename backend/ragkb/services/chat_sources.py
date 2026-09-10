@@ -1,18 +1,24 @@
 """Реестр путей документов в индексе."""
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from ragkb.core.errors import EngineUnavailable
-from ragkb.core.ports import AnswerEngine
+from ragkb.core.ports import IndexEngine
 
 
 class IndexSources:
-    def __init__(self, get_engine: Callable[[], AnswerEngine]):
-        self._get_engine = get_engine
+    """Пути документов, лежащих в индексе.
+
+    Манифест берём у индекса, а не у движка: движок поднимает модель
+    эмбеддингов, а для отметки исчезнувших источников нужен только список
+    файлов.
+    """
+
+    def __init__(self, index: IndexEngine):
+        self._index = index
 
     def document_paths(self) -> set[str] | None:
         try:
-            return self._get_engine().document_paths()
+            manifest = self._index.manifest()
         except EngineUnavailable:
             return None
+        return {d.get("source", "") for d in manifest.get("documents", [])}

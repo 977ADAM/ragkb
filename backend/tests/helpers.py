@@ -16,7 +16,7 @@ from ragkb.core.catalogs import make_catalog
 from ragkb.core.config import Settings
 from ragkb.core.database import alembic_sync_url as alembic_sync_url
 from ragkb.core.engine import EngineCache
-from ragkb.core.errors import EngineUnavailable, RagkbError
+from ragkb.core.errors import RagkbError
 from ragkb.core.index import ConfigIndex
 from ragkb.core.logging_config import setup_logging
 from ragkb.db.storage import Storage
@@ -56,11 +56,7 @@ def make_app(cfg: Settings) -> FastAPI:
         await app.state.storage.dispose()
 
     def health(request: Request) -> dict[str, str]:
-        try:
-            request.app.state.engine()
-        except EngineUnavailable:
-            return {"status": "no_index"}
-        return {"status": "ok"}
+        return {"status": request.app.state.index.probe()}
 
     app = FastAPI(
         title="RAG База знаний",
