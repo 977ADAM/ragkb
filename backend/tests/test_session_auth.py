@@ -290,7 +290,7 @@ def test_me_disabled_is_anonymous(indexed):
     with TestClient(make_app(indexed)) as client:
         assert client.get("/api/v1/auths/me").json() == {
             "username": "anonymous",
-            "role": "user",
+            "role": "admin",
         }
 
 

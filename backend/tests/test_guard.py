@@ -60,7 +60,7 @@ def test_me_disabled_without_database(tmp_path: Path) -> None:
         assert client.get("/auths/me").status_code == 404
         assert client.get("/api/v1/auths/me").json() == {
             "username": "anonymous",
-            "role": "user",
+            "role": "admin",
         }
         assert client.get("/health").status_code == 200
 

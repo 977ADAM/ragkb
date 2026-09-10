@@ -48,7 +48,9 @@ def _remember_user(request: Request, user: User) -> User:
 async def current_user(request: Request) -> User:
     cfg: Settings.AuthConfig = request.app.state.auth
     if cfg.mode == "disabled":
-        return _remember_user(request, User(name=ANONYMOUS))
+        # Без входа хуки пускают /admin только при role=admin; бэкенд и так
+        # считает disabled администратором (require_admin, bootstrap is_admin).
+        return _remember_user(request, User(name=ANONYMOUS, role="admin"))
     if cfg.mode == "session":
         raw = request.cookies.get(COOKIE_NAME)
         if not raw:
