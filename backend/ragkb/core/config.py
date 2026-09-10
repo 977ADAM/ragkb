@@ -116,7 +116,7 @@ class Settings(BaseSettings):
     postgresql_password: str = Field(default="", validation_alias="POSTGRES_PASSWORD")
     postgresql_user: str = Field(default="", validation_alias="POSTGRES_USER")
     postgresql_db: str = Field(default="", validation_alias="POSTGRES_DB")
-    postgresql_host: str = Field(default="", validation_alias="POSTGRES_HOST")
+    postgresql_host: str = Field(default="postgres", validation_alias="POSTGRES_HOST")
 
     _ENV: ClassVar[dict[str, tuple[str | None, str]]] = {
         "RAGKB_DOCS_DIR": (None, "docs_dir"),
@@ -175,8 +175,10 @@ class Settings(BaseSettings):
     @property
     def db_url(self) -> str:
         creds = f"{quote_plus(self.postgresql_user)}:{quote_plus(self.postgresql_password)}"
-        host = f"@{self.postgresql_host}" if self.postgresql_host else ""
-        return f"postgresql+asyncpg://{creds}{host}/{quote_plus(self.postgresql_db)}"
+        # Без @host SQLAlchemy читает пароль как порт. Compose-сервис
+        # называется postgres; локально хост задают POSTGRES_HOST.
+        host = self.postgresql_host or "postgres"
+        return f"postgresql+asyncpg://{creds}@{host}/{quote_plus(self.postgresql_db)}"
 
     @property
     def database_url(self) -> str:

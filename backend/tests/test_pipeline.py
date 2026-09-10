@@ -485,3 +485,13 @@ def test_history_enabled_env_parsing():
         assert Settings().history.enabled is False
     finally:
         os.environ.pop("RAGKB_HISTORY_ENABLED", None)
+
+
+def test_db_url_keeps_host_and_quotes_password():
+    """Без @host SQLAlchemy принимает пароль за порт и падает на int()."""
+    cfg = Settings()
+    cfg.postgresql_user = "ragkb"
+    cfg.postgresql_password = "p:x"
+    cfg.postgresql_db = "kb"
+    cfg.postgresql_host = ""
+    assert cfg.db_url == "postgresql+asyncpg://ragkb:p%3Ax@postgres/kb"
