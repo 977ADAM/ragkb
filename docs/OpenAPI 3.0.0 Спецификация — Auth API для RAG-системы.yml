@@ -127,49 +127,27 @@ paths:
   /api/v1/auths/signup:
     post:
       tags: [auth]
-      summary: Регистрация
+      summary: Регистрация закрыта
       description: |
-        Открытая регистрация. Сразу выдаёт сессию (Set-Cookie) и
-        `{username}`. Занятый логин — 409. Невалидное тело — 422.
+        Всегда 403, пользователя не создаёт, куку не ставит.
+        Учётку создаёт `POST /api/v1/admin/users`.
       operationId: signup
       security: []
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/Credentials'
-            examples:
-              valid:
-                value:
-                  username: Ada
-                  password: password1
       responses:
-        '200':
-          description: Пользователь создан, сессия выставлена
-          headers:
-            Set-Cookie:
-              $ref: '#/components/headers/SetSessionCookie'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UsernameResponse'
-              example:
-                username: ada
-        '409':
-          description: Логин занят
+        '403':
+          description: Регистрация закрыта
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
               example:
-                detail: Такой логин уже занят
-        '422':
-          description: Невалидное тело
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ValidationError'
+                detail: регистрация закрыта, учётку создаёт администратор
 
   /api/v1/auths/signin:
     post:

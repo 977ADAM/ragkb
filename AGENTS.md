@@ -62,7 +62,8 @@ CLI (`ragkb serve` / `index` / `ask`) нет. Индекс — `POST /api/v1/ind
   `backend/migrations/`.
 - Не ходить из браузера в FastAPI напрямую: только BFF `frontend/src/routes/api/`
   (BFF `/api/…` → FastAPI `/api/v1/…`; `GET /health` без версии).
-- Compose: `RAGKB_AUTH_MODE=session`, вход формами (`/login`, `/register`).
+- Compose: `RAGKB_AUTH_MODE=session`, вход формой `/login` (учётку создаёт
+  админ на `/admin/users`). `/register` остаётся публичной страницей-пояснением.
   `RAGKB_DEV_USER` сессию не заменяет. На сервере Angie не должен требовать
   OIDC на `/login`, `/register`, `/api/auths`. oauth2-proxy и Keycloak в стеке нет.
 - LLM не поднимать в compose: OpenAI-совместимый HTTP (`RAGKB_LLM_URL`).

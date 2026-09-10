@@ -88,7 +88,7 @@ RAGKB_BACKEND_URL=http://127.0.0.1:8000 bun run dev
 ```
 
 Compose (`docker compose up` / `make up`): `RAGKB_AUTH_MODE=session` —
-зарегистрируйтесь на `/register`, затем `/login`. `RAGKB_DEV_USER` сессию
+войдите на `/login` (учётку создаёт администратор). `RAGKB_DEV_USER` сессию
 не заменяет.
 
 Из коробки работает без единой нейросети: эмбеддинги TF-IDF, ответ собирается
@@ -189,6 +189,8 @@ OIDC на `/login`, `/register`, `/api/auths`. Keycloak/Angie OIDC для ragkb
 | `POST /api/v1/admin/documents` | загрузка документа multipart + переиндексация (админ); `?index=false` — только принять файл |
 | `POST /api/v1/admin/documents/accept` | принять в корпус файлы, положенные в каталог мимо интерфейса (админ) |
 | `DELETE /api/v1/admin/documents/{name}` | удаление документа: файл + индекс (админ) |
+| `POST /api/v1/auths/signup` | регистрация закрыта (403 без куки) |
+| `POST /api/v1/admin/users` | создание учётки администратором (админ) |
 
 ### Документы попадают в базу только через интерфейс
 
@@ -210,7 +212,8 @@ OIDC на `/login`, `/register`, `/api/auths`. Keycloak/Angie OIDC для ragkb
 
 При `RAGKB_AUTH_MODE=session` (compose) все эндпоинты, кроме `/health`,
 `POST /api/v1/auths/signup` и `POST /api/v1/auths/signin`, требуют сессионную куку и без
-неё отвечают `401`. Режим `proxy` по-прежнему читает `X-Forwarded-*`.
+неё отвечают `401`. `POST /api/v1/auths/signup` без куки отвечает `403` (регистрация
+закрыта). Режим `proxy` по-прежнему читает `X-Forwarded-*`.
 Встроенной страницы `GET /` нет.
 
 При `RAGKB_AUTH_MODE=disabled` все запросы идут от имени `anonymous`.

@@ -29,6 +29,7 @@ bun run dev
 | `RAGKB_DEV_USER` | Только `proxy`/локальный BFF. При `session` личность не даёт. В бою не задавать |
 | `RAGKB_DEV_GROUPS` | Например `ragkb-admins` (режим `proxy`) |
 
-`make up` / compose: `RAGKB_AUTH_MODE=session` — регистрация и вход в UI.
-Angie на сервере не должен требовать OIDC на `/login`, `/register`, `/api/auths`.
+`make up` / compose: `RAGKB_AUTH_MODE=session` — вход на `/login` (учётку создаёт
+администратор на `/admin/users`). Angie на сервере не должен требовать OIDC на
+`/login`, `/register`, `/api/auths`.
 Angie → `frontend:3000` → `rag:8000`.
