@@ -44,12 +44,6 @@
 - Актуальное решение: `docs/superpowers/specs/2026-09-21-without-auth-and-history-design.md`.
   Прежние документы об авторизации и истории описывают старый контракт.
 
-## Запуск и проверки
-
-Из корня: `make sync`, `make sync-frontend`, затем задать URL БД и пути
-RAGKB_DOCS_DIR/RAGKB_INDEX_DIR. `make migrate`, `make api`, в другом терминале
-`make frontend`. `make backend` — псевдоним `make api`.
-
 Тесты backend: `cd backend && uv run pytest` (временная SQLite, внешняя БД не нужна).
 Frontend: `cd frontend && bun test && bun run check && bun run build`.
 
