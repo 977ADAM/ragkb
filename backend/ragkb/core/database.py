@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase
 
 
-EXPECTED_REVISION = "0008_corpus_documents"
+EXPECTED_REVISION = "0001_corpus_documents"
 
 
 class Base(DeclarativeBase):

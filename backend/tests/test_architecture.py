@@ -186,18 +186,5 @@ def test_each_alembic_revision_creates_one_table() -> None:
             continue
         assert len(names) == 1, f"{path.name} создаёт {sorted(names)}"
         found.append(names.pop())
-    assert found == [
-        "conversations",
-        "messages",
-        "cleanup_state",
-        "users",
-        "sessions",
-        "message_feedback",
-        "corpus_documents",
-    ]
-
-
-def test_revision_0006_alters_users_role() -> None:
-    text = (MIGRATIONS / "versions" / "0006_user_role.py").read_text()
-    assert "role" in text.lower()
-    assert "0005_sessions" in text
+    # Приложению нужна ровно одна таблица — реестр корпуса.
+    assert found == ["corpus_documents"]
