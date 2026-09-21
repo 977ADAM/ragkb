@@ -79,11 +79,6 @@ chroma, HNSW ef=400       2.9 мс/запрос,  recall@10 100%
 ```bash
 make sync
 make sync-frontend
-mkdir -p data/docs
-# Локальная SQLite хранит только используемый приложением реестр корпуса.
-export RAGKB_DATABASE_URL="sqlite+aiosqlite:///$(pwd)/data/ragkb.sqlite3"
-export RAGKB_DOCS_DIR="$(pwd)/data/docs"
-export RAGKB_INDEX_DIR="$(pwd)/data/index"
 make migrate
 make api
 ```
@@ -91,8 +86,6 @@ make api
 В другом терминале: `make frontend`, затем открыть `http://localhost:5173`.
 Загрузить или принять документы на `/admin/documents`, перестроить индекс.
 Без URL БД реестр отключён: индексируется весь каталог документов, о чём
-предупреждает интерфейс. Удалите также POSTGRES_* из backend/.env, если
-нужен запуск без подключения к БД.
 
 По умолчанию доступны TF-IDF и экстрактивный ответ без внешних моделей.
 Настройки задаются в `Settings` и переменных окружения `RAGKB_*`; для вложенных
