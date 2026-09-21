@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ragkb.core.config import Settings
 from ragkb.core.evaluation import evaluate, load_cases
-from ragkb.core.pipeline import RAGPipeline
+from ragkb.core.pipeline import RagChain
 
 MODES = [
     ("только BM25",    {"use_bm25": True,  "use_dense": False, "use_mmr": False}),
@@ -34,7 +34,7 @@ def main() -> int:
     for name, overrides in MODES:
         for key, value in overrides.items():
             setattr(cfg.retrieval, key, value)
-        pipeline = RAGPipeline(cfg)
+        pipeline = RagChain(cfg)
         row = [name.ljust(18)]
         for k in (1, 3, 5):
             row.append(f"{evaluate(pipeline, cases, top_k=k).hit_rate:>7.1%}")

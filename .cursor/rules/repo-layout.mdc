@@ -10,6 +10,10 @@ alwaysApply: true
   `main.py` — вход uvicorn: `app`). `services/` — use cases
   на портах; каталоги моделей — `core/catalogs/`.
   Каталогов `features/` и `platform/` нет.
+- Ядро собрано на LangChain 1.x и живёт только в `core/`
+  (`documents.py`, `vectorstore.py`, `retrieval.py`, `pipeline.py`).
+  `api/`, `services/`, `domain/` LangChain не импортируют — это проверяет
+  `tests/test_architecture.py`.
 - Интерфейс только в `frontend/` (SvelteKit + BFF). FastAPI не отдаёт HTML.
   Ручки сервиса кроме `GET /health` — префикс `/api/v1`.
 - Точка входа: `uvicorn ragkb.main:app`. Конфиг:

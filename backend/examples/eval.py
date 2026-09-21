@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ragkb.core.config import Settings
 from ragkb.core.evaluation import evaluate, load_cases
-from ragkb.core.pipeline import RAGPipeline
+from ragkb.core.pipeline import RagChain
 
 
 def main() -> int:
@@ -18,7 +18,7 @@ def main() -> int:
     parser.add_argument("-k", type=int, default=5)
     args = parser.parse_args()
     cfg = Settings()
-    result = evaluate(RAGPipeline(cfg), load_cases(args.cases), top_k=args.k)
+    result = evaluate(RagChain(cfg), load_cases(args.cases), top_k=args.k)
     print(result.summary())
     return 0 if not result.failures else 1
 

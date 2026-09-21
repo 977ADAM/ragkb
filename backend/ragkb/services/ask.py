@@ -6,7 +6,7 @@ import logging
 import time
 from collections.abc import Callable, Iterator
 
-from ragkb.core.errors import InvalidRequest
+from ragkb.core.errors import EngineUnavailable, InvalidRequest
 from ragkb.core.ports import AnswerEngine
 
 log = logging.getLogger("ragkb")
@@ -23,6 +23,14 @@ class AskService:
         except ValueError as exc:
             raise InvalidRequest(str(exc)) from exc
         engine = self._engine()
+        # Готовность генерации проверяется до открытия потока: сообщить об
+        # этом HTTP-ошибкой можно только пока не отправлен первый байт.
+        # Раньше здесь был экстрактивный ответ, теперь генерация обязательна.
+        if not engine.llm_available(resolved):
+            raise EngineUnavailable(
+                "Генерация недоступна: задайте адрес и модель LLM "
+                "(RAGKB_LLM_URL, RAGKB_LLM_MODEL) и перезапустите сервис"
+            )
         started = time.time()
         hits, tokens = engine.stream_answer(
             question, top_k=top_k, expand=expand, model=resolved
@@ -46,16 +54,13 @@ class AskService:
                 collected.append(piece)
                 yield json.dumps({"type": "token", "text": piece}, ensure_ascii=False) + "\n"
         except Exception as exc:
+            # Поток уже открыт: заменить ответ HTTP-ошибкой нельзя, поэтому
+            # сообщаем причину предупреждением и честно завершаем поток.
             if collected:
                 truncated = True
                 warnings.append("Ответ оборвался до завершения")
             else:
-                warnings.append(f"{exc} — ответ собран экстрактивно")
-                fallback = engine.fallback_text(question, hits)
-                collected.append(fallback)
-                yield json.dumps(
-                    {"type": "token", "text": fallback}, ensure_ascii=False
-                ) + "\n"
+                warnings.append(f"Модель не ответила: {exc}")
 
         text = "".join(collected)
         sources = engine.cited_sources(text, hits)

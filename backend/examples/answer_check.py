@@ -19,7 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ragkb.core.config import Settings
 from ragkb.core.evaluation import load_cases
-from ragkb.core.pipeline import RAGPipeline
+from ragkb.core.llm import chat_model_name
+from ragkb.core.pipeline import RagChain
 
 DATASET = "examples/eval_set.jsonl"
 
@@ -58,9 +59,9 @@ def main() -> int:
     if len(sys.argv) > 1:
         cfg.llm.backend, cfg.llm.model = "ollama", sys.argv[1]
 
-    rag = RAGPipeline(cfg)
+    rag = RagChain(cfg)
     cases = load_cases(DATASET)
-    print(f"Модель: {rag.llm.name}   вопросов: {len(cases)}\n")
+    print(f"Модель: {chat_model_name(cfg.llm)}   вопросов: {len(cases)}\n")
 
     correct = cited = 0
     failures: list[tuple[str, str, str]] = []

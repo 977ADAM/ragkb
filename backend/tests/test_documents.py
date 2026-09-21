@@ -1,4 +1,3 @@
-import asyncio
 import json
 import os
 from datetime import datetime, timezone
@@ -11,10 +10,9 @@ from fastapi.testclient import TestClient
 from helpers import BACKEND_ROOT, make_app
 
 from ragkb.core.config import Settings
-from ragkb.core.database import make_engine, make_session_factory
 from ragkb.core.errors import EngineUnavailable, InvalidRequest, NotFound, PayloadTooLarge
 from ragkb.core.index import ConfigIndex
-from ragkb.core.pipeline import RAGPipeline, build_index, update_documents
+from ragkb.core.pipeline import RagChain, build_index
 from ragkb.domain.entities import ORIGIN_EXTERNAL, ORIGIN_UI, CorpusDocument
 from ragkb.services.documents import MAX_UPLOAD_BYTES, DocumentsService
 
@@ -27,7 +25,7 @@ def make_cfg(tmp_path: Path) -> Settings:
         encoding="utf-8",
     )
     cfg = Settings(docs_dir=str(docs), index_dir=str(tmp_path / "index"))
-    cfg.store.backend = "numpy"
+    cfg.store.backend = "memory"
     return cfg
 
 
@@ -68,7 +66,7 @@ class MemoryRegistry:
 def make_service(cfg: Settings, registry=None, invalidate=None) -> DocumentsService:
     def get_engine():
         try:
-            return RAGPipeline(cfg)
+            return RagChain(cfg)
         except (FileNotFoundError, ValueError) as exc:
             raise EngineUnavailable(str(exc)) from exc
 
@@ -206,16 +204,14 @@ async def test_list_without_facts_falls_back_to_built_at(tmp_path):
     assert row["state"] == "indexed"
 
 
-def test_incremental_update_keeps_facts(tmp_path):
-    """Инкрементальное обновление не должно терять факты о документах."""
-    if not _chroma_available():
-        pytest.skip("chromadb не установлена")
+def test_rebuild_keeps_facts_of_every_document(tmp_path):
+    """Полная пересборка описывает фактами все документы корпуса."""
     cfg = make_cfg(tmp_path)
-    cfg.store.backend = "chroma"
-    build_index(cfg)
     fresh = Path(cfg.docs_dir) / "fresh.md"
     fresh.write_text("# Новый\n\nПравило про отпуск: 28 дней.\n", encoding="utf-8")
-    update_documents(cfg, [fresh])
+
+    build_index(cfg)
+
     by_source = {d["source"]: d for d in _manifest(cfg)["documents"]}
     assert len(by_source) == 2
     assert all(len(d.get("sha256", "")) == 64 for d in by_source.values())
@@ -295,8 +291,8 @@ async def test_external_document_is_not_searchable(tmp_path):
     )
     svc = make_service(cfg, MemoryRegistry())
     await svc.upload("ours.md", "# Наш\n\nПравило про отпуск: 28 дней.\n".encode(), "ada")
-    hits = RAGPipeline(cfg).search("код доступа к хранилищу", top_k=3)
-    assert all("КАРАНДАШ" not in hit.chunk.text for hit in hits)
+    hits = RagChain(cfg).search("код доступа к хранилищу", top_k=3)
+    assert all("КАРАНДАШ" not in hit.text for hit in hits)
 
 
 async def test_accept_takes_external_file_into_corpus(tmp_path):
@@ -473,7 +469,7 @@ def _public_client_cfg(tmp_path: Path, url: str) -> Settings:
         index_dir=str(tmp_path / "index"),
         organization=Settings.OrganizationConfig(name="Acme", id="acme"),
     )
-    cfg.store.backend = "numpy"
+    cfg.store.backend = "memory"
     cfg.database_url = url
     cfg.logging.dir = str(tmp_path / "logs")
     return cfg

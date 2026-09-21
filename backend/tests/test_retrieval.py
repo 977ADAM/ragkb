@@ -1,262 +1,294 @@
-"""Ранжирование: слияние с весами, дедупликация, реранк.
+"""Поиск на ретриверах LangChain: гибрид, пороги, реранк, формат выдачи.
 
-Эти свойства видны только на живом поиске — их нельзя проверить на чанкинге
-или загрузчиках, поэтому здесь своё хранилище-заглушка: тест задаёт порядок
-кандидатов напрямую и смотрит, что из него получится после слияния.
+Своё хранилище не нужно: тесты собирают `InMemoryVectorStore` с осмысленными
+векторами (`KeywordEmbeddings`), поэтому проверяется реальный путь LC —
+плотный ретривер, `LexicalRetriever` на rank_bm25, слияние и пороги.
 """
 from __future__ import annotations
 
-import numpy as np
-import pytest
+from pathlib import Path
 
-from ragkb.core.chunking import Chunk
+import pytest
+from helpers import KeywordEmbeddings
+from langchain_classic.retrievers import ContextualCompressionRetriever, EnsembleRetriever
+from langchain_core.documents import Document
+from langchain_core.vectorstores import InMemoryVectorStore
+
 from ragkb.core.config import Settings
-from ragkb.core.pipeline import parse_expanded_queries
+from ragkb.core.documents import BREADCRUMB
+from ragkb.core.errors import EngineUnavailable
 from ragkb.core.retrieval import (
     Hit,
-    Retriever,
-    collapse_duplicate_text,
-    drop_below_rerank_score,
+    HttpReranker,
+    LexicalRetriever,
+    build_retriever,
+    dense_retriever,
     parse_rerank_scores,
-    reciprocal_rank_fusion,
     rerank_endpoint,
+    search,
 )
 
-# ------------------------------------------------------------------ слияние RRF
+DOCUMENTS = [
+    Document(
+        page_content="Регламент отпусков > Оплата отпуска\nОтпускные выплачиваются за три дня.",
+        metadata={
+            "chunk_id": "a1",
+            "doc_id": "a",
+            "source": "otpusk.md",
+            "title": "Регламент отпусков",
+            "section": "Регламент отпусков > Оплата отпуска",
+            BREADCRUMB: "Регламент отпусков > Оплата отпуска",
+            "page": -1,
+        },
+    ),
+    Document(
+        page_content="Положение о командировках\nСуточные составляют 1200 рублей в сутки.",
+        metadata={
+            "chunk_id": "b1",
+            "doc_id": "b",
+            "source": "komandirovki.md",
+            "title": "Положение о командировках",
+            "section": "Положение о командировках",
+            BREADCRUMB: "Положение о командировках",
+            "page": -1,
+        },
+    ),
+    Document(
+        page_content="Политика паролей\nПароль должен содержать не менее 12 символов.",
+        metadata={
+            "chunk_id": "c1",
+            "doc_id": "c",
+            "source": "paroli.md",
+            "title": "Политика паролей",
+            "section": "Политика паролей",
+            BREADCRUMB: "Политика паролей",
+            "page": -1,
+        },
+    ),
+]
 
 
-def test_rrf_default_weights_keep_scale():
-    """Без весов оценка прежняя: 1 / (k + rank), иначе изменился бы весь порядок."""
-    fused = reciprocal_rank_fusion({"x": [("a", 10.0)]}, k=60)
-    assert fused == [("a", pytest.approx(1 / 61), ["x"])]
-
-
-def test_rrf_weight_can_flip_order():
-    """Вес источника смещает вклад, не трогая шкалы оценок."""
-    rankings = {"dense": [("a", 0.9), ("b", 0.8)], "lexical": [("b", 30.0)]}
-    assert reciprocal_rank_fusion(rankings, k=1)[0][0] == "b"
-    weakened = reciprocal_rank_fusion(rankings, k=1, weights={"lexical": 0.2})
-    assert weakened[0][0] == "a"
-
-
-def test_rrf_zero_weight_drops_source():
-    """Нулевой вес — способ выключить один из поисков целиком."""
-    fused = reciprocal_rank_fusion(
-        {"dense": [("a", 0.9)], "lexical": [("b", 30.0)]}, weights={"lexical": 0}
-    )
-    assert [(doc, sources) for doc, _score, sources in fused] == [("a", ["dense"])]
-
-
-# ------------------------------------------------------------- дедупликация
-
-
-def _chunk(chunk_id: str, text: str, source: str = "data/docs/a.md") -> Chunk:
-    return Chunk(
-        chunk_id=chunk_id,
-        doc_id=f"d-{source}",
-        text=text,
-        embed_text=text,
-        source=source,
-        title="Док",
-        section="",
-        page=None,
-        position=0,
-    )
-
-
-def _hit(chunk_id: str, text: str, score: float = 1.0, **kwargs) -> Hit:
-    return Hit(chunk=_chunk(chunk_id, text), score=score, **kwargs)
-
-
-class _FakeEmbedder:
-    def embed_query(self, _query: str) -> np.ndarray:
-        return np.ones(2, dtype=np.float32)
-
-
-class _FakeStore:
-    """Хранилище, у которого порядок кандидатов задан тестом."""
-
-    def __init__(
-        self,
-        chunks: list[Chunk],
-        dense: list[tuple[str, float]],
-        lexical: list[tuple[str, float]],
-    ):
-        self._chunks = {c.chunk_id: c for c in chunks}
-        self._dense = dense
-        self._lexical = lexical
-
-    def __len__(self) -> int:
-        return len(self._chunks)
-
-    def get_chunk(self, chunk_id: str) -> Chunk:
-        return self._chunks[chunk_id]
-
-    def dense_search(self, _query_vector, top_k: int) -> list[tuple[str, float]]:
-        return self._dense[:top_k]
-
-    def lexical_search(self, _query: str, top_k: int) -> list[tuple[str, float]]:
-        return self._lexical[:top_k]
-
-    def get_vectors(self, chunk_ids) -> np.ndarray:
-        return np.zeros((len(chunk_ids), 2), dtype=np.float32)
-
-
-SAME_TEXT = "Ежегодный отпуск составляет 28 календарных дней."
-OTHER_TEXT = "Проезд в командировке оплачивается по фактическим расходам."
-
-
-def _duplicate_store() -> _FakeStore:
-    """Два файла с одинаковым абзацем — так бывает при копии документа."""
-    return _FakeStore(
-        chunks=[
-            _chunk("a", SAME_TEXT, source="data/docs/hr.md"),
-            _chunk("b", SAME_TEXT, source="data/docs/copy.md"),
-            _chunk("c", OTHER_TEXT, source="data/docs/trips.md"),
-        ],
-        dense=[("a", 0.9), ("b", 0.88), ("c", 0.5)],
-        lexical=[("b", 12.0), ("a", 11.0), ("c", 3.0)],
-    )
-
-
-def _retrieval_cfg() -> Settings.RetrievalConfig:
-    cfg = Settings.RetrievalConfig()
-    cfg.use_mmr = False  # MMR проверяется отдельно, здесь нужен порядок слияния
+def _cfg() -> Settings:
+    cfg = Settings()
+    cfg.store.backend = "memory"
+    cfg.embedding.backend = "fake"
     return cfg
 
 
-def test_collapse_duplicate_text_keeps_one_hit():
-    hits = [
-        _hit("a", SAME_TEXT, score=0.9),
-        _hit("b", "  ежегодный   отпуск СОСТАВЛЯЕТ 28 календарных дней.  ", score=0.5),
-        _hit("c", OTHER_TEXT, score=0.4),
-    ]
-    assert [h.chunk.chunk_id for h in collapse_duplicate_text(hits)] == ["a", "c"]
+@pytest.fixture
+def store() -> InMemoryVectorStore:
+    return InMemoryVectorStore.from_documents(DOCUMENTS, KeywordEmbeddings())
 
 
-def test_collapse_duplicate_text_merges_match_info():
-    """Признак находки не теряется: фрагмент подтверждён обоими поисками."""
-    first = _hit("a", SAME_TEXT, rank_sources=["dense"], dense_score=0.9)
-    second = _hit("b", SAME_TEXT, score=0.5, rank_sources=["lexical"], lexical_score=12.0)
-    merged = collapse_duplicate_text([first, second])
-    assert len(merged) == 1
-    assert merged[0].rank_sources == ["dense", "lexical"]
-    assert merged[0].lexical_score == 12.0
+# ------------------------------------------------------------------ лексический
 
 
-def test_search_drops_duplicate_text():
-    retriever = Retriever(_duplicate_store(), _FakeEmbedder(), _retrieval_cfg())
-    hits = retriever.search("отпуск", top_k=3)
-    assert [h.chunk.chunk_id for h in hits] == ["a", "c"]
-    assert set(hits[0].rank_sources) == {"dense", "lexical"}
+def test_lexical_retriever_finds_exact_term():
+    retriever = LexicalRetriever(documents=list(DOCUMENTS), k=3)
+
+    found = retriever.invoke("суточные")
+
+    assert [doc.metadata["chunk_id"] for doc in found] == ["b1"]
+    assert found[0].metadata["lexical_score"] > 0
 
 
-def test_search_keeps_duplicates_when_dedupe_disabled():
-    cfg = _retrieval_cfg()
-    cfg.dedupe_text = False
-    retriever = Retriever(_duplicate_store(), _FakeEmbedder(), cfg)
-    hits = retriever.search("отпуск", top_k=3)
-    assert [h.chunk.chunk_id for h in hits] == ["a", "b", "c"]
+def test_lexical_retriever_uses_russian_stemming():
+    """«отпуска» и «отпуск» для BM25 должны совпасть."""
+    retriever = LexicalRetriever(documents=list(DOCUMENTS), k=3)
+
+    assert [doc.metadata["chunk_id"] for doc in retriever.invoke("отпуска")] == ["a1"]
 
 
-def test_search_uses_configured_weights():
-    cfg = _retrieval_cfg()
-    cfg.bm25_weight = 0.0
-    retriever = Retriever(_duplicate_store(), _FakeEmbedder(), cfg)
-    hits = retriever.search("отпуск", top_k=3)
-    # Лексический поиск выключен весом: порядок задаёт только плотный.
-    assert [h.chunk.chunk_id for h in hits] == ["a", "c"]
+def test_lexical_retriever_without_matches_returns_nothing():
+    retriever = LexicalRetriever(documents=list(DOCUMENTS), k=3)
+
+    assert retriever.invoke("совершенно посторонние слова") == []
 
 
-# ------------------------------------------------------------------- реранк
+def test_lexical_retriever_on_empty_corpus():
+    assert LexicalRetriever(documents=[], k=3).invoke("отпуск") == []
 
 
-def test_rerank_threshold_filters_candidates():
-    hits = [
-        _hit("a", SAME_TEXT, rerank_score=0.9),
-        _hit("b", OTHER_TEXT, rerank_score=0.1),
-    ]
-    assert [h.chunk.chunk_id for h in drop_below_rerank_score(hits, 0.5)] == ["a"]
+# ---------------------------------------------------------------------- сборка
 
 
-def test_rerank_threshold_disabled_by_default():
-    hits = [_hit("a", SAME_TEXT, rerank_score=-5.0)]
-    assert drop_below_rerank_score(hits, 0.0) == hits
+def test_dense_retriever_uses_mmr_by_default(store):
+    cfg = _cfg()
+
+    assert dense_retriever(store, cfg.retrieval).search_type == "mmr"
 
 
-def test_rerank_threshold_keeps_hits_without_scores():
-    """Реранкер не отработал — пустая выдача означала бы «нет информации»."""
-    hits = [_hit("a", SAME_TEXT)]
-    assert drop_below_rerank_score(hits, 0.5) == hits
+def test_dense_retriever_is_plain_similarity_without_mmr(store):
+    cfg = _cfg()
+    cfg.retrieval.use_mmr = False
+
+    assert dense_retriever(store, cfg.retrieval).search_type == "similarity"
 
 
-@pytest.mark.parametrize(
-    ("url", "expected"),
-    [
-        ("http://rerank:8080/v1", "http://rerank:8080/v1/rerank"),
-        ("http://rerank:8080/v1/", "http://rerank:8080/v1/rerank"),
-        ("http://rerank:8080/v1/rerank", "http://rerank:8080/v1/rerank"),
-    ],
-)
-def test_rerank_endpoint_is_completed(url: str, expected: str):
-    assert rerank_endpoint(url) == expected
+def test_hybrid_retriever_is_ensemble(store):
+    retriever = build_retriever(_cfg(), store)
+
+    assert isinstance(retriever, EnsembleRetriever)
+    assert len(retriever.retrievers) == 2
+    assert retriever.c == 60
+    assert retriever.id_key == "chunk_id"
 
 
-def test_parse_rerank_scores_orders_by_index():
+def test_dense_only_when_bm25_disabled(store):
+    cfg = _cfg()
+    cfg.retrieval.use_bm25 = False
+
+    assert not isinstance(build_retriever(cfg, store), EnsembleRetriever)
+
+
+def test_both_searches_disabled_is_an_error(store):
+    cfg = _cfg()
+    cfg.retrieval.use_bm25 = False
+    cfg.retrieval.use_dense = False
+
+    with pytest.raises(EngineUnavailable) as exc:
+        build_retriever(cfg, store)
+    assert "отвечать по базе нечем" in exc.value.detail
+
+
+def test_http_reranker_wraps_retriever(store):
+    cfg = _cfg()
+    cfg.retrieval.reranker = "http"
+    cfg.retrieval.reranker_url = "http://rerank.test:8000/v1"
+
+    assert isinstance(build_retriever(cfg, store), ContextualCompressionRetriever)
+
+
+# ----------------------------------------------------------------------- поиск
+
+
+def test_search_returns_hits_with_contract_fields(store):
+    cfg = _cfg()
+
+    hits = search(cfg, build_retriever(cfg, store), store, KeywordEmbeddings(), "суточные", 3)
+
+    assert hits
+    assert all(isinstance(hit, Hit) for hit in hits)
+    assert hits[0].document.metadata["chunk_id"] == "b1"
+    assert "dense" in hits[0].rank_sources
+    assert hits[0].dense_score is not None
+    assert hits[0].to_dict()["citation"]
+
+
+def test_search_respects_top_k(store):
+    cfg = _cfg()
+
+    hits = search(cfg, build_retriever(cfg, store), store, KeywordEmbeddings(), "правила", 1)
+
+    assert len(hits) == 1
+
+
+def test_min_score_filters_unrelated_query(store):
+    cfg = _cfg()
+    cfg.retrieval.min_score = 0.9
+
+    hits = search(
+        cfg, build_retriever(cfg, store), store, KeywordEmbeddings(), "курс валют", 3
+    )
+
+    assert hits == []
+
+
+def test_gibberish_query_returns_nothing_without_bm25(store):
+    cfg = _cfg()
+    cfg.retrieval.use_bm25 = False
+    cfg.retrieval.min_score = 0.5
+
+    hits = search(cfg, build_retriever(cfg, store), store, KeywordEmbeddings(), "ыыыы", 3)
+
+    assert hits == []
+
+
+def test_search_marks_lexical_matches(store):
+    cfg = _cfg()
+    cfg.retrieval.use_mmr = False
+
+    hits = search(cfg, build_retriever(cfg, store), store, KeywordEmbeddings(), "суточные", 3)
+
+    assert "lexical" in hits[0].rank_sources
+    assert hits[0].lexical_score and hits[0].lexical_score > 0
+
+
+# --------------------------------------------------------------------- реранкер
+
+
+def test_rerank_endpoint_completes_url():
+    assert rerank_endpoint("http://host:8000/v1") == "http://host:8000/v1/rerank"
+    assert rerank_endpoint("http://host:8000/rerank/") == "http://host:8000/rerank"
+
+
+def test_parse_rerank_scores_by_index():
     body = {
-        "results": [
-            {"index": 1, "relevance_score": 0.2},
-            {"index": 0, "relevance_score": 0.9},
-        ]
+        "results": [{"index": 1, "relevance_score": 0.9}, {"index": 0, "relevance_score": 0.1}]
     }
-    assert parse_rerank_scores(body, 2) == [0.9, 0.2]
 
-
-def test_parse_rerank_scores_accepts_score_and_data():
-    assert parse_rerank_scores({"data": [{"index": 0, "score": 0.42}]}, 1) == [0.42]
+    assert parse_rerank_scores(body, 2) == [0.1, 0.9]
 
 
 def test_parse_rerank_scores_fills_missing_with_floor():
-    """Неоценённый документ не должен всплывать выше проверенных."""
     body = {"results": [{"index": 0, "relevance_score": 0.7}]}
-    assert parse_rerank_scores(body, 2) == [0.7, 0.7]
+
+    assert parse_rerank_scores(body, 3) == [0.7, 0.7, 0.7]
 
 
-def test_parse_rerank_scores_rejects_broken_response():
-    body = {"results": [{"index": 5, "relevance_score": 1.0}, {"index": "0"}, "мусор"]}
-    assert parse_rerank_scores(body, 2) == []
+def test_parse_rerank_scores_of_garbage_is_empty():
+    assert parse_rerank_scores("не json", 2) == []
+    assert parse_rerank_scores({"results": []}, 2) == []
 
 
-# ------------------------------------------------- перефразировки для поиска
+def test_http_reranker_orders_documents(monkeypatch):
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "results": [
+                    {"index": 1, "relevance_score": 0.9},
+                    {"index": 0, "relevance_score": 0.2},
+                ]
+            }
+
+    monkeypatch.setattr("ragkb.core.retrieval.httpx.post", lambda *a, **k: Response())
+    reranker = HttpReranker(url="http://rerank.test/v1")
+
+    ranked = reranker.compress_documents(DOCUMENTS[:2], "суточные")
+
+    assert [doc.metadata["chunk_id"] for doc in ranked] == ["b1", "a1"]
+    assert ranked[0].metadata["relevance_score"] == 0.9
 
 
-def test_expanded_queries_are_read_from_json():
-    raw = 'Готово: {"queries": ["оплата отпуска", "срок выплаты отпускных"]}'
-    assert parse_expanded_queries(raw, "когда платят за отпуск?", 2) == [
-        "оплата отпуска",
-        "срок выплаты отпускных",
-    ]
+def test_http_reranker_without_url_keeps_order():
+    ranked = HttpReranker(url="").compress_documents(DOCUMENTS[:2], "суточные")
+
+    assert [doc.metadata["chunk_id"] for doc in ranked] == ["a1", "b1"]
 
 
-def test_expanded_queries_fall_back_to_lines():
-    """Модель без поддержки JSON — не повод остаться без перефразировок."""
-    raw = "1. оплата отпуска\n2) срок выплаты отпускных"
-    assert parse_expanded_queries(raw, "когда платят?", 5) == [
-        "оплата отпуска",
-        "срок выплаты отпускных",
-    ]
+def test_http_reranker_failure_keeps_order(monkeypatch):
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("реранкер лёг")
+
+    monkeypatch.setattr("ragkb.core.retrieval.httpx.post", boom)
+
+    ranked = HttpReranker(url="http://rerank.test/v1").compress_documents(
+        DOCUMENTS[:2], "суточные"
+    )
+
+    assert [doc.metadata["chunk_id"] for doc in ranked] == ["a1", "b1"]
 
 
-def test_expanded_queries_drop_repeats_of_question():
-    raw = '{"queries": ["Сколько дней отпуска?", "длительность ежегодного отпуска"]}'
-    assert parse_expanded_queries(raw, "сколько дней отпуска?", 3) == [
-        "длительность ежегодного отпуска"
-    ]
+# ------------------------------------------------------------------------- прочее
 
 
-def test_expanded_queries_ignore_short_and_extra():
-    raw = '{"queries": ["ок", "первая нормальная фраза", "вторая нормальная фраза"]}'
-    assert parse_expanded_queries(raw, "вопрос", 2) == [
-        "первая нормальная фраза",
-        "вторая нормальная фраза",
-    ]
+def test_delete_by_source_removes_document_chunks(store):
+    from ragkb.core.vectorstore import all_documents, delete_by_source
+
+    removed = delete_by_source(store, str(Path("komandirovki.md")))
+
+    assert removed == 1
+    assert {doc.metadata["chunk_id"] for doc in all_documents(store)} == {"a1", "c1"}

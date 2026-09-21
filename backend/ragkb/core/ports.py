@@ -1,6 +1,7 @@
 """Порты ядра, которые объявляет прикладной слой, а не само ядро.
 
-RAGPipeline удовлетворяет AnswerEngine структурно и ничего не наследует.
+RagChain удовлетворяет AnswerEngine структурно и ничего не наследует:
+прикладной слой не знает ни про LangChain, ни про хранилище векторов.
 """
 from __future__ import annotations
 
@@ -28,7 +29,8 @@ class AnswerEngine(Protocol):
 
     def cited_sources(self, text: str, hits: list[Hit]) -> list[dict[str, Any]]: ...
 
-    def fallback_text(self, question: str, hits: list[Hit]) -> str: ...
+    def llm_available(self, model: str | None = None) -> bool:
+        """Готова ли генерация: если нет, вопрос отклоняется до открытия потока."""
 
     def document_paths(self) -> set[str] | None: ...
 

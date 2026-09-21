@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .pipeline import RAGPipeline
+from .pipeline import RagChain
 
 
 @dataclass
@@ -61,7 +61,7 @@ def load_cases(path: str | Path) -> list[EvalCase]:
     return cases
 
 
-def evaluate(pipeline: RAGPipeline, cases: list[EvalCase], top_k: int = 5) -> EvalResult:
+def evaluate(pipeline: RagChain, cases: list[EvalCase], top_k: int = 5) -> EvalResult:
     hits_count = 0
     reciprocal_ranks: list[float] = []
     precisions: list[float] = []
@@ -81,7 +81,7 @@ def evaluate(pipeline: RAGPipeline, cases: list[EvalCase], top_k: int = 5) -> Ev
                 {
                     "question": case.question,
                     "expected": case.expected,
-                    "got": [h.chunk.citation() for h in results],
+                    "got": [h.citation for h in results],
                 }
             )
         precisions.append(len(matched_ranks) / max(1, len(results)))
@@ -97,7 +97,8 @@ def evaluate(pipeline: RAGPipeline, cases: list[EvalCase], top_k: int = 5) -> Ev
 
 
 def _matches(hit, case: EvalCase) -> bool:
-    if case.doc and case.doc.lower() not in hit.chunk.source.lower():
+    source = str(hit.document.metadata.get("source") or "")
+    if case.doc and case.doc.lower() not in source.lower():
         return False
-    text = hit.chunk.text.lower()
+    text = hit.text.lower()
     return any(phrase.lower() in text for phrase in case.expected)

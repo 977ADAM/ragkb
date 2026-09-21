@@ -1,29 +1,27 @@
-"""Индекс корпуса: пересборка и манифест без знания HTTP."""
+"""Индекс корпуса: пересборка и сведения о нём без знания HTTP.
+
+Манифест и статус читаются с диска, без сборки движка: движок поднимает
+эмбеддер и хранилище (запросы к Ollama, открытие коллекции), а списку
+документов, статусу и проверке живости это не нужно.
+"""
 from __future__ import annotations
 
-import json
 import shutil
 import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ragkb.core import loaders
+from ragkb.core import loaders, manifest
 from ragkb.core.config import Settings
-from ragkb.core.errors import Conflict, EngineUnavailable, InvalidRequest
-from ragkb.core.llm import build_llm
+from ragkb.core.errors import Conflict, InvalidRequest
+from ragkb.core.llm import chat_model_name
 from ragkb.core.pipeline import build_index, remove_document
 from ragkb.core.ports import AnswerEngine
-from ragkb.core.store import MANIFEST
 
 
 class ConfigIndex:
-    """Индекс корпуса: сборка и сведения о нём.
-
-    Манифест и статус читаются с диска, без сборки движка: движок поднимает
-    модель эмбеддингов (гигабайты памяти и десятки секунд на CPU), а списку
-    документов, статусу и проверке живости она не нужна.
-    """
+    """Индекс корпуса: сборка и сведения о нём."""
 
     def __init__(self, cfg: Settings, get_engine: Callable[[], AnswerEngine]):
         self.cfg = cfg
@@ -31,34 +29,25 @@ class ConfigIndex:
         self._rebuild_lock = threading.Lock()
 
     def stats(self) -> dict[str, Any]:
-        manifest = self.manifest()
-        llm = build_llm(self.cfg.llm)
+        indexed = self.manifest()
         return {
-            "chunks": int(manifest.get("n_chunks", 0)),
-            "documents": len(manifest.get("documents", [])),
-            "store": manifest.get("backend"),
-            "embedder": manifest.get("embedder"),
-            "llm": llm.name,
-            "llm_available": llm.available(),
+            "chunks": int(indexed.get("n_chunks", 0)),
+            "documents": len(indexed.get("documents", [])),
+            "store": indexed.get("store"),
+            "embedder": indexed.get("embedder"),
+            "llm": chat_model_name(self.cfg.llm),
+            # Проверка по конфигурации: живой список моделей отдаёт bootstrap,
+            # а статус не должен ходить в сеть.
+            "llm_available": bool(self.cfg.llm.base_url and self.cfg.llm.model),
             "index_dir": str(self.cfg.index_dir),
         }
 
     def probe(self) -> str:
         """«Собран ли индекс» — дешёвая проверка для /health."""
-        try:
-            self.manifest()
-        except EngineUnavailable:
-            return "no_index"
-        return "ok"
+        return "ok" if manifest.exists(self.cfg) else "no_index"
 
     def manifest(self) -> dict[str, Any]:
-        path = Path(self.cfg.index_dir) / MANIFEST
-        if not path.exists():
-            raise EngineUnavailable(f"Индекс не найден в {self.cfg.index_dir}")
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except ValueError as exc:
-            raise EngineUnavailable(f"Манифест индекса повреждён: {exc}") from exc
+        return manifest.read(self.cfg)
 
     def rebuild(self, allow: frozenset[str] | None = None):
         """Полная переиндексация документов, принятых в корпус.
@@ -67,7 +56,7 @@ class ConfigIndex:
         всё, что нашлось в каталоге» (режим без реестра).
 
         Сборка идёт по одной за раз: параллельные пересборки не ускоряются
-        (ядра общие), а память и кеш эмбеддера делят между собой.
+        (ядра общие), а коллекция и память общие.
         """
         if not self._rebuild_lock.acquire(blocking=False):
             raise Conflict("Индексация уже идёт — дождитесь её завершения")
@@ -77,8 +66,7 @@ class ConfigIndex:
             self._rebuild_lock.release()
 
     def reindex_after_delete(self, path: str, allow: frozenset[str] | None = None) -> None:
-        manifest_path = Path(self.cfg.index_dir) / MANIFEST
-        if not manifest_path.exists():
+        if not manifest.exists(self.cfg):
             return
         root = Path(self.cfg.docs_dir)
         predicate = _by_registry(allow)

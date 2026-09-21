@@ -39,12 +39,16 @@ QUERY_EXPANSION_PROMPT = """Переформулируй вопрос польз
 
 
 def format_context(hits, max_chars: int = 12000) -> str:
-    """Собирает пронумерованный контекст, не превышая бюджет символов."""
+    """Собирает пронумерованный контекст, не превышая бюджет символов.
+
+    Номера здесь — те же `[N]`, на которые обязана ссылаться модель:
+    `RagChain.cited_sources` разбирает их обратно в источники ответа.
+    """
     parts: list[str] = []
     total = 0
     for i, hit in enumerate(hits, start=1):
-        header = f"[{i}] Источник: {hit.chunk.citation()}"
-        body = hit.chunk.text.strip()
+        header = f"[{i}] Источник: {hit.citation}"
+        body = hit.text.strip()
         block = f"{header}\n{body}"
         if total + len(block) > max_chars and parts:
             break

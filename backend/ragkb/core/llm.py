@@ -1,226 +1,45 @@
-"""Бэкенды генерации.
+"""Чат-модель LangChain: OpenAI-совместимый HTTP.
 
-openai     — любой OpenAI-совместимый HTTP API: vLLM, llama.cpp server,
-             LM Studio, TGI, облачный OpenAI. Это основной боевой путь.
-ollama     — нативный протокол Ollama (/api/chat), не OpenAI. В compose его нет.
-extractive — без LLM: ответ из найденных фрагментов. Тесты и деградация.
+Генерация идёт через `langchain-openai`, поэтому подходит любой сервер с
+совместимым API: vLLM, llama.cpp, LM Studio, ollama (её корень с `/v1`).
+Собственного HTTP-клиента у сервиса больше нет; отказы переводим в доменную
+ошибку, чтобы администратор видел действие, а не исключение пакета.
 """
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from langchain_core.language_models import BaseChatModel
+from pydantic import SecretStr
 
 from .config import Settings
+from .errors import EngineUnavailable
 
 
-class LLMError(RuntimeError):
-    pass
+def build_chat_model(cfg: Settings.LLMConfig, model: str | None = None) -> BaseChatModel:
+    """Модель для конкретного запроса (в интерфейсе можно выбрать другую)."""
+    from langchain_openai import ChatOpenAI
+
+    if not cfg.base_url:
+        raise EngineUnavailable(
+            "Не задан адрес генерации: укажите llm.base_url (RAGKB_LLM_URL) — "
+            "корень OpenAI-совместимого API, обычно с /v1"
+        )
+    name = model or cfg.model
+    if not name:
+        raise EngineUnavailable(
+            "Не выбрана модель генерации: задайте llm.model (RAGKB_LLM_MODEL) "
+            "или выберите модель в интерфейсе"
+        )
+    return ChatOpenAI(
+        model=name,
+        base_url=cfg.base_url.rstrip("/"),
+        # Ollama и большинство локальных серверов ключ не проверяют, но
+        # клиент требует непустое значение.
+        api_key=SecretStr(cfg.api_key or "not-needed"),
+        temperature=cfg.temperature,
+        max_completion_tokens=cfg.max_tokens,
+        timeout=cfg.timeout,
+    )
 
 
-class LLM(ABC):
-    name: str
-
-    @abstractmethod
-    def generate(self, system: str, user: str) -> str: ...
-
-    def stream(self, system: str, user: str) -> Iterator[str]:
-        yield self.generate(system, user)
-
-    def available(self) -> bool:
-        return True
-
-
-def build_llm(cfg: Settings.LLMConfig) -> LLM:
-    backend = cfg.backend.lower()
-    if backend == "ollama":
-        return OllamaLLM(cfg)
-    if backend in {"openai", "vllm", "openai-compatible"}:
-        return OpenAILLM(cfg)
-    if backend in {"extractive", "none"}:
-        return ExtractiveLLM(cfg)
-    raise ValueError(f"Неизвестный бэкенд LLM: {cfg.backend}")
-
-
-class OllamaLLM(LLM):
-    def __init__(self, cfg: Settings.LLMConfig):
-        self.cfg = cfg
-        self.name = f"ollama:{cfg.model}"
-        self.base_url = cfg.base_url.rstrip("/")
-
-    def available(self) -> bool:
-        try:
-            import httpx
-
-            with httpx.Client(timeout=3) as client:
-                return client.get(f"{self.base_url}/api/tags").status_code == 200
-        except Exception:
-            return False
-
-    def generate(self, system: str, user: str) -> str:
-        import httpx
-
-        payload = {
-            "model": self.cfg.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "stream": False,
-            "options": {
-                "temperature": self.cfg.temperature,
-                "num_predict": self.cfg.max_tokens,
-            },
-        }
-        try:
-            with httpx.Client(timeout=self.cfg.timeout) as client:
-                resp = client.post(f"{self.base_url}/api/chat", json=payload)
-                resp.raise_for_status()
-                return resp.json()["message"]["content"].strip()
-        except Exception as exc:
-            raise LLMError(f"Ollama недоступна ({self.base_url}): {exc}") from exc
-
-    def stream(self, system: str, user: str) -> Iterator[str]:
-        import json
-
-        import httpx
-
-        payload = {
-            "model": self.cfg.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "stream": True,
-            "options": {
-                "temperature": self.cfg.temperature,
-                "num_predict": self.cfg.max_tokens,
-            },
-        }
-        with (
-            httpx.Client(timeout=self.cfg.timeout) as client,
-            client.stream("POST", f"{self.base_url}/api/chat", json=payload) as resp,
-        ):
-                resp.raise_for_status()
-                for line in resp.iter_lines():
-                    if not line:
-                        continue
-                    data = json.loads(line)
-                    piece = data.get("message", {}).get("content", "")
-                    if piece:
-                        yield piece
-
-
-class OpenAILLM(LLM):
-    def __init__(self, cfg: Settings.LLMConfig):
-        self.cfg = cfg
-        self.name = f"openai:{cfg.model}"
-        self.base_url = cfg.base_url.rstrip("/")
-
-    def _headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self.cfg.api_key}"} if self.cfg.api_key else {}
-
-    def available(self) -> bool:
-        try:
-            import httpx
-
-            with httpx.Client(timeout=3, headers=self._headers()) as client:
-                return client.get(f"{self.base_url}/models").status_code < 500
-        except Exception:
-            return False
-
-    def generate(self, system: str, user: str) -> str:
-        import httpx
-
-        payload = {
-            "model": self.cfg.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "temperature": self.cfg.temperature,
-            "max_tokens": self.cfg.max_tokens,
-        }
-        try:
-            with httpx.Client(timeout=self.cfg.timeout, headers=self._headers()) as client:
-                resp = client.post(f"{self.base_url}/chat/completions", json=payload)
-                resp.raise_for_status()
-                return resp.json()["choices"][0]["message"]["content"].strip()
-        except Exception as exc:
-            raise LLMError(f"LLM-эндпоинт недоступен ({self.base_url}): {exc}") from exc
-
-    def stream(self, system: str, user: str) -> Iterator[str]:
-        import json
-
-        import httpx
-
-        payload = {
-            "model": self.cfg.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "temperature": self.cfg.temperature,
-            "max_tokens": self.cfg.max_tokens,
-            "stream": True,
-        }
-        try:
-            with (
-                httpx.Client(timeout=self.cfg.timeout, headers=self._headers()) as client,
-                client.stream("POST", f"{self.base_url}/chat/completions", json=payload) as resp,
-            ):
-                resp.raise_for_status()
-                for line in resp.iter_lines():
-                    if not line:
-                        continue
-                    line = line.removeprefix("data: ")
-                    if line.strip() == "[DONE]":
-                        return
-                    try:
-                        data = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    delta = (data.get("choices") or [{}])[0].get("delta") or {}
-                    piece = delta.get("content") or ""
-                    if piece:
-                        yield piece
-        except Exception as exc:
-            raise LLMError(f"LLM-эндпоинт недоступен ({self.base_url}): {exc}") from exc
-
-
-class ExtractiveLLM(LLM):
-    """Фолбэк без нейросети: возвращает найденные фрагменты как есть."""
-
-    def __init__(self, cfg: Settings.LLMConfig):
-        self.cfg = cfg
-        self.name = "extractive"
-
-    def generate(self, system: str, user: str) -> str:
-        fragments = _extract_context_fragments(user)
-        if not fragments:
-            return "В базе знаний не найдено релевантной информации по этому вопросу."
-        lines = ["Ответ собран из найденных фрагментов (LLM отключена):", ""]
-        for marker, text in fragments[:3]:
-            snippet = text.strip()
-            if len(snippet) > 600:
-                snippet = snippet[:600].rsplit(" ", 1)[0] + "…"
-            lines.append(f"{marker} {snippet}")
-            lines.append("")
-        return "\n".join(lines).strip()
-
-
-def _extract_context_fragments(prompt: str) -> list[tuple[str, str]]:
-    """Разбирает промпт обратно на фрагменты вида [1] ... — только для фолбэка."""
-    import re
-
-    # Контекст ограничен блоком между «КОНТЕКСТ:» и «ВОПРОС:» — иначе в
-    # «фрагмент» попадут сами инструкции промпта.
-    body = prompt
-    if "КОНТЕКСТ:" in body:
-        body = body.split("КОНТЕКСТ:", 1)[1]
-    body = re.split(r"\n\s*ВОПРОС:", body)[0]
-
-    fragments = []
-    pattern = re.compile(r"^\[(\d+)\][^\n]*\n(.*?)(?=\n\[\d+\]|\Z)", re.DOTALL | re.MULTILINE)
-    for match in pattern.finditer(body):
-        fragments.append((f"[{match.group(1)}]", match.group(2)))
-    return fragments
+def chat_model_name(cfg: Settings.LLMConfig, model: str | None = None) -> str:
+    return f"openai:{model or cfg.model}"

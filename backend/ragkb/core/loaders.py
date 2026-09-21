@@ -1,8 +1,12 @@
-"""Загрузка документов разных форматов в единое внутреннее представление.
+"""Загрузка документов разных форматов в блоки с метаданными о происхождении.
 
-Каждый загрузчик возвращает список Block — абзац/заголовок/строку таблицы —
-с метаданными о происхождении. Блоки, а не сырой текст, позволяют дальше
-резать документ по смысловым границам и сохранять ссылку на страницу.
+Каждый загрузчик возвращает список Block — абзац/заголовок/строку таблицы.
+Блоки, а не сырой текст, позволяют собрать секции по иерархии заголовков и
+сохранить ссылку на страницу (см. `core/documents.py`, где блоки становятся
+документами LangChain).
+
+Разбор форматов остаётся своим: загрузчики LangChain для docx/pdf тянут
+`docx2txt` и `unstructured` и теряют структуру таблиц и страниц.
 """
 from __future__ import annotations
 
@@ -27,7 +31,8 @@ class Block:
 
 
 @dataclass
-class Document:
+class LoadedDocument:
+    """Прочитанный файл до превращения в документы LangChain."""
     doc_id: str
     path: str
     title: str
@@ -69,7 +74,7 @@ def discover(root: str | Path) -> list[Path]:
     return files
 
 
-def load(path: str | Path) -> Document:
+def load(path: str | Path) -> LoadedDocument:
     path = Path(path)
     suffix = path.suffix.lower()
     if suffix == ".pdf":
@@ -90,7 +95,7 @@ def load(path: str | Path) -> Document:
     # что лежит в индексе, и по нему же ловим дубликаты документов.
     checksum = hashlib.sha256(path.read_bytes()).hexdigest()
     title = meta.pop("title", None) or _guess_title(blocks) or path.stem
-    return Document(
+    return LoadedDocument(
         doc_id=hashlib.sha1(str(path.resolve()).encode()).hexdigest()[:12],
         path=str(path),
         title=title,

@@ -10,40 +10,39 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     class ChunkConfig(BaseModel):
+        # Границы чанка задаёт RecursiveCharacterTextSplitter (langchain):
+        # разделители — абзац, конец предложения, строка, пробел.
         size: int = 900
         overlap: int = 150
-        min_size: int = 120
-        respect_structure: bool = True
 
     class EmbeddingConfig(BaseModel):
-        # Ollama — основной путь: модель живёт вне процесса сервиса, поэтому
-        # в образе нет ни torch, ни весов эмбеддера. tfidf остаётся для тестов
-        # и работы совсем без сети, openai/st — для внешнего HTTP или HF.
+        # ollama — рабочий путь (langchain-ollama): модель живёт вне процесса
+        # сервиса, поэтому в образе нет ни torch, ни весов эмбеддера.
+        # fake — детерминированные векторы без сети: тесты и офлайн-прогоны.
         backend: str = "ollama"
         model: str = "qwen3-embedding:0.6b"
-        # Адрес Ollama — корень API, без /v1: эмбеддинги берутся из /api/embed.
+        # Адрес Ollama — корень API, без /v1.
         base_url: str = "http://127.0.0.1:11434"
-        api_key: str = ""
-        batch_size: int = 32
-        query_prefix: str = ""
-        doc_prefix: str = ""
-        tfidf_dim: int = 4096
         # Первый запрос поднимает модель в память Ollama: на холодную это
-        # заметно дольше одного прохода по батчам, поэтому таймаут щедрый.
+        # заметно дольше одного запроса, поэтому таймаут щедрый.
         timeout: int = 300
         # Сколько держать модель загруженной после индексации: следующий
         # вопрос не должен ждать повторной загрузки весов.
         keep_alive: str = "30m"
-        # Повторы на сетевых сбоях и 5xx: перезапуск Ollama посреди
-        # индексации не должен ронять всю сборку.
-        retries: int = 3
+        # 0 — не переопределять контекст модели.
+        num_ctx: int = 0
+        # langchain-ollama проверяет наличие модели при сборке объекта.
+        validate_model: bool = True
+        # Размерность вектора у бэкенда fake.
+        fake_dim: int = 1024
 
     class StoreConfig(BaseModel):
+        # chroma — рабочий бэкенд (langchain-chroma, персистентный клиент).
+        # memory — InMemoryVectorStore из langchain-core: тесты без диска.
         backend: str = "chroma"
         collection: str = "knowledge_base"
         chroma_host: str = ""
         chroma_port: int = 8000
-        upsert_batch: int = 500
         hnsw_construction_ef: int = 200
         hnsw_search_ef: int = 100
         hnsw_m: int = 16
@@ -60,11 +59,10 @@ class Settings(BaseSettings):
         rrf_k: int = 60
         use_mmr: bool = True
         mmr_lambda: float = 0.7
+        # Порог по близости плотного поиска: ниже него система честно отвечает
+        # «не найдено», а не отдаёт случайные абзацы.
         min_score: float = 0.0
-        # Одинаковый текст из двух файлов не должен занимать в выдаче две
-        # позиции: он вытесняет альтернативные формулировки.
-        dedupe_text: bool = True
-        reranker: str = "none"          # none | sentence-transformers | http
+        reranker: str = "none"          # none | http
         reranker_model: str = "BAAI/bge-reranker-v2-m3"
         # Адрес реранкера по HTTP: корень OpenAI-совместимого API (…/v1) или
         # полный адрес до /rerank. Пустой адрес при reranker: http — ошибка
@@ -77,6 +75,9 @@ class Settings(BaseSettings):
         min_rerank_score: float = 0.0
 
     class LLMConfig(BaseModel):
+        # Генерация — OpenAI-совместимый HTTP (langchain-openai): vLLM,
+        # llama.cpp, LM Studio, Ollama (её корень с /v1). Поле backend
+        # выбирает только источник каталога моделей.
         backend: str = "extractive"
         model: str = ""
         base_url: str = ""
@@ -123,13 +124,10 @@ class Settings(BaseSettings):
         "RAGKB_EMBEDDING_BACKEND": ("embedding", "backend"),
         "RAGKB_EMBEDDING_MODEL": ("embedding", "model"),
         "RAGKB_EMBEDDING_URL": ("embedding", "base_url"),
-        "RAGKB_EMBEDDING_API_KEY": ("embedding", "api_key"),
-        "RAGKB_EMBEDDING_BATCH_SIZE": ("embedding", "batch_size"),
         "RAGKB_EMBEDDING_TIMEOUT": ("embedding", "timeout"),
         "RAGKB_EMBEDDING_KEEP_ALIVE": ("embedding", "keep_alive"),
-        "RAGKB_EMBEDDING_RETRIES": ("embedding", "retries"),
-        "RAGKB_EMBEDDING_QUERY_PREFIX": ("embedding", "query_prefix"),
-        "RAGKB_EMBEDDING_DOC_PREFIX": ("embedding", "doc_prefix"),
+        "RAGKB_EMBEDDING_NUM_CTX": ("embedding", "num_ctx"),
+        "RAGKB_EMBEDDING_FAKE_DIM": ("embedding", "fake_dim"),
         "RAGKB_STORE_BACKEND": ("store", "backend"),
         "RAGKB_CHROMA_HOST": ("store", "chroma_host"),
         "RAGKB_CHROMA_COLLECTION": ("store", "collection"),

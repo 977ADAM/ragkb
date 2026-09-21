@@ -1,252 +1,381 @@
-"""Гибридный поиск: BM25 + плотные векторы, слияние RRF, MMR, опциональный реранк.
+"""Поиск на ретриверах LangChain: гибрид (плотный + BM25) через RRF, MMR, реранк.
 
 Почему гибрид, а не только векторы: плотный поиск хорошо ловит перефразировки
 («как отпроситься» → «предоставление отпуска»), но проваливается на точных
 сущностях — артикулах, номерах приказов, аббревиатурах. BM25 наоборот. Их
 объединение даёт заметно более устойчивый recall, чем любой из двух отдельно.
 
-Слияние — Reciprocal Rank Fusion: складываются не сырые оценки (они в разных
-шкалах и несопоставимы), а обратные ранги. Это делает схему устойчивой к тому,
-что BM25 выдаёт значения 0..30, а косинус 0..1.
+Слияние — Reciprocal Rank Fusion из `langchain-classic.EnsembleRetriever`:
+складываются не сырые оценки (BM25 выдаёт 0…30, косинус 0…1 — складывать
+нельзя), а обратные ранги. Лексическая половина — свой `LexicalRetriever`
+на `rank_bm25` (пакет `langchain-community` объявлен устаревшим, поэтому
+зависимость от него не тянем), с русской токенизацией из `core.text`.
 
-Вес источника в слиянии настраивается (`retrieval.bm25_weight`/`dense_weight`):
-когда по замерам один из поисков явно полезнее, его вклад можно усилить,
-не трогая шкалы оценок.
+Оценка в выдаче — близость плотного поиска: именно на неё смотрит порог
+`retrieval.min_score`. Порядок задаёт RRF, поэтому score не обязан убывать.
 """
 from __future__ import annotations
 
-import hashlib
 import logging
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 import numpy as np
+from langchain_classic.retrievers import ContextualCompressionRetriever, EnsembleRetriever
+from langchain_core.callbacks import CallbackManagerForRetrieverRun
+from langchain_core.documents import Document
+from langchain_core.documents.compressor import BaseDocumentCompressor
+from langchain_core.embeddings import Embeddings
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.vectorstores import VectorStore
 
-from .chunking import Chunk
 from .config import Settings
-from .embeddings import Embedder
-from .store import BaseStore
+from .documents import document_citation, document_page, document_section, document_text
+from .errors import EngineUnavailable
+from .text import tokenize
+from .vectorstore import all_documents, vectors_for
 
 log = logging.getLogger("ragkb")
+
+_RERANK_PREFIX = "relevance_score"
 
 
 @dataclass
 class Hit:
-    chunk: Chunk
-    score: float                       # итоговая оценка после слияния
+    """Находка поиска: документ LangChain и то, чем он подтверждён."""
+
+    document: Document
+    score: float
     dense_score: float | None = None
     lexical_score: float | None = None
     rerank_score: float | None = None
     rank_sources: list[str] = field(default_factory=list)
 
+    @property
+    def chunk_id(self) -> str:
+        return str(self.document.metadata.get("chunk_id") or "")
+
+    @property
+    def text(self) -> str:
+        return document_text(self.document)
+
+    @property
+    def citation(self) -> str:
+        return document_citation(self.document)
+
     def to_dict(self) -> dict[str, Any]:
+        """Форма для /api/v1/search и для сносок в ответе."""
         return {
-            "chunk_id": self.chunk.chunk_id,
-            "text": self.chunk.text,
-            "citation": self.chunk.citation(),
-            "source": self.chunk.source,
-            "page": self.chunk.page,
-            "section": self.chunk.section,
+            "chunk_id": self.chunk_id,
+            "text": self.text,
+            "citation": self.citation,
+            "source": str(self.document.metadata.get("source") or ""),
+            "page": document_page(self.document),
+            "section": document_section(self.document),
             "score": round(self.score, 4),
             "dense_score": None if self.dense_score is None else round(self.dense_score, 4),
-            "lexical_score": None if self.lexical_score is None else round(self.lexical_score, 4),
-            "rerank_score": None if self.rerank_score is None else round(self.rerank_score, 4),
+            "lexical_score": (
+                None if self.lexical_score is None else round(self.lexical_score, 4)
+            ),
+            "rerank_score": (
+                None if self.rerank_score is None else round(self.rerank_score, 4)
+            ),
             "matched_by": self.rank_sources,
         }
 
 
-class Retriever:
-    def __init__(self, store: BaseStore, embedder: Embedder, cfg: Settings.RetrievalConfig):
-        self.store = store
-        self.embedder = embedder
-        self.cfg = cfg
-        self._reranker: Any = None
+# ------------------------------------------------------------ лексический поиск
 
-    def search(self, query: str, top_k: int | None = None) -> list[Hit]:
-        top_k = top_k or self.cfg.top_k
-        n_candidates = max(self.cfg.candidates, top_k)
 
-        dense: list[tuple[str, float]] = []
-        lexical: list[tuple[str, float]] = []
-        query_vec: np.ndarray | None = None
+class LexicalRetriever(BaseRetriever):
+    """BM25 по документам индекса: лексическая половина гибрида.
 
-        if self.cfg.use_dense and len(self.store):
-            query_vec = self.embedder.embed_query(query)
-            dense = self.store.dense_search(query_vec, n_candidates)
-        if self.cfg.use_bm25:
-            lexical = self.store.lexical_search(query, n_candidates)
+    Свой ретривер вместо `langchain_community.retrievers.BM25Retriever`:
+    community объявлен устаревшим, а нам нужны русская токенизация
+    (`core.text.tokenize`) и оценка BM25 в метаданных находки.
+    """
 
-        fused = reciprocal_rank_fusion(
-            {"dense": dense, "lexical": lexical},
-            k=self.cfg.rrf_k,
-            weights={"dense": self.cfg.dense_weight, "lexical": self.cfg.bm25_weight},
-        )
-        if not fused:
+    documents: list[Document]
+    k: int = 30
+    preprocess: Callable[[str], list[str]] = tokenize
+    _bm25: Any = None
+
+    def model_post_init(self, __context: Any) -> None:
+        from rank_bm25 import BM25Okapi
+
+        corpus = [self.preprocess(document.page_content) for document in self.documents]
+        self._bm25 = BM25Okapi(corpus) if corpus else None
+
+    def _get_relevant_documents(
+        self, query: str, *, run_manager: CallbackManagerForRetrieverRun | None = None
+    ) -> list[Document]:
+        if self._bm25 is None:
             return []
+        tokens = self.preprocess(query)
+        if not tokens:
+            return []
+        scores = self._bm25.get_scores(tokens)
+        ranked = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+        out: list[Document] = []
+        for index in ranked[: self.k]:
+            score = float(scores[index])
+            if score <= 0:
+                # BM25 без совпадений даёт нули: такие документы не находки.
+                break
+            document = self.documents[index]
+            document.metadata["lexical_score"] = score
+            out.append(document)
+        return out
 
-        dense_map = dict(dense)
-        lexical_map = dict(lexical)
-        hits = [
+
+# ------------------------------------------------------------------- сборка
+
+
+def build_retriever(cfg: Settings, store: VectorStore) -> BaseRetriever:
+    """Ретривер по конфигурации: плотный, лексический, их слияние и реранк."""
+    retrieval = cfg.retrieval
+    legs: list[BaseRetriever] = []
+    weights: list[float] = []
+
+    if retrieval.use_dense:
+        legs.append(dense_retriever(store, retrieval))
+        weights.append(retrieval.dense_weight)
+    if retrieval.use_bm25:
+        legs.append(
+            LexicalRetriever(
+                documents=all_documents(store),
+                k=max(retrieval.candidates, retrieval.top_k),
+            )
+        )
+        weights.append(retrieval.bm25_weight)
+    if not legs:
+        raise EngineUnavailable(
+            "Оба поиска выключены (retrieval.use_dense и retrieval.use_bm25): "
+            "отвечать по базе нечем"
+        )
+
+    base: BaseRetriever = (
+        legs[0]
+        if len(legs) == 1
+        else EnsembleRetriever(
+            retrievers=legs,  # type: ignore[arg-type]
+            weights=weights,
+            c=retrieval.rrf_k,
+            id_key="chunk_id",
+        )
+    )
+    if retrieval.reranker == "http":
+        return ContextualCompressionRetriever(
+            base_compressor=HttpReranker(
+                url=retrieval.reranker_url,
+                model=retrieval.reranker_model,
+                api_key=retrieval.reranker_api_key,
+                timeout=retrieval.reranker_timeout,
+            ),
+            base_retriever=base,
+        )
+    return base
+
+
+def dense_retriever(store: VectorStore, retrieval: Settings.RetrievalConfig) -> BaseRetriever:
+    """Плотная половина: MMR или обычная близость."""
+    if retrieval.use_mmr:
+        # fetch_k больше k: MMR нужно из чего выбирать разнообразие.
+        return store.as_retriever(
+            search_type="mmr",
+            search_kwargs={
+                "k": retrieval.candidates,
+                "fetch_k": max(retrieval.candidates * 3, retrieval.top_k),
+                "lambda_mult": retrieval.mmr_lambda,
+            },
+        )
+    return store.as_retriever(search_kwargs={"k": retrieval.candidates})
+
+
+def search(
+    cfg: Settings,
+    retriever: BaseRetriever,
+    store: VectorStore,
+    embeddings: Embeddings,
+    question: str,
+    top_k: int | None = None,
+) -> list[Hit]:
+    """Поиск с оценками и порогами — то, что видит прикладной слой."""
+    retrieval = cfg.retrieval
+    limit = top_k or retrieval.top_k
+    documents = retriever.invoke(question)
+    scores = dense_scores(store, embeddings, question, documents)
+    hits: list[Hit] = []
+    for document in documents:
+        chunk_id = str(document.metadata.get("chunk_id") or "")
+        dense = scores.get(chunk_id)
+        lexical = document.metadata.get("lexical_score")
+        rerank = document.metadata.get(_RERANK_PREFIX)
+        hits.append(
             Hit(
-                chunk=self.store.get_chunk(chunk_id),
-                score=score,
-                dense_score=dense_map.get(chunk_id),
-                lexical_score=lexical_map.get(chunk_id),
-                rank_sources=sources,
+                document=document,
+                score=_final_score(dense, rerank),
+                dense_score=dense,
+                lexical_score=float(lexical) if isinstance(lexical, (int, float)) else None,
+                rerank_score=float(rerank) if isinstance(rerank, (int, float)) else None,
+                rank_sources=_sources(document, dense, lexical),
             )
-            for chunk_id, score, sources in fused[:n_candidates]
+        )
+
+    if retrieval.min_score > 0:
+        hits = [
+            hit
+            for hit in hits
+            if hit.dense_score is None or hit.dense_score >= retrieval.min_score
         ]
-
-        # Один и тот же абзац из двух файлов — это одна находка, а не две:
-        # иначе он занимает позиции в top-k и вытесняет альтернативы.
-        if self.cfg.dedupe_text:
-            hits = collapse_duplicate_text(hits)
-
-        # Отсечка по плотной близости: если ничего похожего нет, лучше честно
-        # сказать «не найдено», чем скормить LLM случайные абзацы.
-        if self.cfg.min_score > 0:
-            hits = [
-                h for h in hits
-                if h.dense_score is None or h.dense_score >= self.cfg.min_score
-            ]
-            if not hits:
-                return []
-
-        if self.cfg.reranker != "none":
-            hits = self._rerank(query, hits)
-            hits = drop_below_rerank_score(hits, self.cfg.min_rerank_score)
-            if not hits:
-                return []
-
-        if self.cfg.use_mmr and query_vec is not None and self.cfg.reranker == "none":
-            hits = self._mmr(hits, query_vec, top_k)
-
-        return hits[:top_k]
-
-    # ------------------------------------------------------------------- MMR
-
-    def _mmr(self, hits: list[Hit], query_vec: np.ndarray, top_k: int) -> list[Hit]:
-        """Maximal Marginal Relevance — убирает почти одинаковые чанки из выдачи.
-
-        Без него top-5 часто оказывается пятью вариациями одного абзаца из разных
-        версий документа, и LLM не видит альтернативных формулировок.
-        """
-        if len(hits) <= 1:
-            return hits
-        vecs = self.store.get_vectors([h.chunk.chunk_id for h in hits])
-        relevance = vecs @ query_vec
-
-        selected: list[int] = []
-        remaining = list(range(len(hits)))
-        lam = self.cfg.mmr_lambda
-        while remaining and len(selected) < top_k:
-            if not selected:
-                best = int(np.argmax(relevance[remaining]))
-                selected.append(remaining.pop(best))
-                continue
-            sim_to_selected = vecs[remaining] @ vecs[selected].T
-            penalty = sim_to_selected.max(axis=1)
-            mmr_scores = lam * relevance[remaining] - (1 - lam) * penalty
-            best = int(np.argmax(mmr_scores))
-            selected.append(remaining.pop(best))
-        return [hits[i] for i in selected]
-
-    # --------------------------------------------------------------- реранкер
-
-    def _rerank(self, query: str, hits: list[Hit]) -> list[Hit]:
-        """Переставляет кандидатов по оценке реранкера.
-
-        Локальный cross-encoder считает пару (запрос, чанк) целиком и точнее
-        bi-encoder'а, но требует torch в процессе. Если в контуре уже есть
-        отдельный сервис реранка (vLLM, TEI, Jina-совместимый шлюз), дешевле
-        спросить его по HTTP и не тащить модель в контейнер rag.
-        """
-        if self.cfg.reranker == "http":
-            scores = self._rerank_http(query, hits)
-        else:
-            scores = self._rerank_cross_encoder(query, hits)
-        if scores is None:
-            return hits
-        for hit, score in zip(hits, scores, strict=False):
-            hit.rerank_score = float(score)
-            hit.score = float(score)
-        return sorted(
-            hits,
-            key=lambda h: h.rerank_score if h.rerank_score is not None else 0.0,
-            reverse=True,
-        )
-
-    def _rerank_cross_encoder(self, query: str, hits: list[Hit]) -> list[float] | None:
-        if self._reranker is None:
-            try:
-                from sentence_transformers import CrossEncoder
-                self._reranker = CrossEncoder(self.cfg.reranker_model)
-            except ImportError:
-                log.warning(
-                    "реранкер %s не установлен: pip install 'ragkb[local-models]' "
-                    "или переключитесь на retrieval.reranker: http",
-                    self.cfg.reranker_model,
-                )
-                return None
-        pairs = [(query, h.chunk.embed_text) for h in hits]
-        try:
-            return [float(s) for s in self._reranker.predict(pairs)]
-        except Exception as exc:
-            log.warning("локальный реранкер не отработал (%s) — порядок оставлен как есть", exc)
-            return None
-
-    def _rerank_http(self, query: str, hits: list[Hit]) -> list[float] | None:
-        if not self.cfg.reranker_url:
-            log.warning(
-                "retrieval.reranker: http, но retrieval.reranker_url не задан — "
-                "реранк пропущен, порядок остался после RRF"
-            )
-            return None
-        reranker = _HttpReranker(
-            url=self.cfg.reranker_url,
-            model=self.cfg.reranker_model,
-            api_key=self.cfg.reranker_api_key,
-            timeout=self.cfg.reranker_timeout,
-        )
-        try:
-            return reranker.rank(query, [h.chunk.embed_text for h in hits])
-        except Exception as exc:
-            log.warning("внешний реранкер недоступен (%s) — порядок оставлен как есть", exc)
-            return None
+    if retrieval.min_rerank_score > 0:
+        threshold = retrieval.min_rerank_score
+        scored = [
+            hit
+            for hit in hits
+            if hit.rerank_score is not None and hit.rerank_score >= threshold
+        ]
+        # Если реранкер не отработал, оценок нет и отсекать нечего: пустая
+        # выдача здесь означала бы «нет информации» на ровном месте.
+        hits = scored or [hit for hit in hits if hit.rerank_score is None]
+    return hits[:limit]
 
 
-class _HttpReranker:
+def dense_scores(
+    store: VectorStore, embeddings: Embeddings, question: str, documents: Sequence[Document]
+) -> dict[str, float]:
+    """Близость плотного поиска для найденных чанков.
+
+    Нужна для порога `min_score` и для оценки в выдаче: слияние RRF отдаёт
+    порядок, но не близость. Считаем одним запросом к хранилищу; если
+    документ в него не попал — оценки нет, и порог его не отсекает.
+    """
+    if not documents:
+        return {}
+    wanted = [str(document.metadata.get("chunk_id") or "") for document in documents]
+    try:
+        found = store.similarity_search_with_relevance_scores(question, k=len(documents))
+    except Exception:
+        # Хранилище в памяти не умеет relevance score (NotImplementedError) —
+        # считаем косинус по сохранённым векторам.
+        return _cosine_scores(store, embeddings, question, wanted)
+    return {
+        str(document.metadata.get("chunk_id") or ""): float(score)
+        for document, score in found
+        if str(document.metadata.get("chunk_id") or "") in wanted
+    }
+
+
+def _cosine_scores(
+    store: VectorStore, embeddings: Embeddings, question: str, chunk_ids: list[str]
+) -> dict[str, float]:
+    vectors = vectors_for(store, chunk_ids)
+    if not vectors:
+        return {}
+    query = np.asarray(embeddings.embed_query(question), dtype=np.float32)
+    query_norm = float(np.linalg.norm(query)) or 1.0
+    out: dict[str, float] = {}
+    for chunk_id in chunk_ids:
+        vector = vectors.get(chunk_id)
+        if vector is None:
+            continue
+        values = np.asarray(vector, dtype=np.float32)
+        norm = float(np.linalg.norm(values)) or 1.0
+        out[chunk_id] = float(query @ values / (query_norm * norm))
+    return out
+
+
+def _final_score(dense: float | None, rerank: Any) -> float:
+    if isinstance(rerank, (int, float)):
+        return float(rerank)
+    return float(dense) if dense is not None else 0.0
+
+
+def _sources(document: Document, dense: float | None, lexical: Any) -> list[str]:
+    """Чем подтверждена находка — для разбора качества поиска."""
+    out: list[str] = []
+    if dense is not None:
+        out.append("dense")
+    if isinstance(lexical, (int, float)):
+        out.append("lexical")
+    if document.metadata.get(_RERANK_PREFIX) is not None:
+        out.append("rerank")
+    return out
+
+
+# ------------------------------------------------------------------ реранкер
+
+
+class HttpReranker(BaseDocumentCompressor):
     """Реранкер по HTTP: POST {query, documents} → оценки по индексам.
 
     Формат запроса и ответа совпадает у Jina, Cohere и совместимых сервисов,
     поэтому отдельная библиотека не нужна: нужен один запрос и разбор ответа.
+    Локальный cross-encoder не поддерживаем: он требует torch в процессе.
     """
 
-    def __init__(self, url: str, model: str = "", api_key: str = "", timeout: int = 60):
-        self.url = rerank_endpoint(url)
-        self.model = model
-        self.api_key = api_key
-        self.timeout = timeout
+    url: str = ""
+    model: str = ""
+    api_key: str = ""
+    timeout: int = 60
 
-    def rank(self, query: str, documents: list[str]) -> list[float]:
+    def compress_documents(
+        self,
+        documents: Sequence[Document],
+        query: str,
+        callbacks: Any | None = None,
+    ) -> list[Document]:
         if not documents:
             return []
-        payload: dict[str, Any] = {
-            "query": query,
-            "documents": documents,
-            "top_n": len(documents),
-        }
-        if self.model:
-            payload["model"] = self.model
-        headers = {"content-type": "application/json"}
-        if self.api_key:
-            headers["authorization"] = f"Bearer {self.api_key}"
-        response = httpx.post(
-            self.url, json=payload, headers=headers, timeout=self.timeout
+        if not self.url:
+            log.warning(
+                "retrieval.reranker: http, но retrieval.reranker_url не задан — "
+                "реранк пропущен, порядок остался после RRF"
+            )
+            return list(documents)
+        try:
+            scores = _rerank_scores(
+                url=self.url,
+                model=self.model,
+                api_key=self.api_key,
+                timeout=self.timeout,
+                query=query,
+                documents=[document.page_content for document in documents],
+            )
+        except Exception as exc:
+            log.warning("внешний реранкер недоступен (%s) — порядок оставлен как есть", exc)
+            return list(documents)
+        if not scores:
+            return list(documents)
+        ranked: list[Document] = []
+        for document, score in zip(documents, scores, strict=False):
+            document.metadata[_RERANK_PREFIX] = float(score)
+            ranked.append(document)
+        return sorted(
+            ranked, key=lambda doc: float(doc.metadata[_RERANK_PREFIX]), reverse=True
         )
-        response.raise_for_status()
-        return parse_rerank_scores(response.json(), len(documents))
+
+
+def _rerank_scores(
+    *,
+    url: str,
+    model: str,
+    api_key: str,
+    timeout: int,
+    query: str,
+    documents: list[str],
+) -> list[float]:
+    payload: dict[str, Any] = {"query": query, "documents": documents, "top_n": len(documents)}
+    if model:
+        payload["model"] = model
+    headers = {"content-type": "application/json"}
+    if api_key:
+        headers["authorization"] = f"Bearer {api_key}"
+    response = httpx.post(rerank_endpoint(url), json=payload, headers=headers, timeout=timeout)
+    response.raise_for_status()
+    return parse_rerank_scores(response.json(), len(documents))
 
 
 def rerank_endpoint(url: str) -> str:
@@ -266,7 +395,7 @@ def parse_rerank_scores(body: Any, count: int) -> list[float]:
 
     Индекс приходит явно, поэтому порядок элементов в ответе не важен.
     Неоценённые документы получают минимальную оценку: иначе они всплывут
-    наверх и вытеснят те, которые модель действительно проверила.
+    наверху и вытеснят те, которые модель действительно проверила.
     Пустой результат означает «реранкер не ответил по существу» — вызывающий
     код в этом случае оставляет прежний порядок.
     """
@@ -291,87 +420,3 @@ def parse_rerank_scores(body: Any, count: int) -> list[float]:
         return []
     floor = min(scores.values())
     return [scores.get(i, floor) for i in range(count)]
-
-
-def collapse_duplicate_text(hits: list[Hit]) -> list[Hit]:
-    """Убирает из выдачи чанки с одинаковым текстом.
-
-    Одинаковый абзац попадает в индекс дважды, когда документ лежит в двух
-    файлах или переписан под новым именем: в top-k он занимает две позиции и
-    вытесняет альтернативы. Оставляем первый — он выше по скору слияния, —
-    а признаки находки сливаем: иначе потеряется то, что фрагмент подтверждён
-    и лексическим, и плотным поиском.
-    """
-    seen: dict[str, Hit] = {}
-    out: list[Hit] = []
-    for hit in hits:
-        key = _content_hash(hit.chunk.text)
-        keeper = seen.get(key)
-        if keeper is None:
-            seen[key] = hit
-            out.append(hit)
-            continue
-        for name in hit.rank_sources:
-            if name not in keeper.rank_sources:
-                keeper.rank_sources.append(name)
-        if keeper.dense_score is None:
-            keeper.dense_score = hit.dense_score
-        if keeper.lexical_score is None:
-            keeper.lexical_score = hit.lexical_score
-    return out
-
-
-def drop_below_rerank_score(hits: list[Hit], min_score: float) -> list[Hit]:
-    """Отсекает кандидатов с низкой оценкой реранкера.
-
-    Оценки реранкера безразмерны — у каждой модели своя шкала, поэтому порог
-    задаётся конфигом и по умолчанию выключен. Если реранкер не отработал,
-    оценки пусты и отсекать нечего: пустая выдача здесь означала бы «нет
-    информации» на ровном месте.
-    """
-    if min_score <= 0:
-        return hits
-    scored = [h for h in hits if h.rerank_score is not None]
-    if not scored:
-        return hits
-    kept: list[Hit] = []
-    for hit in scored:
-        score = hit.rerank_score
-        if score is not None and score >= min_score:
-            kept.append(hit)
-    return kept
-
-
-def _content_hash(text: str) -> str:
-    """Хэш содержимого: пробелы и регистр не должны создавать «разные» чанки."""
-    normalized = " ".join(text.split()).casefold()
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-
-
-def reciprocal_rank_fusion(
-    rankings: dict[str, list[tuple[Any, float]]],
-    k: int = 60,
-    weights: dict[str, float] | None = None,
-) -> list[tuple[Any, float, list[str]]]:
-    """RRF: score(d) = Σ w_s / (k + rank_s(d)). Ранги считаются с 1.
-
-    Ключ документа — любой хэшируемый идентификатор (у нас chunk_id),
-    поэтому слияние не зависит от того, чем хранятся векторы.
-
-    Веса позволяют сместить вклад источников, не трогая их шкалы: по
-    умолчанию он равный (единица у каждого), вес 0 выбрасывает источник
-    из слияния целиком — это способ выключить один из поисков, не ломая
-    остальную схему.
-    """
-    weights = weights or {}
-    fused: dict[Any, float] = {}
-    sources: dict[Any, list[str]] = {}
-    for name, ranking in rankings.items():
-        weight = float(weights.get(name, 1.0))
-        if weight <= 0:
-            continue
-        for rank, (doc_id, _score) in enumerate(ranking, start=1):
-            fused[doc_id] = fused.get(doc_id, 0.0) + weight / (k + rank)
-            sources.setdefault(doc_id, []).append(name)
-    ordered = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)
-    return [(doc_id, score, sources[doc_id]) for doc_id, score in ordered]

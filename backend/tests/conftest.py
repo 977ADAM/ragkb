@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from helpers import make_app
-from sqlalchemy import create_engine, text
 
 from ragkb.core.config import Settings
 from ragkb.core.pipeline import build_index
@@ -30,7 +29,9 @@ def cfg(tmp_path: Path) -> Settings:
         index_dir=str(tmp_path / "index"),
         organization=Settings.OrganizationConfig(name="Acme", id="acme"),
     )
-    cfg.store.backend = "numpy"
+    # Тесты идут без сети и без chromadb: векторы детерминированные,
+    # хранилище — в памяти процесса.
+    cfg.store.backend = "memory"
     cfg.database_url = ""
     cfg.logging.dir = str(tmp_path / "logs")
     return cfg
@@ -56,7 +57,8 @@ def isolated_environment(monkeypatch):
             monkeypatch.delenv(key, raising=False)
     for key in ('POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB'):
         monkeypatch.setenv(key, '')
-    # Эмбеддинги по умолчанию считает Ollama — в тестах её нет. TF-IDF
-    # включается переменной окружения, а не полем фикстуры: так его получают
-    # и те Settings(), которые тесты собирают вручную.
-    monkeypatch.setenv('RAGKB_EMBEDDING_BACKEND', 'tfidf')
+    # Эмбеддинги по умолчанию считает Ollama — в тестах её нет: бэкенд fake
+    # (детерминированные векторы) задаётся переменной окружения, поэтому его
+    # получают и те Settings(), которые тесты собирают вручную.
+    monkeypatch.setenv('RAGKB_EMBEDDING_BACKEND', 'fake')
+    monkeypatch.setenv('RAGKB_STORE_BACKEND', 'memory')

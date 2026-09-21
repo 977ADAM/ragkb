@@ -1,519 +1,430 @@
-"""Юнит-тесты. Запуск: python -m pytest tests/ -q (или python tests/test_pipeline.py)."""
+"""Индексация и цепочка ответа: документы, нарезка, манифест, LCEL.
+
+Сети нет: эмбеддинги считает `KeywordEmbeddings` (косинус по пересечению
+слов), хранилище — `InMemoryVectorStore`, модель ответа — `ScriptedChatModel`.
+"""
 from __future__ import annotations
 
 import json
-import sys
-import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import pytest
+from helpers import KeywordEmbeddings, ScriptedChatModel
 
-import numpy as np
-
-from ragkb.core.bm25 import BM25Index
-from ragkb.core.chunking import Chunk, chunk_document
+from ragkb.core import loaders, manifest
 from ragkb.core.config import Settings
-from ragkb.core.embeddings import TfidfEmbedder
-from ragkb.core.loaders import Block, Document, load
-from ragkb.core.pipeline import RAGPipeline
-from ragkb.core.retrieval import Hit, reciprocal_rank_fusion
-from ragkb.core.text import stem, tokenize
-
-# ----------------------------------------------------------------- нормализация
-
-def test_stemmer_collapses_word_forms():
-    forms = ["отпуск", "отпуска", "отпуску", "отпуском", "отпуске"]
-    stems = {stem(f) for f in forms}
-    assert len(stems) == 1, f"формы должны сводиться к одной основе, получено {stems}"
-
-
-def test_stemmer_is_idempotent():
-    for word in ["документы", "согласование", "работника", "командировках"]:
-        assert stem(stem(word)) == stem(word)
-
-
-def test_stemmer_keeps_short_words():
-    assert stem("дом") == "дом"
-    assert stem("VPN".lower()) == "vpn"
-
-
-def test_tokenizer_drops_stopwords():
-    tokens = tokenize("и в на отпуск сотрудника")
-    assert "и" not in tokens and "в" not in tokens
-    assert len(tokens) == 2
-
-
-def test_tokenizer_keeps_numbers_and_hyphens():
-    tokens = tokenize("бизнес-класс 1200 рублей", stemming=False)
-    assert "бизнес-класс" in tokens
-    assert "1200" in tokens
-
-
-# ---------------------------------------------------------------------- чанкинг
-
-def _doc(blocks):
-    return Document(doc_id="d1", path="/tmp/x.md", title="Док", blocks=blocks, checksum="c")
-
-
-def test_chunk_carries_heading_breadcrumb():
-    doc = _doc([
-        Block("Раздел 1", kind="heading", level=1),
-        Block("Оплата производится в течение трёх дней."),
-    ])
-    chunks = chunk_document(doc, Settings.ChunkConfig(size=900, overlap=0, min_size=1))
-    assert chunks[0].section == "Раздел 1"
-    assert "Раздел 1" in chunks[0].embed_text
-    # В text заголовка нет — LLM видит только содержательный текст.
-    assert "Оплата" in chunks[0].text
-
-
-def test_chunks_respect_size_limit():
-    long_text = " ".join(f"Предложение номер {i} с некоторым текстом." for i in range(200))
-    cfg = Settings.ChunkConfig(size=400, overlap=50, min_size=1)
-    chunks = chunk_document(_doc([Block(long_text)]), cfg)
-    assert len(chunks) > 1
-    assert all(len(c.text) <= 900 for c in chunks), [len(c.text) for c in chunks]
-
-
-def test_chunking_terminates_on_pathological_input():
-    """Регрессия: оверлап не должен приводить к бесконечному циклу."""
-    blocks = [Block("Короткая строка.") for _ in range(50)]
-    chunks = chunk_document(_doc(blocks), Settings.ChunkConfig(size=100, overlap=90, min_size=1))
-    assert 0 < len(chunks) < 200
-
-
-def test_citation_does_not_duplicate_title():
-    doc = Document(doc_id="d", path="/tmp/a.md", title="Регламент", checksum="c", blocks=[
-        Block("Регламент", kind="heading", level=1),
-        Block("Пункт 1", kind="heading", level=2),
-        Block("Текст пункта достаточной длины для чанка."),
-    ])
-    chunk = chunk_document(doc, Settings.ChunkConfig(min_size=1))[0]
-    assert chunk.citation().count("Регламент") == 1
-
-
-def _chunk(text: str, *, title: str = "Документ", source: str = "data/docs/a.md") -> Chunk:
-    return Chunk(
-        chunk_id="c1",
-        doc_id="d1",
-        text=text,
-        embed_text=text,
-        source=source,
-        title=title,
-        section=f"{title} > Раздел",
-        page=3,
-        position=0,
-    )
-
-
-def test_cited_sources_carry_snapshot_text():
-
-    hits = [
-        Hit(chunk=_chunk("Первый фрагмент про отпуск."), score=0.9),
-        Hit(chunk=_chunk("Второй фрагмент про больничный.", title="Медицина"), score=0.8),
-        Hit(chunk=_chunk("Третий фрагмент про командировки.", title="Поездки"), score=0.7),
-    ]
-    sources = RAGPipeline._cited_sources("Ответ: [2] и [1].", hits)
-    assert [s["n"] for s in sources] == [1, 2]
-    for s in sources:
-        assert "text" in s
-    by_n = {s["n"]: s for s in sources}
-    assert by_n[1]["text"] == "Первый фрагмент про отпуск."
-    assert by_n[1]["citation"] == "Документ / Раздел / с. 3"
-    assert by_n[2]["source"] == "data/docs/a.md"
-
-
-def test_cited_sources_skip_uncited_hits():
-
-    hits = [
-        Hit(chunk=_chunk("Цитируется."), score=0.9),
-        Hit(chunk=_chunk("Не цитируется."), score=0.8),
-    ]
-    sources = RAGPipeline._cited_sources("Только [1].", hits)
-    assert [s["n"] for s in sources] == [1]
-
-
-# ------------------------------------------------------------------------ BM25
-
-def test_bm25_ranks_exact_term_first():
-    texts = [
-        "Суточные при командировках по России составляют 1200 рублей.",
-        "Отпуск составляет 28 календарных дней.",
-        "Пароль должен содержать не менее 12 символов.",
-    ]
-    index = BM25Index().build(texts)
-    ranked = index.search("размер суточных в командировке", top_k=3)
-    assert ranked[0][0] == 0
-
-
-def test_bm25_matches_inflected_forms():
-    index = BM25Index().build(["Заявление на отпуск подаётся заранее."])
-    assert index.search("отпуска", top_k=1), "стемминг должен связать «отпуск» и «отпуска»"
-
-
-def test_bm25_empty_index_is_safe():
-    assert BM25Index().build([]).search("что угодно") == []
-
-
-def test_bm25_roundtrip(tmp_path=None):
-    tmp = Path(tempfile.mkdtemp())
-    index = BM25Index().build(["первый документ про закупки", "второй про отпуск"])
-    index.save(tmp / "bm25.pkl")
-    restored = BM25Index.load(tmp / "bm25.pkl")
-    assert restored.search("закупки") == index.search("закупки")
-
-
-# ------------------------------------------------------------------ эмбеддинги
-
-def test_embeddings_are_normalized():
-    emb = TfidfEmbedder(Settings.EmbeddingConfig(tfidf_dim=256))
-    vectors = emb.embed_documents(["первый текст", "второй текст про отпуск"])
-    norms = np.linalg.norm(vectors, axis=1)
-    assert np.allclose(norms, 1.0, atol=1e-5)
-
-
-def test_similar_texts_score_higher():
-    emb = TfidfEmbedder(Settings.EmbeddingConfig(tfidf_dim=2048))
-    docs = ["Суточные в командировке составляют 1200 рублей",
-            "Пароль должен содержать 12 символов"]
-    matrix = emb.embed_documents(docs)
-    query = emb.embed_query("размер суточных в командировке")
-    scores = matrix @ query
-    assert scores[0] > scores[1]
-
-
-def test_tfidf_state_roundtrip():
-    emb = TfidfEmbedder(Settings.EmbeddingConfig(tfidf_dim=512))
-    emb.embed_documents(["отпуск и командировки", "закупки и тендеры"])
-    restored = TfidfEmbedder(Settings.EmbeddingConfig(tfidf_dim=512))
-    restored.load_state(emb.state())
-    assert np.allclose(emb.embed_query("отпуск"), restored.embed_query("отпуск"))
-
-
-def test_hash_is_stable_across_calls():
-    from ragkb.core.embeddings import _stable_hash
-    assert _stable_hash("отпуск".encode()) == _stable_hash("отпуск".encode())
-    assert _stable_hash("отпуск".encode()) != _stable_hash("закупка".encode())
-
-
-# -------------------------------------------------------------------- слияние
-
-def test_rrf_prefers_item_ranked_by_both():
-    fused = reciprocal_rank_fusion({
-        "dense": [(1, 0.9), (2, 0.8), (3, 0.7)],
-        "lexical": [(3, 12.0), (1, 9.0)],
-    })
-    top = fused[0]
-    assert top[0] in {1, 3}
-    assert set(top[2]) == {"dense", "lexical"}
-
-
-def test_rrf_is_scale_invariant():
-    """Разные шкалы оценок не должны влиять на результат — важен только ранг."""
-    a = reciprocal_rank_fusion({"x": [(1, 0.9), (2, 0.1)]})
-    b = reciprocal_rank_fusion({"x": [(1, 900.0), (2, 100.0)]})
-    assert [i for i, *_ in a] == [i for i, *_ in b]
-
-
-# --------------------------------------------------------------- end-to-end
-
-SAMPLE_DOC = (
-    "# Политика\n\n## Пароли\n\nПароль должен содержать не менее 12 символов.\n\n"
-    "## Отпуск\n\nЕжегодный отпуск составляет 28 календарных дней.\n"
+from ragkb.core.documents import (
+    BREADCRUMB,
+    document_citation,
+    document_page,
+    document_text,
+    section_documents,
+    split_documents,
 )
+from ragkb.core.errors import EngineUnavailable
+from ragkb.core.index import ConfigIndex
+from ragkb.core.pipeline import RagChain, build_index, parse_expanded_queries
+from ragkb.core.retrieval import Hit
+
+SAMPLE = """# Регламент отпусков
+
+## Оплата отпуска
+
+Отпускные выплачиваются не позднее чем за три дня до начала отдыха.
+
+## Подача заявления
+
+Заявление подаётся не позднее чем за 14 календарных дней.
+
+# Командировки
+
+Суточные составляют 1200 рублей в сутки.
+"""
 
 
-def _workspace(backend: str) -> Settings:
-    workdir = Path(tempfile.mkdtemp())
-    docs = workdir / "docs"
-    docs.mkdir()
-    (docs / "policy.md").write_text(SAMPLE_DOC, encoding="utf-8")
-    cfg = Settings(docs_dir=str(docs), index_dir=str(workdir / "index"))
-    cfg.store.backend = backend
+def _cfg(tmp_path: Path, **files: str) -> Settings:
+    docs = tmp_path / "docs"
+    docs.mkdir(parents=True, exist_ok=True)
+    for name, content in (files or {"policy.md": SAMPLE}).items():
+        (docs / name).write_text(content, encoding="utf-8")
+    cfg = Settings(docs_dir=str(docs), index_dir=str(tmp_path / "index"))
+    cfg.store.backend = "memory"
+    cfg.embedding.backend = "fake"
+    cfg.logging.dir = str(tmp_path / "logs")
     return cfg
 
 
-def _chroma_available() -> bool:
-    try:
-        import chromadb  # noqa: F401
-        return True
-    except ImportError:
-        return False
+@pytest.fixture
+def keyword_embeddings(monkeypatch):
+    """Одинаковые осмысленные векторы и при сборке индекса, и при поиске."""
+    embeddings = KeywordEmbeddings()
+    monkeypatch.setattr("ragkb.core.pipeline.build_embeddings", lambda _cfg: embeddings)
+    return embeddings
 
 
-def test_manifest_has_built_at():
-    from ragkb.core.pipeline import build_index
-
-    cfg = _workspace("numpy")
-    build_index(cfg)
-    manifest = json.loads((Path(cfg.index_dir) / "manifest.json").read_text(encoding="utf-8"))
-    assert "built_at" in manifest
-    from datetime import datetime
-    datetime.fromisoformat(manifest["built_at"])  # не падает — валидный ISO
+# ------------------------------------------------------------------- документы
 
 
-# ------------------------------------------------ корпус только из реестра
+def test_sections_follow_heading_hierarchy(tmp_path):
+    cfg = _cfg(tmp_path)
+    loaded = loaders.load(Path(cfg.docs_dir) / "policy.md")
+
+    sections = section_documents(loaded)
+
+    assert [s.metadata["section"] for s in sections] == [
+        "Регламент отпусков > Оплата отпуска",
+        "Регламент отпусков > Подача заявления",
+        "Командировки",
+    ]
+    assert sections[0].metadata["title"] == "Регламент отпусков"
+    assert "не позднее чем за три дня" in sections[0].page_content
 
 
-def test_build_index_skips_documents_outside_corpus():
-    """Индексируются только принятые документы, остальные перечисляются."""
-    from ragkb.core.pipeline import build_index
+def test_breadcrumb_lands_in_every_chunk(tmp_path):
+    long_text = "# Регламент\n\n## Отпуск\n\n" + "Предложение про отпуск. " * 80
+    cfg = _cfg(tmp_path, **{"long.md": long_text})
+    cfg.chunking.size = 200
+    cfg.chunking.overlap = 20
+    loaded = loaders.load(Path(cfg.docs_dir) / "long.md")
 
-    cfg = _workspace("numpy")
-    (Path(cfg.docs_dir) / "extra.md").write_text("# Extra\n\nТекст.\n", encoding="utf-8")
-    report = build_index(cfg, allow=lambda name: name == "policy.md")
+    chunks = split_documents(section_documents(loaded), cfg.chunking)
+
+    assert len(chunks) > 1
+    for chunk in chunks:
+        assert chunk.metadata[BREADCRUMB] == "Регламент > Отпуск"
+        assert chunk.page_content.startswith("Регламент > Отпуск")
+        # В текст для пользователя breadcrumb не попадает.
+        assert not document_text(chunk).startswith("Регламент > Отпуск")
+    assert [c.metadata["position"] for c in chunks] == list(range(len(chunks)))
+    assert len({c.metadata["chunk_id"] for c in chunks}) == len(chunks)
+
+
+def test_splitter_respects_size(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.chunking.size = 120
+    cfg.chunking.overlap = 0
+    loaded = loaders.load(Path(cfg.docs_dir) / "policy.md")
+
+    chunks = split_documents(section_documents(loaded), cfg.chunking)
+
+    assert chunks
+    assert max(len(document_text(chunk)) for chunk in chunks) <= 300
+
+
+def test_citation_skips_repeated_document_title(tmp_path):
+    cfg = _cfg(tmp_path)
+    loaded = loaders.load(Path(cfg.docs_dir) / "policy.md")
+    sections = section_documents(loaded)
+    chunk = split_documents([sections[1]], cfg.chunking)[0]
+
+    assert document_citation(chunk) == "Регламент отпусков / Подача заявления"
+    assert document_page(chunk) is None
+
+
+# ------------------------------------------------------------------ индексация
+
+
+def test_build_index_writes_manifest(tmp_path, keyword_embeddings):
+    cfg = _cfg(tmp_path)
+
+    report = build_index(cfg)
+
     assert report.files == 1
-    assert [Path(p).name for p in report.excluded] == ["extra.md"]
-    manifest = json.loads((Path(cfg.index_dir) / "manifest.json").read_text(encoding="utf-8"))
-    assert [Path(d["source"]).name for d in manifest["documents"]] == ["policy.md"]
+    assert report.chunks >= 3
+    assert report.store_backend == "memory"
+    assert report.embedder == "fake:1024"
+
+    indexed = manifest.read(cfg)
+    assert indexed["n_chunks"] == report.chunks
+    assert indexed["store"] == "memory"
+    assert indexed["chunk_size"] == cfg.chunking.size
+    assert [d["title"] for d in indexed["documents"]] == ["Регламент отпусков"]
+    assert indexed["documents"][0]["chunks"] == report.chunks
+    # Факты о файле нужны странице документов, чтобы отличить правку от подмены.
+    assert {"mtime", "size", "sha256"} <= set(indexed["documents"][0])
 
 
-def test_build_index_refuses_when_nothing_accepted():
-    """Пустой корпус — понятная ошибка, а не пустой индекс."""
-    import pytest
+def test_build_index_without_files_is_reported(tmp_path, keyword_embeddings):
+    cfg = _cfg(tmp_path)
+    Path(cfg.docs_dir, "policy.md").unlink()
 
-    from ragkb.core.pipeline import build_index
+    with pytest.raises(FileNotFoundError):
+        build_index(cfg)
 
-    cfg = _workspace("numpy")
-    with pytest.raises(ValueError, match="Примите"):
+
+def test_build_index_excludes_unaccepted_files(tmp_path, keyword_embeddings):
+    cfg = _cfg(tmp_path, **{"accepted.md": "", "rejected.md": ""})
+    (Path(cfg.docs_dir) / "accepted.md").write_text("# Принят\n\nТекст.\n", encoding="utf-8")
+    (Path(cfg.docs_dir) / "rejected.md").write_text("# Нет\n\nТекст.\n", encoding="utf-8")
+
+    report = build_index(cfg, allow=lambda name: name == "accepted.md")
+
+    assert report.files == 1
+    assert [Path(p).name for p in report.excluded] == ["rejected.md"]
+    assert [d["source"] for d in manifest.read(cfg)["documents"]] == [
+        str(Path(cfg.docs_dir) / "accepted.md")
+    ]
+
+
+def test_build_index_with_nothing_accepted_explains_what_to_do(tmp_path, keyword_embeddings):
+    cfg = _cfg(tmp_path)
+
+    with pytest.raises(ValueError) as exc:
         build_index(cfg, allow=lambda _name: False)
 
-
-def test_index_and_search_end_to_end_numpy():
-    _assert_end_to_end("numpy")
+    assert "Примите их на странице" in str(exc.value)
 
 
-def test_index_and_search_end_to_end_chroma():
-    if not _chroma_available():
-        import pytest
-        pytest.skip("chromadb не установлена")
-    _assert_end_to_end("chroma")
+def test_build_index_reports_unreadable_file(tmp_path, keyword_embeddings):
+    cfg = _cfg(tmp_path)
+    (Path(cfg.docs_dir) / "broken.pdf").write_bytes(b"not a pdf")
 
-
-def _assert_end_to_end(backend: str) -> None:
-    from ragkb.core.pipeline import build_index
-
-    cfg = _workspace(backend)
     report = build_index(cfg)
-    assert report.chunks >= 2
-    assert report.store_backend == backend
 
-    pipeline = RAGPipeline(cfg)
-    hits = pipeline.search("какой длины должен быть пароль", top_k=2)
-    assert hits and "12 символов" in hits[0].chunk.text
-
-    answer = pipeline.ask("сколько дней отпуска?")
-    assert "28" in answer.text
-    assert answer.hits
+    assert report.files == 1
+    assert [Path(path).name for path, _reason in report.skipped] == ["broken.pdf"]
 
 
-def test_llm_uses_model_selected_in_ui():
-    """Выбор модели в интерфейсе не должен ронять запрос.
-
-    Конфиг — pydantic-модель; попытка сделать копию через dataclasses.replace
-    роняла каждое обращение к чату с выбранной моделью (TypeError → 500).
-    """
-    from ragkb.core.pipeline import build_index
-
-    cfg = _workspace("numpy")
-    cfg.llm.backend = "openai"
-    cfg.llm.base_url = "http://127.0.0.1:9/v1"
-    build_index(cfg)
-    pipeline = RAGPipeline(cfg)
-    llm = pipeline._llm_for("qwen2.5:7b-instruct")
-    assert llm.name == "openai:qwen2.5:7b-instruct"
-    assert pipeline.cfg.llm.model != "qwen2.5:7b-instruct", "конфиг не должен меняться"
-    assert pipeline._llm_for(None) is pipeline.llm
-
-
-def test_backends_agree_on_ranking():
-    """Chroma и numpy должны выдавать одинаковый порядок на одних данных.
-
-    Chroma отдаёт косинусную дистанцию, numpy — близость; если где-то забыть
-    преобразование, ранжирование молча перевернётся.
-    """
-    if not _chroma_available():
-        import pytest
-        pytest.skip("chromadb не установлена")
-    from ragkb.core.pipeline import build_index
-
-    queries = ["длина пароля", "сколько дней отпуска", "требования безопасности"]
-    results = {}
-    for backend in ("numpy", "chroma"):
-        cfg = _workspace(backend)
-        build_index(cfg)
-        pipeline = RAGPipeline(cfg)
-        results[backend] = [
-            [h.chunk.text for h in pipeline.search(q, top_k=3)] for q in queries
-        ]
-    assert results["numpy"] == results["chroma"], "бэкенды разошлись в ранжировании"
-
-
-def test_chroma_returns_similarity_not_distance():
-    """Плотная оценка должна расти с похожестью, а не падать."""
-    if not _chroma_available():
-        import pytest
-        pytest.skip("chromadb не установлена")
-    from ragkb.core.pipeline import build_index
-
-    cfg = _workspace("chroma")
-    build_index(cfg)
-    pipeline = RAGPipeline(cfg)
-    hits = pipeline.search("пароль должен содержать 12 символов", top_k=3)
-    dense = [h.dense_score for h in hits if h.dense_score is not None]
-    assert dense and max(dense) > 0.3, f"похожие тексты должны давать высокий скор: {dense}"
-
-
-def test_chroma_incremental_update_and_delete():
-    if not _chroma_available():
-        import pytest
-        pytest.skip("chromadb не установлена")
-    from ragkb.core.pipeline import build_index, remove_document, update_documents
-
-    cfg = _workspace("chroma")
-    build_index(cfg)
-    baseline = len(RAGPipeline(cfg).store)
-
-    extra = Path(cfg.docs_dir).parent / "extra.md"
-    extra.write_text(
-        "# Техника\n\nНоутбук заменяется каждые четыре года по плановому графику.\n",
-        encoding="utf-8",
+def test_every_file_gets_its_own_document(tmp_path, keyword_embeddings):
+    cfg = _cfg(
+        tmp_path, **{"first.md": "# Первый\n\nТекст.\n", "second.md": "# Второй\n\nТекст.\n"}
     )
-    update_documents(cfg, [str(extra)])
-    assert len(RAGPipeline(cfg).store) > baseline
 
-    # Повторная загрузка того же файла не должна плодить дубли.
-    update_documents(cfg, [str(extra)])
-    after_second = len(RAGPipeline(cfg).store)
-    update_documents(cfg, [str(extra)])
-    assert len(RAGPipeline(cfg).store) == after_second
+    report = build_index(cfg)
 
-    removed = remove_document(cfg, str(extra))
-    assert removed > 0
-    assert len(RAGPipeline(cfg).store) == baseline
+    assert report.files == 2
+    assert len(manifest.read(cfg)["documents"]) == 2
 
 
-def test_numpy_rejects_incremental_update():
-    """У numpy-хранилища нет upsert — ошибка должна быть явной."""
-    from ragkb.core.pipeline import build_index, update_documents
+# ----------------------------------------------------------------------- RAG
 
-    cfg = _workspace("numpy")
+
+def test_search_finds_fragment_by_exact_term(tmp_path, keyword_embeddings):
+    cfg = _cfg(tmp_path)
     build_index(cfg)
-    try:
-        update_documents(cfg, [cfg.docs_dir])
-    except ValueError as exc:
-        assert "chroma" in str(exc)
-    else:
-        raise AssertionError("ожидалась ошибка о недоступности инкрементального обновления")
+    chain = RagChain(cfg)
+
+    hits = chain.search("сколько суточные в командировке", top_k=3)
+
+    assert hits
+    assert "суточные" in hits[0].text.lower()
 
 
-def test_store_backend_mismatch_is_detected():
-    """Индекс Chroma нельзя открыть numpy-бэкендом и наоборот."""
-    from ragkb.core.pipeline import build_index
+def test_hit_payload_keeps_api_contract(tmp_path, keyword_embeddings):
+    cfg = _cfg(tmp_path)
+    build_index(cfg)
+    chain = RagChain(cfg)
 
-    cfg = _workspace("numpy")
+    payload = chain.search("отпуск", top_k=1)[0].to_dict()
+
+    assert set(payload) == {
+        "chunk_id",
+        "text",
+        "citation",
+        "source",
+        "page",
+        "section",
+        "score",
+        "dense_score",
+        "lexical_score",
+        "rerank_score",
+        "matched_by",
+    }
+    assert payload["citation"]
+    assert payload["source"].endswith("policy.md")
+
+
+def test_min_score_drops_unrelated_hits(tmp_path, keyword_embeddings):
+    cfg = _cfg(tmp_path)
+    build_index(cfg)
+    cfg.retrieval.min_score = 0.9
+    chain = RagChain(cfg)
+
+    assert chain.search("совершенно посторонний вопрос") == []
+
+
+def test_chain_rejects_index_of_another_embedder(tmp_path, keyword_embeddings):
+    cfg = _cfg(tmp_path)
+    build_index(cfg)
+    cfg.embedding.fake_dim = 64
+
+    with pytest.raises(ValueError) as exc:
+        RagChain(cfg)
+    assert "Переиндексируйте" in str(exc.value)
+
+
+def test_chain_rejects_index_of_another_store(tmp_path, keyword_embeddings):
+    cfg = _cfg(tmp_path)
     build_index(cfg)
     cfg.store.backend = "chroma"
-    try:
-        RAGPipeline(cfg)
-    except ValueError as exc:
-        assert "Перестройте индекс" in str(exc)
-    else:
-        raise AssertionError("ожидалась ошибка несовпадения бэкенда хранилища")
+
+    with pytest.raises(ValueError) as exc:
+        RagChain(cfg)
+    assert "Перестройте индекс" in str(exc.value)
 
 
-def test_invalid_collection_name_is_rejected_early():
-    from ragkb.core.store import _validate_collection_name
+def test_chain_requires_manifest(tmp_path, keyword_embeddings):
+    cfg = _cfg(tmp_path)
 
-    _validate_collection_name("knowledge_base")
-    for bad in ("b", "ab", "-plohoe", "с_кириллицей"):
-        try:
-            _validate_collection_name(bad)
-        except ValueError as exc:
-            assert "store.collection" in str(exc)
-        else:
-            raise AssertionError(f"имя «{bad}» должно быть отклонено")
+    with pytest.raises(EngineUnavailable) as exc:
+        RagChain(cfg)
+    assert "Индекс не найден" in exc.value.detail
 
 
-def test_pipeline_rejects_mismatched_embedder():
-    """Индекс, построенный одной моделью, нельзя опрашивать другой."""
-    from ragkb.core.pipeline import build_index
+def test_stream_answer_yields_tokens_and_hits(tmp_path, keyword_embeddings, monkeypatch):
+    cfg = _cfg(tmp_path)
+    build_index(cfg)
+    monkeypatch.setattr(
+        "ragkb.core.pipeline.build_chat_model",
+        lambda *_args, **_kwargs: ScriptedChatModel(responses=["Отпускные — за три дня [1]."]),
+    )
+    chain = RagChain(cfg)
 
-    cfg = _workspace("numpy")
+    hits, tokens = chain.stream_answer("когда выплачивают отпускные")
+
+    text = "".join(tokens)
+    assert "Отпускные" in text
+    assert hits
+    assert chain.cited_sources(text, hits)[0]["n"] == 1
+
+
+def test_ask_returns_answer_with_sources(tmp_path, keyword_embeddings, monkeypatch):
+    cfg = _cfg(tmp_path)
+    build_index(cfg)
+    monkeypatch.setattr(
+        "ragkb.core.pipeline.build_chat_model",
+        lambda *_args, **_kwargs: ScriptedChatModel(responses=["Суточные — 1200 рублей [1]."]),
+    )
+    chain = RagChain(cfg)
+
+    answer = chain.ask("сколько суточные")
+
+    assert answer.text.startswith("Суточные")
+    assert answer.used_sources[0]["n"] == 1
+    assert answer.llm_backend.startswith("openai:")
+    assert answer.elapsed >= 0
+
+
+def test_llm_unavailable_without_address(tmp_path, keyword_embeddings):
+    cfg = _cfg(tmp_path)
+    build_index(cfg)
+    cfg.llm.base_url = ""
+    chain = RagChain(cfg)
+
+    assert chain.llm_available() is False
+
+
+def test_cited_sources_skip_uncited_and_unknown_numbers(tmp_path, keyword_embeddings):
+    cfg = _cfg(tmp_path)
+    build_index(cfg)
+    chain = RagChain(cfg)
+    hits = chain.search("отпуск", top_k=3)
+
+    sources = chain.cited_sources("Ответ [3] и [9].", hits)
+
+    assert [s["n"] for s in sources] == [3]
+    assert sources[0]["text"]
+
+
+def test_stats_describe_index_without_building_engine(tmp_path, keyword_embeddings):
+    cfg = _cfg(tmp_path)
     build_index(cfg)
 
-    cfg.embedding.backend = "openai"
-    cfg.embedding.model = "bge-m3"
-    try:
-        RAGPipeline(cfg)
-    except ValueError as exc:
-        assert "Переиндексируйте" in str(exc)
-    else:
-        raise AssertionError("ожидалась ошибка несовпадения эмбеддера")
+    stats = ConfigIndex(cfg, lambda: pytest.fail("движок не нужен")).stats()
+
+    assert stats["chunks"] > 0
+    assert stats["store"] == "memory"
+    assert stats["embedder"] == "fake:1024"
 
 
-def test_pipeline_rejects_mismatched_dimension():
-    """Имя эмбеддера совпало, а длина вектора — нет: поиск сломался бы молча."""
-    from ragkb.core.pipeline import build_index
+# ------------------------------------------------------------- расширение запроса
 
-    cfg = _workspace("numpy")
-    cfg.embedding.tfidf_dim = 64
+
+def test_expanded_queries_from_json():
+    raw = 'Вот результат: {"queries": ["предоставление отпуска", "оплата отпуска"]}'
+
+    assert parse_expanded_queries(raw, "отпуск", 2) == [
+        "предоставление отпуска",
+        "оплата отпуска",
+    ]
+
+
+def test_expanded_queries_fall_back_to_lines():
+    raw = "1. предоставление ежегодного отпуска\n2. оплата отпускных"
+
+    assert parse_expanded_queries(raw, "отпуск", 2) == [
+        "предоставление ежегодного отпуска",
+        "оплата отпускных",
+    ]
+
+
+def test_expanded_queries_drop_repeats_of_question():
+    raw = '{"queries": ["отпуск", "оплата отпускных"]}'
+
+    assert parse_expanded_queries(raw, "отпуск", 3) == ["оплата отпускных"]
+
+
+def test_expand_search_merges_variants(tmp_path, keyword_embeddings, monkeypatch):
+    cfg = _cfg(tmp_path)
     build_index(cfg)
-    manifest = json.loads((Path(cfg.index_dir) / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["dim"] == 64
+    monkeypatch.setattr(
+        "ragkb.core.pipeline.build_chat_model",
+        lambda *_args, **_kwargs: ScriptedChatModel(
+            responses=['{"queries": ["суточные в командировке"]}']
+        ),
+    )
+    chain = RagChain(cfg)
 
-    cfg.embedding.tfidf_dim = 128
-    try:
-        RAGPipeline(cfg)
-    except ValueError as exc:
-        assert "64" in str(exc) and "128" in str(exc)
-    else:
-        raise AssertionError("ожидалась ошибка несовпадения размерности")
-
-
-def test_loaders_read_all_formats():
-    root = Path(__file__).resolve().parents[1] / "data" / "docs"
-    if not root.exists():
-        return
-    for path in root.iterdir():
-        doc = load(path)
-        assert doc.blocks, f"пустой документ: {path.name}"
-        assert doc.title
-
-
+    assert chain.search("командировка", top_k=3, expand=True)
 
 
 # ------------------------------------------------------------- окружение RAGKB_*
 
-def test_env_overrides_nested_section():
-    import os
 
-    os.environ["RAGKB_LLM_URL"] = "http://10.0.0.2:1/v1"
-    try:
-        assert Settings().llm.base_url == "http://10.0.0.2:1/v1"
-    finally:
-        os.environ.pop("RAGKB_LLM_URL", None)
+def test_env_overrides_nested_section(monkeypatch):
+    monkeypatch.setenv("RAGKB_EMBEDDING_MODEL", "bge-m3")
+    monkeypatch.setenv("RAGKB_EMBEDDING_KEEP_ALIVE", "5m")
 
-
-
-
-def test_empty_env_keeps_default():
-    import os
-
-    os.environ["RAGKB_LLM_MODEL"] = ""
-    try:
-        assert Settings().llm.model == ""
-    finally:
-        os.environ.pop("RAGKB_LLM_MODEL", None)
-
-
-
-
-def test_db_url_keeps_host_and_quotes_password():
-    """Без @host SQLAlchemy принимает пароль за порт и падает на int()."""
     cfg = Settings()
-    cfg.postgresql_user = "ragkb"
-    cfg.postgresql_password = "p:x"
-    cfg.postgresql_db = "kb"
-    cfg.postgresql_host = ""
-    assert cfg.db_url == "postgresql+asyncpg://ragkb:p%3Ax@postgres/kb"
+
+    assert cfg.embedding.model == "bge-m3"
+    assert cfg.embedding.keep_alive == "5m"
+
+
+def test_env_coerces_types(monkeypatch):
+    monkeypatch.setenv("RAGKB_EMBEDDING_FAKE_DIM", "128")
+
+    assert Settings().embedding.fake_dim == 128
+
+
+def test_hit_dataclass_contract():
+    from langchain_core.documents import Document
+
+    hit = Hit(
+        document=Document(
+            page_content="Регламент > Оплата\nТекст",
+            metadata={
+                "chunk_id": "abc",
+                "source": "policy.md",
+                "title": "Регламент",
+                "section": "Регламент > Оплата",
+                BREADCRUMB: "Регламент > Оплата",
+                "page": -1,
+            },
+        ),
+        score=0.5,
+    )
+
+    assert hit.text == "Текст"
+    assert hit.citation == "Регламент / Оплата"
+    assert hit.to_dict()["page"] is None
+
+
+def test_manifest_json_is_readable(tmp_path, keyword_embeddings):
+    cfg = _cfg(tmp_path)
+    build_index(cfg)
+
+    payload = json.loads((Path(cfg.index_dir) / "manifest.json").read_text(encoding="utf-8"))
+
+    assert payload["embedder"] == "fake:1024"
+    assert payload["dim"] == 256

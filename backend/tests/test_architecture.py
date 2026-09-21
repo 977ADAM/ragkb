@@ -98,7 +98,7 @@ def test_services_are_use_cases_without_adapters():
             "ragkb.core.pipeline",
             "ragkb.core.llm",
             "ragkb.core.prompts",
-            "ragkb.core.store",
+            "ragkb.core.vectorstore",
         ),
     )
     for name in (
@@ -112,6 +112,32 @@ def test_services_are_use_cases_without_adapters():
     assert (catalogs / "openai.py").is_file()
     assert (catalogs / "ollama.py").is_file()
     assert (catalogs / "static.py").is_file()
+
+
+def test_langchain_stays_inside_core():
+    """LangChain — деталь ядра: прикладной слой знает только порты.
+
+    Иначе интеграционные пакеты расползутся по сервисам и API, и заменить
+    фреймворк (или обновить мажорную версию) станет нельзя без правок во
+    всех слоях.
+    """
+    _assert_not_imported(
+        PKG / "services",
+        ("langchain_core", "langchain_classic", "langchain_ollama", "langchain_chroma"),
+    )
+    _assert_not_imported(
+        PKG / "api",
+        ("langchain_core", "langchain_classic", "langchain_ollama", "langchain_chroma"),
+    )
+    _assert_not_imported(
+        PKG / "domain",
+        ("langchain_core", "langchain_classic", "langchain_ollama", "langchain_chroma"),
+    )
+    # Ядро ходит в LangChain только через эти модули.
+    for name in ("documents.py", "vectorstore.py", "retrieval.py", "pipeline.py"):
+        assert (PKG / "core" / name).is_file(), name
+    for name in ("store.py", "bm25.py", "chunking.py"):
+        assert not (PKG / "core" / name).exists(), f"остался старый модуль {name}"
 
 
 def test_no_process_container():
