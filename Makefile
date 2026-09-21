@@ -7,7 +7,7 @@ help:
 	@echo "sync            uv sync (backend, migrations + dev)"
 	@echo "sync-frontend   bun install (frontend)"
 	@echo "migrate         alembic upgrade head"
-	@echo "api			   uvicorn ragkb.main:app --host 127.0.0.1 --port 8000"
+	@echo "api             uvicorn ragkb.main:app --host 127.0.0.1 --port 8000"
 	@echo "frontend        bun run dev, BFF → 127.0.0.1:8000"
 	@echo "test            pytest (backend); временная SQLite"
 	@echo "check           svelte-check (frontend)"
