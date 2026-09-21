@@ -44,7 +44,8 @@
 - Актуальное решение: `docs/superpowers/specs/2026-09-21-without-auth-and-history-design.md`.
   Прежние документы об авторизации и истории описывают старый контракт.
 
-Тесты backend: `cd backend && uv run pytest` (временная SQLite, внешняя БД не нужна).
+Тесты backend: `cd backend && uv run pytest` (временная SQLite, внешняя БД и
+Ollama не нужны: тесты подставляют `tfidf` и httpx.MockTransport).
 Frontend: `cd frontend && bun test && bun run check && bun run build`.
 
 ## Ограничения
@@ -52,10 +53,15 @@ Frontend: `cd frontend && bun test && bun run check && bun run build`.
 - Не возвращать HTML из FastAPI и не заводить второй UI рядом с frontend.
 - SQLAlchemy — в db/, исключение core/database.py владеет движком и Base.
   Alembic — только backend/migrations/.
-- В Compose нет ensure-admin, oauth2-proxy, Keycloak, Ollama и LLM-сервера.
-  Angie проксирует frontend без прежней проверки входа.
-- LLM — OpenAI-совместимый HTTP (`RAGKB_LLM_URL`). Эмбеддинги в контейнере
-  rag — sentence-transformers, модель BAAI/bge-m3.
+- В Compose нет ensure-admin, oauth2-proxy, Keycloak, сервиса Ollama и
+  LLM-сервера. Angie проксирует frontend без прежней проверки входа.
+- Эмбеддинги считает Ollama вне образа: `RAGKB_EMBEDDING_URL`
+  (`http://127.0.0.1:11434` локально, `http://host.docker.internal:11434` из
+  контейнера), модель по умолчанию `qwen3-embedding:0.6b`. В образе rag нет
+  torch и sentence-transformers; `tfidf` — бэкенд для тестов и работы без сети.
+  Модель и её размерность попадают в манифест: смена требует переиндексации.
+  Решение: `docs/superpowers/specs/2026-09-21-ollama-embeddings-design.md`.
+- Генерация — OpenAI-совместимый HTTP (`RAGKB_LLM_URL`), подойдёт и Ollama.
 - CLI serve/index/ask нет. Индекс перестраивается через API и интерфейс.
 - Исторические планы не переписывать под новую архитектуру. Цепочка миграций
   намеренно сведена к одной начальной ревизии — прежние восемь файлов

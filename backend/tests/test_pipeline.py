@@ -417,7 +417,7 @@ def test_store_backend_mismatch_is_detected():
     try:
         RAGPipeline(cfg)
     except ValueError as exc:
-        assert "Переиндексируйте" in str(exc)
+        assert "Перестройте индекс" in str(exc)
     else:
         raise AssertionError("ожидалась ошибка несовпадения бэкенда хранилища")
 
@@ -450,6 +450,25 @@ def test_pipeline_rejects_mismatched_embedder():
         assert "Переиндексируйте" in str(exc)
     else:
         raise AssertionError("ожидалась ошибка несовпадения эмбеддера")
+
+
+def test_pipeline_rejects_mismatched_dimension():
+    """Имя эмбеддера совпало, а длина вектора — нет: поиск сломался бы молча."""
+    from ragkb.core.pipeline import build_index
+
+    cfg = _workspace("numpy")
+    cfg.embedding.tfidf_dim = 64
+    build_index(cfg)
+    manifest = json.loads((Path(cfg.index_dir) / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["dim"] == 64
+
+    cfg.embedding.tfidf_dim = 128
+    try:
+        RAGPipeline(cfg)
+    except ValueError as exc:
+        assert "64" in str(exc) and "128" in str(exc)
+    else:
+        raise AssertionError("ожидалась ошибка несовпадения размерности")
 
 
 def test_loaders_read_all_formats():

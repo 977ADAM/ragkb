@@ -31,7 +31,9 @@ services:
       - ./data/docs:/app/data/docs
       - ./data/logs:/app/data/logs
       - rag_index:/app/data/index
-      - rag_hf:/app/data/hf
+    # Ollama живёт на хосте, а не в compose: модели остаются под управлением
+    # `ollama pull`, образ rag остаётся без torch. Адрес по умолчанию задан
+    # в Dockerfile и перекрывается RAGKB_EMBEDDING_URL в .env.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file: .env
@@ -47,4 +49,3 @@ services:
 volumes:
   rag_index:
   rag_pg:
-  rag_hf:

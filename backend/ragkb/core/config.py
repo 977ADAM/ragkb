@@ -16,14 +16,27 @@ class Settings(BaseSettings):
         respect_structure: bool = True
 
     class EmbeddingConfig(BaseModel):
-        backend: str = "tfidf"
-        model: str = "BAAI/bge-m3"
-        base_url: str = ""
+        # Ollama — основной путь: модель живёт вне процесса сервиса, поэтому
+        # в образе нет ни torch, ни весов эмбеддера. tfidf остаётся для тестов
+        # и работы совсем без сети, openai/st — для внешнего HTTP или HF.
+        backend: str = "ollama"
+        model: str = "qwen3-embedding:0.6b"
+        # Адрес Ollama — корень API, без /v1: эмбеддинги берутся из /api/embed.
+        base_url: str = "http://127.0.0.1:11434"
         api_key: str = ""
         batch_size: int = 32
         query_prefix: str = ""
         doc_prefix: str = ""
         tfidf_dim: int = 4096
+        # Первый запрос поднимает модель в память Ollama: на холодную это
+        # заметно дольше одного прохода по батчам, поэтому таймаут щедрый.
+        timeout: int = 300
+        # Сколько держать модель загруженной после индексации: следующий
+        # вопрос не должен ждать повторной загрузки весов.
+        keep_alive: str = "30m"
+        # Повторы на сетевых сбоях и 5xx: перезапуск Ollama посреди
+        # индексации не должен ронять всю сборку.
+        retries: int = 3
 
     class StoreConfig(BaseModel):
         backend: str = "chroma"
@@ -111,6 +124,12 @@ class Settings(BaseSettings):
         "RAGKB_EMBEDDING_MODEL": ("embedding", "model"),
         "RAGKB_EMBEDDING_URL": ("embedding", "base_url"),
         "RAGKB_EMBEDDING_API_KEY": ("embedding", "api_key"),
+        "RAGKB_EMBEDDING_BATCH_SIZE": ("embedding", "batch_size"),
+        "RAGKB_EMBEDDING_TIMEOUT": ("embedding", "timeout"),
+        "RAGKB_EMBEDDING_KEEP_ALIVE": ("embedding", "keep_alive"),
+        "RAGKB_EMBEDDING_RETRIES": ("embedding", "retries"),
+        "RAGKB_EMBEDDING_QUERY_PREFIX": ("embedding", "query_prefix"),
+        "RAGKB_EMBEDDING_DOC_PREFIX": ("embedding", "doc_prefix"),
         "RAGKB_STORE_BACKEND": ("store", "backend"),
         "RAGKB_CHROMA_HOST": ("store", "chroma_host"),
         "RAGKB_CHROMA_COLLECTION": ("store", "collection"),

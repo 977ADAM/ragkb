@@ -13,13 +13,14 @@ alwaysApply: true
 - Интерфейс только в `frontend/` (SvelteKit + BFF). FastAPI не отдаёт HTML.
   Ручки сервиса кроме `GET /health` — префикс `/api/v1`.
 - Точка входа: `uvicorn ragkb.main:app`. Конфиг:
-  `backend/config.yaml`.
-- Миграции истории и аккаунтов: Postgres, `backend/migrations/`,
+  `backend/ragkb/core/config.py` (перекрывается окружением `RAGKB_*`).
+- Реестр документов: Postgres, `backend/migrations/`,
   `alembic upgrade head`. URL: `RAGKB_DATABASE_URL`.
-- В compose нет Ollama и нет oauth2-proxy. LLM — OpenAI-совместимый HTTP
-  (`RAGKB_LLM_URL`). Эмбеддинги — HuggingFace в контейнере `rag`
-  (`sentence-transformers`, `BAAI/bge-m3`). На сервере TLS и вход — Angie;
-  compose отдаёт `frontend:3000`.
+- В compose нет сервиса Ollama и нет oauth2-proxy. Генерация —
+  OpenAI-совместимый HTTP (`RAGKB_LLM_URL`), подойдёт и Ollama.
+  Эмбеддинги — Ollama на хосте (`RAGKB_EMBEDDING_URL`,
+  `qwen3-embedding:0.6b`): в образе `rag` нет torch и sentence-transformers.
+  На сервере TLS и вход — Angie; compose отдаёт `frontend:3000`.
 - Живые доки: корневой `README.md`, `AGENTS.md`. Исторические спеки
   (`2026-08-21-hexagonal-slices`, `2026-08-31-backend-frontend-layout`)
   описывают прежнюю раскладку `features/`/`platform/`; в спеке слайсов путь

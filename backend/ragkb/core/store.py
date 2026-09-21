@@ -140,7 +140,7 @@ class BaseStore(ABC):
     def _read_common(self) -> None:
         if not (self.dir / MANIFEST).exists():
             raise FileNotFoundError(
-                f"Индекс не найден в {self.dir}. Сначала выполните: ragkb index"
+                f"Индекс не найден в {self.dir}. Соберите его на странице «Документы»"
             )
         self.manifest = json.loads((self.dir / MANIFEST).read_text(encoding="utf-8"))
         self.chunks = [
@@ -425,7 +425,7 @@ def open_store(cfg: Settings) -> BaseStore:
     manifest_path = Path(cfg.index_dir) / MANIFEST
     if not manifest_path.exists():
         raise FileNotFoundError(
-            f"Индекс не найден в {cfg.index_dir}. Сначала выполните: ragkb index"
+            f"Индекс не найден в {cfg.index_dir}. Соберите его на странице «Документы»"
         )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     indexed_backend = manifest.get("backend", "numpy")
@@ -433,7 +433,7 @@ def open_store(cfg: Settings) -> BaseStore:
     if indexed_backend != wanted:
         raise ValueError(
             f"Индекс построен бэкендом «{indexed_backend}», а конфиг требует «{wanted}». "
-            f"Переиндексируйте базу (ragkb index --rebuild) или верните прежний бэкенд."
+            f"Перестройте индекс на странице «Документы» или верните прежний бэкенд."
         )
     if indexed_backend == "chroma":
         return ChromaStore.load(cfg.index_dir, cfg.store)

@@ -93,6 +93,13 @@ def build_index(
             )
         raise FileNotFoundError(f"В каталоге {source} не найдено поддерживаемых файлов")
 
+    embedder = build_embedder(cfg.embedding)
+    say(f"Эмбеддинги: {embedder.name}")
+    # Модель проверяется до парсинга корпуса: чтение и чанкинг всех файлов —
+    # самая долгая часть сборки, и недоступная Ollama или неоттянутая модель
+    # иначе выяснились бы только на первом батче, уже после этой работы.
+    embedder.check()
+
     documents = []
     skipped: list[tuple[str, str]] = []
     facts: dict[str, dict[str, Any]] = {}
@@ -116,8 +123,6 @@ def build_index(
         raise ValueError("После чанкинга не осталось текста — проверьте исходные файлы")
     say(f"Чанков получено: {len(chunks)}")
 
-    embedder = build_embedder(cfg.embedding)
-    say(f"Эмбеддинги: {embedder.name}")
     vectors = embedder.embed_documents([c.embed_text for c in chunks])
 
     store = create_store(cfg)
@@ -172,7 +177,7 @@ def update_documents(
     if not isinstance(store, ChromaStore):
         raise ValueError(
             "Инкрементальное обновление доступно только при store.backend: chroma. "
-            "Для numpy выполните полную переиндексацию: ragkb index --rebuild"
+            "Для numpy перестройте индекс целиком на странице «Документы»"
         )
 
     embedder = build_embedder(cfg.embedding)
@@ -346,6 +351,17 @@ class RAGPipeline:
             raise ValueError(
                 f"Индекс построен эмбеддером «{indexed_with}», а конфиг требует "
                 f"«{embedder.name}». Переиндексируйте базу или верните прежнюю модель."
+            )
+        # Имя модели — не единственное, чем индекс связан с эмбеддером:
+        # у одной и той же модели бывает разная длина вектора (tfidf_dim, тег
+        # Ollama с другой размерностью). Иначе запрос вернул бы вектор одной
+        # длины, а индекс хранил другой — поиск упал бы на арифметике.
+        indexed_dim = int(self.store.manifest.get("dim") or 0)
+        if indexed_dim and embedder.dim != indexed_dim:
+            raise ValueError(
+                f"Индекс построен векторами длиной {indexed_dim}, а эмбеддер "
+                f"«{embedder.name}» выдаёт {embedder.dim}. Переиндексируйте базу "
+                f"или верните прежние параметры эмбеддинга."
             )
         state = self.store.embedder_state
         if state:

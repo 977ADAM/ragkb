@@ -56,3 +56,7 @@ def isolated_environment(monkeypatch):
             monkeypatch.delenv(key, raising=False)
     for key in ('POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB'):
         monkeypatch.setenv(key, '')
+    # Эмбеддинги по умолчанию считает Ollama — в тестах её нет. TF-IDF
+    # включается переменной окружения, а не полем фикстуры: так его получают
+    # и те Settings(), которые тесты собирают вручную.
+    monkeypatch.setenv('RAGKB_EMBEDDING_BACKEND', 'tfidf')

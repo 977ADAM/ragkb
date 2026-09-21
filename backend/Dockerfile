@@ -15,17 +15,21 @@ ENV UV_COMPILE_BYTECODE=1 \
     PATH="/app/.venv/bin:$PATH"
 
 COPY pyproject.toml uv.lock ./
-# local-models: sentence-transformers + torch CPU (см. tool.uv.sources в pyproject).
-RUN uv sync --locked --extra migrations --extra local-models --no-install-project
+# Без extra local-models: эмбеддинги считает Ollama вне образа, поэтому
+# torch и sentence-transformers здесь не нужны (это ~1.5 ГБ).
+RUN uv sync --locked --extra migrations --no-install-project
 
 COPY ragkb ./ragkb
 COPY migrations ./migrations
 COPY alembic.ini ./
 
-RUN uv sync --locked --extra migrations --extra local-models --no-editable
+RUN uv sync --locked --extra migrations --no-editable
 
-ENV HF_HOME=/app/data/hf \
-    RAGKB_EMBEDDING_BACKEND=sentence-transformers \
+# Адрес Ollama: в compose это хост-машина через host.docker.internal.
+# RAGKB_EMBEDDING_URL в .env перекрывает значение ниже.
+ENV RAGKB_EMBEDDING_BACKEND=ollama \
+    RAGKB_EMBEDDING_MODEL=qwen3-embedding:0.6b \
+    RAGKB_EMBEDDING_URL=http://host.docker.internal:11434 \
     RAGKB_LLM_BACKEND=openai \
     RAGKB_LOG_DIR=/app/data/logs
 

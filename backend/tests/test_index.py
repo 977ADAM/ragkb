@@ -120,6 +120,50 @@ def test_embedder_differs_for_other_config():
     assert build_embedder(first) is not build_embedder(other)
 
 
+# --------------------------------------------- готовность эмбеддера к сборке
+
+
+class _RefusingEmbedder:
+    """Эмбеддер, который отказывает на предпроверке (Ollama недоступна)."""
+
+    name = "ollama:qwen3-embedding:0.6b"
+    dim = 1024
+
+    def check(self) -> None:
+        raise EngineUnavailable("Ollama недоступна по адресу http://ollama.test")
+
+    def embed_documents(self, _texts):  # pragma: no cover
+        raise AssertionError("векторы считаются только после успешной проверки")
+
+    def state(self):
+        return {}
+
+
+def test_index_checks_embedder_before_reading_files(cfg, monkeypatch):
+    """Модель проверяется до парсинга корпуса, а не на первом батче."""
+
+    def bomb(*_args, **_kwargs):
+        raise AssertionError("файлы читаются до проверки эмбеддера")
+
+    monkeypatch.setattr("ragkb.core.pipeline.build_embedder", lambda _cfg: _RefusingEmbedder())
+    monkeypatch.setattr("ragkb.core.pipeline.loaders.load", bomb)
+
+    with pytest.raises(EngineUnavailable):
+        build_index(cfg)
+
+
+def test_rebuild_reports_unavailable_ollama_as_503(client, cfg):
+    """Администратор должен увидеть причину, а не «внутреннюю ошибку»."""
+    cfg.embedding.backend = "ollama"
+    cfg.embedding.base_url = "http://127.0.0.1:1"
+    cfg.embedding.retries = 1
+
+    response = client.post("/api/v1/index/rebuild")
+
+    assert response.status_code == 503
+    assert "Ollama недоступна" in response.json()["detail"]
+
+
 # ------------------------------------------------- одиночная пересборка
 
 
