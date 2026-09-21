@@ -47,13 +47,75 @@ def test_fake_backend_is_deterministic():
 def test_unknown_backend_is_rejected():
     with pytest.raises(EngineUnavailable) as exc:
         build_embeddings(Settings.EmbeddingConfig(backend="tfidf"))
-    assert "ollama и fake" in exc.value.detail
+    assert "ollama, openai и fake" in exc.value.detail
 
 
 def test_ollama_without_address_is_rejected_early():
     with pytest.raises(EngineUnavailable) as exc:
         build_embeddings(Settings.EmbeddingConfig(backend="ollama", base_url=""))
     assert "RAGKB_EMBEDDING_URL" in exc.value.detail
+
+
+# ------------------------------------------- OpenAI-совместимый HTTP (llama.cpp)
+
+
+def test_openai_backend_sends_strings_not_tokens():
+    """`check_embedding_ctx_length=False` — иначе уйдёт чужая токенизация.
+
+    По умолчанию клиент langchain-openai считает длину контекста своим
+    (tiktoken) токенизатором и отправляет серверу идентификаторы токенов.
+    llama.cpp прочитал бы их как свои и посчитал бы векторы по чужой разметке,
+    поэтому флаг обязан быть выключен для любого не-OpenAI сервера.
+    """
+    cfg = Settings.EmbeddingConfig(
+        backend="openai", model="USER2-small", base_url="http://127.0.0.1:8081/v1"
+    )
+    embeddings = build_embeddings(cfg)
+
+    assert embeddings.check_embedding_ctx_length is False
+    assert embeddings.model == "USER2-small"
+    assert embeddings.openai_api_base == "http://127.0.0.1:8081/v1"
+
+
+def test_openai_backend_needs_address_and_model():
+    with pytest.raises(EngineUnavailable) as no_address:
+        build_embeddings(Settings.EmbeddingConfig(backend="openai", base_url=""))
+    assert "RAGKB_EMBEDDING_URL" in no_address.value.detail
+
+    with pytest.raises(EngineUnavailable) as no_model:
+        build_embeddings(
+            Settings.EmbeddingConfig(
+                backend="openai", model="", base_url="http://127.0.0.1:8081/v1"
+            )
+        )
+    assert "RAGKB_EMBEDDING_MODEL" in no_model.value.detail
+
+
+def test_embedder_name_for_openai_backend():
+    cfg = Settings.EmbeddingConfig(backend="openai", model="USER2-small")
+    assert embedder_name(cfg) == "openai:USER2-small"
+
+
+def test_openai_unreachable_message_names_the_service():
+    """Текст про Ollama здесь был бы неправдой: сервис другой."""
+    cfg = Settings.EmbeddingConfig(
+        backend="openai", model="USER2-small", base_url="http://127.0.0.1:8081/v1"
+    )
+    detail = explain_embedding_error(ConnectionError("Connection refused"), cfg)
+
+    assert "http://127.0.0.1:8081/v1" in detail
+    assert "Ollama" not in detail
+    assert "RAGKB_EMBEDDING_URL" in detail
+
+
+def test_openai_unknown_model_message_points_at_the_name():
+    cfg = Settings.EmbeddingConfig(
+        backend="openai", model="нет-такой", base_url="http://127.0.0.1:8081/v1"
+    )
+    detail = explain_embedding_error(RuntimeError("404 model not found"), cfg)
+
+    assert "нет-такой" in detail
+    assert "RAGKB_EMBEDDING_MODEL" in detail
 
 
 def test_embedder_name_reflects_model():

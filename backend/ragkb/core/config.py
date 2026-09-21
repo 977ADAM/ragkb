@@ -37,11 +37,17 @@ class Settings(BaseSettings):
     class EmbeddingConfig(BaseModel):
         # ollama — рабочий путь (langchain-ollama): модель живёт вне процесса
         # сервиса, поэтому в образе нет ни torch, ни весов эмбеддера.
+        # openai — OpenAI-совместимый HTTP (llama.cpp, vLLM, TEI и подобные):
+        # запрос уходит на POST {base_url}/embeddings, как у генерации.
         # fake — детерминированные векторы без сети: тесты и офлайн-прогоны.
         backend: str = "ollama"
         model: str = "qwen3-embedding:0.6b"
-        # Адрес Ollama — корень API, без /v1.
+        # Адрес сервиса эмбеддингов. У ollama это корень API без /v1, у
+        # openai — корень OpenAI-совместимого API, обычно с /v1.
         base_url: str = "http://127.0.0.1:11434"
+        # Ключ нужен только бэкенду openai; локальные серверы его не проверяют,
+        # но клиент требует непустое значение.
+        api_key: str = ""
         # Первый запрос поднимает модель в память Ollama: на холодную это
         # заметно дольше одного запроса, поэтому таймаут щедрый.
         timeout: int = 300
@@ -149,6 +155,7 @@ class Settings(BaseSettings):
         "RAGKB_EMBEDDING_BACKEND": ("embedding", "backend"),
         "RAGKB_EMBEDDING_MODEL": ("embedding", "model"),
         "RAGKB_EMBEDDING_URL": ("embedding", "base_url"),
+        "RAGKB_EMBEDDING_API_KEY": ("embedding", "api_key"),
         "RAGKB_EMBEDDING_TIMEOUT": ("embedding", "timeout"),
         "RAGKB_EMBEDDING_KEEP_ALIVE": ("embedding", "keep_alive"),
         "RAGKB_EMBEDDING_NUM_CTX": ("embedding", "num_ctx"),

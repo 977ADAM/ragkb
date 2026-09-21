@@ -90,6 +90,32 @@ def test_embedding_models_empty_for_test_backend():
     assert embedding_models(cfg) == []
 
 
+def test_embedding_models_come_from_openai_server(monkeypatch):
+    """У OpenAI-совместимого бэкенда список берётся из его GET /models."""
+    seen: list[tuple[str, str]] = []
+
+    def fake_listed(base_url: str, api_key: str = "") -> list[dict]:
+        seen.append((base_url, api_key))
+        return [{"id": "USER2-small"}]
+
+    monkeypatch.setattr("ragkb.core.catalogs.listed_models", fake_listed)
+    # Окружение сильнее явно переданной конфигурации (см. Settings._apply_env),
+    # а conftest для всех тестов выставляет fake: здесь он же и нужен.
+    monkeypatch.setenv("RAGKB_EMBEDDING_BACKEND", "openai")
+    cfg = Settings(
+        embedding=Settings.EmbeddingConfig(
+            backend="openai",
+            model="USER2-small",
+            base_url="http://127.0.0.1:8081/v1",
+            api_key="secret",
+        )
+    )
+    assert cfg.embedding.backend == "openai"
+
+    assert embedding_models(cfg) == [{"id": "USER2-small"}]
+    assert seen == [("http://127.0.0.1:8081/v1", "secret")]
+
+
 def test_chat_catalog_hides_vector_only_models():
     """Модель, считающая только векторы, не предлагается для генерации."""
     catalog = StaticCatalog(Settings.LLMConfig(model="qwen3-embedding:0.6b"))

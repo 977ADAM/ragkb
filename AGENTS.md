@@ -55,10 +55,11 @@
   Остальные именованные `RAGKB_*` из `Settings._ENV` читаются из окружения
   процесса: локально нужны `export` или загрузка `.env` с `set -a`;
   Compose экспортирует их через `env_file`.
-- Модель эмбеддингов на странице настроек выбирается из каталога Ollama
-  по `embedding.base_url`; при наличии capabilities список фильтруется по
-  поддержке эмбеддингов. Модели, умеющие только эмбеддинги, исключаются из
-  каталога генерации, если сведения о возможностях доступны.
+- Модель эмбеддингов на странице настроек выбирается из каталога выбранного
+  бэкенда по `embedding.base_url`: у Ollama — `/api/tags` с фильтром по
+  поддержке эмбеддингов (при наличии capabilities), у `openai` — `GET /models`.
+  Модели, умеющие только эмбеддинги, исключаются из каталога генерации, если
+  сведения о возможностях доступны.
 - Compose не монтирует `data/settings.json`: для сохранения настроек при
   пересоздании контейнера нужен отдельный mount (пример override в README).
   Не хранить настройки внутри `index_dir`: удаление последнего документа
@@ -78,12 +79,17 @@ Frontend: `cd frontend && bun test && bun run check && bun run build`.
   Alembic — только backend/migrations/.
 - В Compose нет ensure-admin, oauth2-proxy, Keycloak, сервиса Ollama и
   LLM-сервера. Angie проксирует frontend без прежней проверки входа.
-- Эмбеддинги считает Ollama вне образа: `RAGKB_EMBEDDING_URL`
-  (`http://127.0.0.1:11434` локально, `http://host.docker.internal:11434` из
-  контейнера), модель по умолчанию `qwen3-embedding:0.6b`. В образе rag нет
+- Эмбеддинги считает сервис вне образа — по умолчанию Ollama:
+  `RAGKB_EMBEDDING_URL` (`http://127.0.0.1:11434` локально,
+  `http://host.docker.internal:11434` из контейнера), модель по умолчанию
+  `qwen3-embedding:0.6b`. Второй бэкенд — `openai`: OpenAI-совместимый HTTP
+  (`POST {base_url}/embeddings`), то есть llama.cpp, vLLM, TEI; у него адрес с
+  `/v1`, а модель обязательна. У обоих рабочих бэкендов `base_url` обязателен,
+  у `openai` клиент собирается с `check_embedding_ctx_length=False` — иначе
+  langchain отправит серверу tiktoken-токены вместо строк. В образе rag нет
   torch и sentence-transformers; бэкенд `fake` (детерминированные векторы)
   нужен только тестам. Модель и её размерность попадают в манифест: смена
-  требует переиндексации.
+  бэкенда, модели или размерности требует переиндексации.
   Решение: `docs/superpowers/specs/2026-09-21-ollama-embeddings-design.md`.
 - Генерация — OpenAI-совместимый HTTP (`RAGKB_LLM_URL`) через
   `langchain_openai.ChatOpenAI`; подойдёт и Ollama (её корень с `/v1`).

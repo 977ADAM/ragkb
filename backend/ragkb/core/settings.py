@@ -58,8 +58,12 @@ FIELDS: tuple[Field, ...] = (
         "Бэкенд",
         "Эмбеддинги",
         kind="select",
-        options=("ollama", "fake"),
-        help="fake — детерминированные векторы без сети, только для тестов",
+        options=("ollama", "openai", "fake"),
+        help=(
+            "ollama — модель в Ollama; openai — OpenAI-совместимый HTTP "
+            "(llama.cpp, vLLM, TEI); fake — детерминированные векторы без сети, "
+            "только для тестов"
+        ),
         requires="reindex",
     ),
     _f(
@@ -68,14 +72,25 @@ FIELDS: tuple[Field, ...] = (
         "Эмбеддинги",
         kind="select",
         options_from="embedding_models",
-        help="Список берётся у Ollama: только модели, умеющие считать эмбеддинги",
+        help="Список берётся у сервиса эмбеддингов: у Ollama — только модели с их поддержкой",
         requires="reindex",
     ),
     _f(
         "embedding.base_url",
-        "Адрес Ollama",
+        "Адрес сервиса эмбеддингов",
         "Эмбеддинги",
-        help="Корень API без /v1: эмбеддинги берутся из /api/embed",
+        help=(
+            "ollama — корень API без /v1 (эмбеддинги берутся из /api/embed); "
+            "openai — корень OpenAI-совместимого API, обычно с /v1"
+        ),
+    ),
+    _f(
+        "embedding.api_key",
+        "Ключ API",
+        "Эмбеддинги",
+        kind="secret",
+        secret=True,
+        help="Нужен только бэкенду openai: локальные серверы ключ не проверяют",
     ),
     _f("embedding.keep_alive", "Держать модель загруженной", "Эмбеддинги", help="Например 30m"),
     _f(
@@ -440,10 +455,18 @@ def inconsistencies(cfg: Settings) -> list[str]:
     в файл состояние, из которого не собирается ни индекс, ни ответ.
     """
     problems: list[str] = []
-    if cfg.embedding.backend.lower() == "ollama" and not cfg.embedding.base_url.strip():
+    backend = cfg.embedding.backend.lower()
+    if backend in {"ollama", "openai", "http", "openai-compatible"} and not (
+        cfg.embedding.base_url.strip()
+    ):
         problems.append(
-            "«Адрес Ollama» не может быть пустым при бэкенде ollama: "
-            "без него индекс не собрать"
+            f"«{FIELDS_BY_PATH['embedding.base_url'].label}» не может быть пустым "
+            f"при бэкенде {cfg.embedding.backend}: без него индекс не собрать"
+        )
+    if backend in {"openai", "http", "openai-compatible"} and not cfg.embedding.model.strip():
+        problems.append(
+            f"«{FIELDS_BY_PATH['embedding.model'].label}» не выбрана при бэкенде "
+            f"{cfg.embedding.backend}: OpenAI-совместимый сервер не подставит её сам"
         )
     if not cfg.retrieval.use_dense and not cfg.retrieval.use_bm25:
         problems.append(

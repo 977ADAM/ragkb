@@ -397,7 +397,7 @@ def test_broken_catalog_does_not_break_settings_page(cfg):
 
 
 def test_empty_ollama_address_is_rejected(cfg):
-    """Пустой адрес Ollama — не сохранение, а объяснение, что сломается.
+    """Пустой адрес сервиса эмбеддингов — не сохранение, а объяснение, что сломается.
 
     Бэкенд задаём через те же настройки: при сохранении конфигурация
     пересобирается из окружения и файла, поля объекта напрямую не переживают
@@ -411,12 +411,76 @@ def test_empty_ollama_address_is_rejected(cfg):
     with pytest.raises(InvalidRequest) as exc:
         service.update({"embedding.base_url": ""})
 
-    assert "Адрес Ollama" in exc.value.detail
+    assert "Адрес сервиса эмбеддингов" in exc.value.detail
     assert cfg.embedding.base_url == "http://127.0.0.1:11434"
     assert core.read_overrides(cfg.settings_file) == {
         "embedding.backend": "ollama",
         "embedding.base_url": "http://127.0.0.1:11434",
     }
+
+
+def test_openai_embedding_backend_is_offered(cfg):
+    """llama.cpp и другие OpenAI-совместимые серверы выбираются на странице."""
+    payload = _service(cfg).describe()
+    field = next(
+        item
+        for group in payload["groups"]
+        for item in group["fields"]
+        if item["path"] == "embedding.backend"
+    )
+
+    assert "openai" in field["options"]
+
+
+def test_openai_backend_needs_address(cfg):
+    """Адрес обязателен и для openai: без него неизвестно, куда слать запрос."""
+    service = _service(cfg, models=None)
+
+    with pytest.raises(InvalidRequest) as exc:
+        service.update(
+            {
+                "embedding.backend": "openai",
+                "embedding.base_url": "",
+                "embedding.model": "USER2-small",
+            }
+        )
+
+    assert "Адрес сервиса эмбеддингов" in exc.value.detail
+    assert cfg.embedding.backend == "fake"  # откат: прежнее значение окружения
+
+
+def test_openai_backend_needs_model(cfg):
+    """OpenAI-совместимый сервер не подставит модель сам."""
+    service = _service(cfg, models=None)
+
+    with pytest.raises(InvalidRequest) as exc:
+        service.update(
+            {
+                "embedding.backend": "openai",
+                "embedding.base_url": "http://127.0.0.1:8081/v1",
+                "embedding.model": "",
+            }
+        )
+
+    assert "Модель" in exc.value.detail
+
+
+def test_openai_embedding_backend_is_accepted(cfg):
+    """Сочетание «openai + адрес + модель» сохраняется, а не откатывается."""
+    service = _service(cfg, models=None)
+
+    service.update(
+        {
+            "embedding.backend": "openai",
+            "embedding.base_url": "http://127.0.0.1:8081/v1",
+            "embedding.model": "USER2-small",
+        }
+    )
+
+    assert cfg.embedding.backend == "openai"
+    assert cfg.embedding.base_url == "http://127.0.0.1:8081/v1"
+    assert cfg.embedding.model == "USER2-small"
+    assert core.read_overrides(cfg.settings_file)["embedding.backend"] == "openai"
 
 
 def test_reapply_resets_to_environment(cfg, monkeypatch):
