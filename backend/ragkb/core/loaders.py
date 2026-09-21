@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -186,32 +186,69 @@ def _load_docx(path: Path) -> tuple[list[Block], dict[str, Any]]:
 
     document = docx.Document(str(path))
     blocks: list[Block] = []
-    for para in document.paragraphs:
-        text = para.text.strip()
-        if not text:
+    table_index = 0
+    # Абзацы и таблицы идут в порядке документа. Собранные в конец, таблицы
+    # достались бы последнему заголовку: в справочниках, где почти весь текст
+    # лежит таблицами, это уводит в один раздел почти весь документ, а ссылка
+    # на источник начинает врать.
+    for kind, item in _docx_items(document):
+        if kind == "paragraph":
+            text = item.text.strip()
+            if not text:
+                continue
+            # У абзаца может не быть стиля вовсе — тогда это обычный текст.
+            style = ((item.style.name if item.style else None) or "").lower()
+            if style.startswith(("heading", "заголовок")):
+                level = _int_or(style.split()[-1], 1)
+                blocks.append(Block(text=text, kind="heading", level=level))
+            else:
+                blocks.append(Block(text=text, kind="paragraph"))
             continue
-        # У абзаца может не быть стиля вовсе — тогда это обычный текст.
-        style = ((para.style.name if para.style else None) or "").lower()
-        if style.startswith(("heading", "заголовок")):
-            level = _int_or(style.split()[-1], 1)
-            blocks.append(Block(text=text, kind="heading", level=level))
-        else:
-            blocks.append(Block(text=text, kind="paragraph"))
-
-    # Таблицы: каждая строка становится отдельным блоком вида "колонка: значение".
-    for t_idx, table in enumerate(document.tables):
-        header = [c.text.strip() for c in table.rows[0].cells] if table.rows else []
-        for row in table.rows[1:]:
-            cells = [c.text.strip() for c in row.cells]
-            pairs = [f"{h}: {v}" for h, v in zip(header, cells, strict=False) if v]
-            if pairs:
-                blocks.append(
-                    Block(text="; ".join(pairs), kind="table", meta={"table": t_idx})
-                )
+        blocks.extend(_table_blocks(item, table_index))
+        table_index += 1
 
     core = document.core_properties
     meta = {"title": (core.title or "").strip() or None, "author": core.author or ""}
     return blocks, {k: v for k, v in meta.items() if v}
+
+
+def _docx_items(document: Any) -> Iterator[tuple[str, Any]]:
+    """Тело документа по порядку: абзацы и таблицы вперемешку, как в файле."""
+    from docx.oxml.ns import qn
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    for child in document.element.body.iterchildren():
+        if child.tag == qn("w:p"):
+            yield "paragraph", Paragraph(child, document)
+        elif child.tag == qn("w:tbl"):
+            yield "table", Table(child, document)
+
+
+def _table_blocks(table: Any, index: int) -> list[Block]:
+    """Строки таблицы как блоки вида «колонка: значение».
+
+    Первая строка считается шапкой. Таблица из одной строки — это не таблица,
+    а абзац в рамке: в таких часто лежит вводный текст раздела, и терять его
+    нельзя.
+    """
+    rows = list(table.rows)
+    if not rows:
+        return []
+    header = [cell.text.strip() for cell in rows[0].cells]
+    if len(rows) == 1:
+        text = " ".join(part for part in header if part)
+        return [Block(text=text, kind="table", meta={"table": index})] if text else []
+
+    blocks: list[Block] = []
+    for row in rows[1:]:
+        cells = [cell.text.strip() for cell in row.cells]
+        pairs = [f"{h}: {v}" for h, v in zip(header, cells, strict=False) if v]
+        if pairs:
+            blocks.append(
+                Block(text="; ".join(pairs), kind="table", meta={"table": index})
+            )
+    return blocks
 
 
 # ---------------------------------------------------------------------- Markdown
