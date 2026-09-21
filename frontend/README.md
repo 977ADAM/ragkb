@@ -1,35 +1,50 @@
 # Интерфейс базы знаний
 
-SvelteKit-чат. Браузер к FastAPI не ходит: запросы идут в `/api/*` (BFF).
-BFF проксирует на FastAPI `/api/v1/*`. Живость бэкенда — `GET /health` без версии;
-проверка BFF — `GET /health` на самом SvelteKit (`ok`).
+SvelteKit 2 / Svelte 5. Браузер отправляет запросы в `/api/*` (BFF),
+который проксирует их на FastAPI `/api/v1/*`. Ответы чата передаются потоком
+NDJSON без буферизации. Адрес FastAPI браузеру не нужен.
+
+Авторизации, аккаунтов и серверной истории нет. `/` перенаправляет на `/new`
+с чатом; текущие сообщения хранятся только в памяти страницы. Документы
+(`/admin/documents`) и настройки (`/admin/settings`) доступны всем посетителям.
 
 ## Запуск
 
-```
-cd backend
-uv sync --extra migrations --extra dev
-# нужен Postgres и RAGKB_DATABASE_URL
-alembic upgrade head
-export RAGKB_AUTH_MODE=disabled
-export RAGKB_HISTORY_ENABLED=false   # make backend: без форм и без Postgres
-uv run uvicorn ragkb.main:app --port 8000
+Сначала подготовьте БД, модели и зависимости бэкенда по
+[основному README](../README.md#быстрый-старт). Запускайте бэкенд из корня
+репозитория, чтобы относительные пути указывали на корневой `data/`:
 
-cd frontend
-bun install
-cp .env.example .env
-bun run dev
+```bash
+make api
 ```
 
-## Переменные
+В отдельном терминале из корня репозитория:
 
-| Переменная | Смысл |
-|---|---|
-| `RAGKB_BACKEND_URL` | Адрес бэкенда, по умолчанию `http://127.0.0.1:8000` |
-| `RAGKB_DEV_USER` | Только `proxy`/локальный BFF. При `session` личность не даёт. В бою не задавать |
-| `RAGKB_DEV_GROUPS` | Например `ragkb-admins` (режим `proxy`) |
+```bash
+make sync-frontend
+make frontend
+```
 
-`make up` / compose: `RAGKB_AUTH_MODE=session` — вход на `/login` (учётку создаёт
-администратор на `/admin/users`). Angie на сервере не должен требовать OIDC на
-`/login`, `/register`, `/api/auths`.
-Angie → `frontend:3000` → `rag:8000`.
+Интерфейс: `http://localhost:5173`. По умолчанию BFF обращается к
+`http://127.0.0.1:8000`. Для другого адреса создайте `frontend/.env` по
+`frontend/.env.example` и задайте `RAGKB_BACKEND_URL`. Переменная читается
+только серверной частью SvelteKit.
+
+## Сборка и проверки
+
+Из `frontend/`:
+
+```bash
+bun test
+bun run check
+bun run build
+RAGKB_BACKEND_URL=http://127.0.0.1:8000 BODY_SIZE_LIMIT=21M node build
+```
+
+Сборка использует `adapter-node`. `BODY_SIZE_LIMIT=21M` соответствует
+Dockerfile и позволяет BFF передавать загрузки документов бэкенду.
+В Compose frontend доступен на порту 3000 и обращается к `http://rag:8000`:
+Angie → frontend:3000 → rag:8000. Правил входа и OIDC в этой схеме нет.
+
+`GET /health` на SvelteKit возвращает `ok` и проверяет только BFF.
+`GET /health` на FastAPI возвращает JSON с состоянием индекса.
