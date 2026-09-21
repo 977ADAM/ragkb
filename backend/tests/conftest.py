@@ -65,3 +65,6 @@ def isolated_environment(monkeypatch, tmp_path):
     # Настройки со страницы управления пишутся файлом: в тестах он свой,
     # иначе тест правил бы рабочий data/settings.json.
     monkeypatch.setenv('RAGKB_SETTINGS_FILE', str(tmp_path / 'settings.json'))
+    # …и чтобы не прочитался рабочий .env в корне репозитория: там локальная
+    # БД, тесты не должны в неё ходить (у них своя временная SQLite).
+    monkeypatch.setenv('ENV_FILE', str(tmp_path / 'нет-такого.env'))

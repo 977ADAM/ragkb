@@ -1,11 +1,30 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, ClassVar
 from urllib.parse import quote_plus
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Корень репозитория: backend/ragkb/core/config.py → backend/ragkb/core → … .
+# Нужен, чтобы .env находился независимо от текущего каталога процесса:
+# при запуске из backend/ (make migrate, alembic) путь «.env» указывал бы
+# на несуществующий backend/.env.
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
+def env_files() -> tuple[str, ...]:
+    """Файлы окружения: ENV_FILE, иначе .env в корне репозитория.
+
+    Значения из окружения процесса всё равно сильнее файла, поэтому в
+    контейнере (где корня репозитория нет) ничего не ломается.
+    """
+    explicit = os.environ.get("ENV_FILE")
+    if explicit:
+        return (explicit,)
+    return (str(_PROJECT_ROOT / ".env"),)
 
 
 class Settings(BaseSettings):
@@ -97,7 +116,7 @@ class Settings(BaseSettings):
         dir: str = "data/logs"
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
-        env_file=os.environ.get("ENV_FILE", ".env"),
+        env_file=env_files(),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -115,6 +134,9 @@ class Settings(BaseSettings):
     organization: OrganizationConfig = OrganizationConfig()
     logging: LoggingConfig = LoggingConfig()
 
+    # Прямой URL базы (RAGKB_DATABASE_URL) сильнее сборки из POSTGRES_*:
+    # он же приходит из .env и из переменных окружения.
+    database_url_override: str = Field(default="", validation_alias="RAGKB_DATABASE_URL")
     postgresql_password: str = Field(default="", validation_alias="POSTGRES_PASSWORD")
     postgresql_user: str = Field(default="", validation_alias="POSTGRES_USER")
     postgresql_db: str = Field(default="", validation_alias="POSTGRES_DB")
@@ -188,9 +210,8 @@ class Settings(BaseSettings):
         explicit = getattr(self, "_database_url", None)
         if explicit is not None:
             return explicit
-        env_url = os.environ.get("RAGKB_DATABASE_URL")
-        if env_url:
-            return env_url
+        if self.database_url_override:
+            return self.database_url_override
         if self.postgresql_user and self.postgresql_password and self.postgresql_db:
             return self.db_url
         return ""

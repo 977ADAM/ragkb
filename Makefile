@@ -24,7 +24,7 @@ sync-frontend:
 	cd frontend && bun install
 
 migrate:
-	cd backend && uv run alembic upgrade head
+	uv run --project backend alembic -c backend/alembic.ini upgrade head
 
 backend: api
 
