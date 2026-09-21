@@ -48,7 +48,6 @@ app = FastAPI(
 )
 engine = EngineCache(cfg)
 app.state.cfg = cfg
-app.state.auth = cfg.auth
 app.state.storage = Storage(cfg)
 app.state.engine = engine
 app.state.index = ConfigIndex(cfg, engine)

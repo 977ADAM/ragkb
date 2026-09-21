@@ -9,11 +9,10 @@ log = get_logger("ragkb")
 
 
 class AccessLogMiddleware:
-    """Метод, путь, статус, длительность, пользователь.
+    """Метод, путь, статус, длительность.
 
     Чистый ASGI, а не BaseHTTPMiddleware: не буферизует NDJSON генерации.
-    Пользователь берётся из scope.state — его кладут Depends(current_user),
-    поэтому он виден только на защищённых роутах.
+    Личности в журнале нет — аккаунтов в приложении тоже нет.
     """
 
     def __init__(self, app):
@@ -34,16 +33,10 @@ class AccessLogMiddleware:
             await self.app(scope, receive, _send)
         finally:
             elapsed_ms = (time.perf_counter() - started) * 1000
-            user = ""
-            state = scope.get("state") or {}
-            current = state.get("user")
-            if current is not None:
-                user = getattr(current, "name", "")
             log.info(
-                "%s %s -> %d (%.0f ms)%s",
+                "%s %s -> %d (%.0f ms)",
                 scope.get("method", ""),
                 scope.get("path", ""),
                 status["code"],
                 elapsed_ms,
-                f" user={user}" if user else "",
             )

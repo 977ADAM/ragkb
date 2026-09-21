@@ -70,79 +70,57 @@ chroma, HNSW ef=400       2.9 мс/запрос,  recall@10 100%
 
 ## Быстрый старт
 
+Авторизации, аккаунтов и истории нет. Сайт сразу открывает чат; документы и
+управление индексом доступны всем посетителям. Переписка живёт только в памяти
+страницы и исчезает после обновления. Каждый вопрос обрабатывается независимо.
+
+Из корня репозитория:
+
 ```bash
-cd backend
-uv sync --extra migrations --extra dev
-
-# схема истории (нужен Postgres и RAGKB_DATABASE_URL)
-alembic upgrade head
-
-# индекс — POST /api/v1/index/rebuild (кнопка в интерфейсе у администратора)
-# локально с формами и SQLite (без Postgres):
-make backend
-
-# в другом терминале — интерфейс
-cd ../frontend
-bun install
-RAGKB_BACKEND_URL=http://127.0.0.1:8000 bun run dev
+make sync
+make sync-frontend
+mkdir -p data/docs
+# Локальная SQLite хранит только используемый приложением реестр корпуса.
+export RAGKB_DATABASE_URL="sqlite+aiosqlite:///$(pwd)/data/ragkb.sqlite3"
+export RAGKB_DOCS_DIR="$(pwd)/data/docs"
+export RAGKB_INDEX_DIR="$(pwd)/data/index"
+make migrate
+make api
 ```
 
-Compose (`docker compose up` / `make up`): `RAGKB_AUTH_MODE=session` —
-войдите на `/login` (учётку создаёт администратор). `RAGKB_DEV_USER` сессию
-не заменяет.
+В другом терминале: `make frontend`, затем открыть `http://localhost:5173`.
+Загрузить или принять документы на `/admin/documents`, перестроить индекс.
+Без URL БД реестр отключён: индексируется весь каталог документов, о чём
+предупреждает интерфейс. Удалите также POSTGRES_* из backend/.env, если
+нужен запуск без подключения к БД.
 
-Из коробки работает без единой нейросети: эмбеддинги TF-IDF, ответ собирается
-экстрактивно из найденных фрагментов. Это baseline — проверить, что документы
-парсятся и поиск находит нужное.
+По умолчанию доступны TF-IDF и экстрактивный ответ без внешних моделей.
+Настройки задаются в `Settings` и переменных окружения `RAGKB_*`; для вложенных
+параметров RAGKB_* должны быть в окружении процесса (Compose делает это через env_file).
 
 ## Боевая конфигурация
 
-Генерация — любой **OpenAI-совместимый HTTP** (обычно корень `…/v1`):
-vLLM, llama.cpp server, LM Studio, облачный OpenAI. Эмбеддинги в compose
-считает сам `rag`: HuggingFace / transformers (`sentence-transformers`),
-модель `BAAI/bge-m3` (первый запуск качает веса в том `rag_hf`).
-В compose **нет Ollama**.
+Compose запускает Postgres, миграции, backend и frontend. Сервис создания
+администратора отсутствует. Postgres используется для реестра документов.
 
-В `.env`:
-
-```
-RAGKB_LLM_BACKEND=openai
-RAGKB_LLM_URL=http://10.10.1.114:8080/v1
-RAGKB_LLM_MODEL=qwen2.5-instruct
-RAGKB_EMBEDDING_BACKEND=sentence-transformers
-RAGKB_EMBEDDING_MODEL=BAAI/bge-m3
-ADMIN_LOGIN=admin
-ADMIN_PASSWORD=…
+```bash
+cp .env.example .env
+# Задайте параметры БД и адрес OpenAI-совместимого LLM в .env.
+docker compose up -d --build
 ```
 
-`ADMIN_LOGIN` / `ADMIN_PASSWORD` (8–128 символов) — одноразовый compose-сервис
-`ensure-admin` после migrate создаёт или обновляет админа. Оба пустые — сидер
-пропускается.
+Интерфейс доступен на порту 3000. Внешний Angie при использовании должен
+проксировать сайт на frontend без прежних правил входа и OIDC.
 
-Чеклист оператора (сервер, не часть `make backend`):
+Генерация — OpenAI-совместимый HTTP (`RAGKB_LLM_URL`, обычно корень `…/v1`).
+Эмбеддинги в контейнере rag — sentence-transformers, BAAI/bge-m3; веса
+сохраняются в томе rag_hf. Ollama и LLM-сервера в Compose нет.
+Каталог `./data/docs` смонтирован на запись для загрузки документов через UI.
+Смена эмбеддера требует перестроения индекса.
 
-- в `.env` на сервере задать оба `ADMIN_LOGIN` и `ADMIN_PASSWORD`;
-- `docker compose up` / `make up` должен запускать сервис `ensure-admin` после `migrate`;
-- оба значения пустые — сидер выходит 0, пользователя-админа нет;
-- после подъёма войти этим логином и открыть `/admin`.
-
-Смена эмбеддера: `POST /api/v1/index/rebuild` (админ в интерфейсе).
-
-Или целиком в Docker: `docker compose up -d` (см. `docker-compose.yml`).
-Каталог корпуса `./data/docs` смонтирован в контейнер `rag` на запись
-(`./data/docs:/app/data/docs`), чтобы админ мог загружать документы через UI
-(`/admin/documents`).
-oauth2-proxy и **Keycloak в стеке нет**. На сервере TLS делает **Angie**
-(вне compose): он проксирует на `frontend:3000`. Личность — сессионная кука
-после форм `/login` и `/register`. Angie **не должен** требовать корпоративный
-OIDC на `/login`, `/register`, `/api/auths`. Keycloak/Angie OIDC для ragkb
-больше не источник личности. `RAGKB_DEV_USER` при `session` не подменяет вход.
-
-- нужен `.env` из `.env.example` с паролем Postgres (`POSTGRES_PASSWORD`) и
-  адресом LLM (`RAGKB_LLM_URL`) — без URL compose поднимет rag, но генерация
-  не заработает; эмбеддинги качаются с HuggingFace при первой индексации;
-- `make backend` — `RAGKB_AUTH_MODE=session` и SQLite `data/ragkb.sqlite3`
-  (формы `/login` и `/register`, Postgres не нужен).
+Существующие таблицы аккаунтов, сессий, диалогов и оценок после обновления
+не читаются и не заполняются. Старые данные автоматически не удаляются;
+цепочка миграций сохранена для обновления существующих установок.
 
 ### Что выбрать
 
@@ -166,82 +144,46 @@ OIDC на `/login`, `/register`, `/api/auths`. Keycloak/Angie OIDC для ragkb
 
 ## HTTP API
 
-Браузер ходит только в BFF (`frontend/`). Ниже — контракт FastAPI.
-
-`GET /health` живёт на корне, без версии. Остальные ручки — префикс `/api/v1`
-(например `POST /api/v1/auths/signin`). BFF `frontend/src/routes/api/`
-проксирует на них: браузерный `/api/auths/signin` → FastAPI `/api/v1/auths/signin`.
+Браузер ходит только через BFF SvelteKit: `/api/ask` → `/api/v1/ask`.
+Все маршруты открыты, cookie и заголовки идентификации не используются.
 
 | Метод | Назначение |
 |---|---|
-| `GET /health` | живость, без аутентификации, только `{"status": ...}` |
-| `GET /api/v1/status` | индекс, эмбеддер, LLM (под аутентификацией) |
-| `GET /api/v1/bootstrap?session_id=` | первый экран; `session_id` — UUID клиента |
-| `GET /api/v1/models` | модели |
-| `POST /api/v1/search` | поиск без генерации |
-| `GET /api/v1/organization` | чья база; не настроено — 404 |
-| `GET/POST /api/v1/organization/{id}/chat_conversations` | список / завести пустой диалог |
-| `GET/PATCH/DELETE .../chat_conversations/{cid}` | сообщения, имя, удаление |
-| `POST .../chat_conversations/{cid}/messages` | вопрос, поток NDJSON |
-| `POST /api/v1/events` | телеметрия пачкой (до 100 событий) |
-| `POST /api/v1/index/rebuild` | переиндексация: в `session` роль `admin`; в `proxy` группа `auth.admin_group` (по умолчанию `ragkb-admins`) |
-| `GET /api/v1/admin/documents` | список файлов корпуса со статусом индексации (админ) |
-| `POST /api/v1/admin/documents` | загрузка документа multipart + переиндексация (админ); `?index=false` — только принять файл |
-| `POST /api/v1/admin/documents/accept` | принять в корпус файлы, положенные в каталог мимо интерфейса (админ) |
-| `DELETE /api/v1/admin/documents/{name}` | удаление документа: файл + индекс (админ) |
-| `POST /api/v1/auths/signup` | регистрация закрыта (403 без куки) |
-| `POST /api/v1/admin/users` | создание учётки администратором (админ) |
+| `GET /health` | Живость и наличие индекса |
+| `GET /api/v1/status` | Сведения об индексе и моделях |
+| `GET /api/v1/bootstrap?session_id=` | Версия, организация, модели и индекс; UUID вкладки для телеметрии |
+| `GET /api/v1/models` | Каталог моделей |
+| `GET /api/v1/organization` | Сведения об организации, 404 если не настроена |
+| `POST /api/v1/search` | Поиск без генерации |
+| `POST /api/v1/ask` | Независимый вопрос, ответ потоком NDJSON |
+| `POST /api/v1/events` | Телеметрия, до 100 событий |
+| `POST /api/v1/index/rebuild` | Перестроение индекса |
+| `GET /api/v1/admin/documents` | Файлы и состояние индексации |
+| `POST /api/v1/admin/documents` | Multipart-загрузка; `?index=false` откладывает индексацию |
+| `POST /api/v1/admin/documents/accept` | Принятие файлов из каталога в корпус |
+| `DELETE /api/v1/admin/documents/{name}` | Удаление файла и записи индекса |
 
-### Документы попадают в базу только через интерфейс
+Тело вопроса: `question`, необязательные `model`, `top_k` (1–20), `expand`.
+Модель проверяется по каталогу. История, идентификатор диалога и пользователя
+не принимаются. Ответ завершается событием done с источниками; при обрыве
+после первого токена `truncated` истинно. При недоступной генерации до первого
+токена используется экстрактивный ответ.
 
-Реестр документов живёт в Postgres (`corpus_documents`, миграция `0008`), и индекс
-собирается **только по нему**. Файл, положенный в `data/docs` мимо интерфейса
-(scp, монтирование, правка на сервере), в базу знаний не попадает: он виден на
-странице `/admin/documents` как «вне корпуса» и индексируется лишь после того,
-как администратор нажмёт «Принять». В реестре остаётся, кто и когда принял
-документ и как он появился — загружен через интерфейс или принят из каталога.
-
-Порядок после обновления: если индекс уже был собран, а реестр пуст, кнопка
-«Перестроить индекс» ответит `400` с объяснением — сначала примите документы
-на странице «Документы» (там же есть «Принять все в корпус»).
-
-Загрузка идёт очередью: файлы можно перетащить в окно или выбрать несколько
-сразу, каждый со своим прогрессом, а индекс пересобирается один раз в конце
-(`POST /api/v1/index/rebuild`). Без `RAGKB_DATABASE_URL` реестра нет, и
-поведение прежнее — индексируется весь каталог; страница об этом предупреждает.
-
-При `RAGKB_AUTH_MODE=session` (compose) все эндпоинты, кроме `/health`,
-`POST /api/v1/auths/signup` и `POST /api/v1/auths/signin`, требуют сессионную куку и без
-неё отвечают `401`. `POST /api/v1/auths/signup` без куки отвечает `403` (регистрация
-закрыта). Режим `proxy` по-прежнему читает `X-Forwarded-*`.
-Встроенной страницы `GET /` нет.
-
-При `RAGKB_AUTH_MODE=disabled` все запросы идут от имени `anonymous`.
-Приватности в этом режиме нет.
-
-Диалоги привязаны к пользователю и лежат в Postgres (`RAGKB_DATABASE_URL`).
-Там же реестр документов корпуса: индекс собирается по нему, поэтому файлы
-в каталоге мимо интерфейса в базу знаний не попадают.
-Срок — `history.retention_days` в `backend/config.yaml`, по умолчанию 90 дней.
-`history.enabled: false` не ломает ответ: история эфемерная, Postgres не нужен,
-если ещё и `RAGKB_AUTH_MODE=disabled`.
-
-Поток сообщения — NDJSON, `application/x-ndjson`. Терминальное событие
-всегда `done`; поле `truncated` истинно, если генерация оборвалась после
-первого токена. Источники только в `done`. Постепенность токенов — у OpenAI-совместимого стрима (`stream: true`); если
-сервер стрим не умеет, клиент всё равно получит один `token` и `done`.
-
-```
-{"type": "token", "text": "Ежегодный "}
-{"type": "done", "conversation_id": "...", "sources": [...], "warnings": [], "elapsed_sec": 6.2, "truncated": false}
+```json
+{"type":"token","text":"Ежегодный "}
+{"type":"done","sources":[],"warnings":[],"elapsed_sec":0.2,"model":"extractive","truncated":false}
 ```
 
-Тело вопроса: `question`, необязательные `model`, `top_k`, `expand`.
-Имя модели проверяется по каталогу; свободный ввод недопустим.
+### Документы попадают в базу через интерфейс
 
-Число фрагментов — сильный рычаг скорости без GPU: на одном замере
-уменьшение с пяти до трёх сокращало время примерно вдвое. Детали:
-`docs/superpowers/specs/2026-08-20-model-switching-design.md`.
+При подключённой БД реестр `corpus_documents` — источник истины. Файл,
+положенный в `data/docs` вручную, отображается как «вне корпуса», пока его
+не примут на `/admin/documents`. Записываются дата и способ принятия;
+личность загрузившего больше не фиксируется.
+
+Очередь загрузки принимает файлы с `index=false`, затем один раз перестраивает
+индекс. Если реестр пуст, сначала примите документы. Без подключения БД
+индексируется весь каталог; интерфейс явно предупреждает об этом.
 
 ## Оценка качества
 
@@ -282,8 +224,8 @@ python examples/bench_store.py
 
 ## Настройка
 
-Всё в `backend/config.yaml`; переменные окружения (`RAGKB_LLM_BACKEND`, `RAGKB_EMBEDDING_MODEL`
-и т.д.) перекрывают файл — удобно для Docker.
+Настройки описаны в `backend/ragkb/core/config.py`; переменные окружения
+(`RAGKB_LLM_BACKEND`, `RAGKB_EMBEDDING_MODEL` и т.д.) перекрывают значения по умолчанию.
 
 Что обычно приходится крутить:
 
@@ -312,19 +254,13 @@ python examples/bench_store.py
 - **BM25 пересобирается целиком** при каждом изменении корпуса в коде
   `update`/`delete`. На миллионах чанков это заметно; тогда лексический поиск
   стоит вынести в OpenSearch.
-- **Разграничение доступа грубое.** В compose личность — локальная сессия
-  (формы). `RAGKB_DEV_USER` при `session` не действует. Разграничения по
-  отдельным документам нет: метаданные
-  в Chroma для этого есть (`doc_id`, `source`, `section`), не хватает фильтра
-  `where` в запросе и модели прав.
-
 ## Структура
 
 ```
 backend/ragkb/
   api/         FastAPI: routes, schemas, deps, обработка ошибок
   core/        поиск и генерация, конфиг, движок БД, доменные ошибки
-  db/          ORM-модели и адаптеры хранения (Postgres и память)
+  db/          реестр документов (SQLAlchemy: Postgres или SQLite)
   domain/      сущности и порты
   services/    сценарии приложения (без FastAPI и SQLAlchemy)
   main.py      app — вход uvicorn и композиционный корень
@@ -336,5 +272,9 @@ frontend/       SvelteKit, BFF
 ```bash
 cd backend
 uv sync --extra migrations --extra dev
-RAGKB_TEST_DATABASE_URL=postgresql+asyncpg://ragkb:test@127.0.0.1:5432/ragkb_test uv run pytest
+uv run pytest
+cd ../frontend
+bun test
+bun run check
+bun run build
 ```

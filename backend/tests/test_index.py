@@ -84,7 +84,6 @@ def test_health_does_not_build_engine(tmp_path, monkeypatch):
         raise AssertionError("движок собран на проверке живости")
 
     cfg = _cfg(tmp_path)
-    cfg.history.enabled = False  # без истории БД не нужна
     build_index(cfg)
     monkeypatch.setattr("ragkb.core.engine.RAGPipeline", boom)
     with TestClient(make_app(cfg)) as client:
@@ -96,7 +95,6 @@ def test_health_reports_missing_index(tmp_path, monkeypatch):
         raise AssertionError("движок собран на проверке живости")
 
     cfg = _cfg(tmp_path)
-    cfg.history.enabled = False
     monkeypatch.setattr("ragkb.core.engine.RAGPipeline", boom)
     with TestClient(make_app(cfg)) as client:
         assert client.get("/health").json() == {"status": "no_index"}

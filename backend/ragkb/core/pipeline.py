@@ -17,7 +17,6 @@ from .embeddings import Embedder, TfidfEmbedder, build_embedder
 from .llm import LLM, LLMError, build_llm
 from .prompts import (
     ANSWER_TEMPLATE,
-    CONDENSE_PROMPT,
     QUERY_EXPANSION_PROMPT,
     SYSTEM_PROMPT,
     format_context,
@@ -407,7 +406,6 @@ class RAGPipeline:
         question: str,
         *,
         top_k: int | None = None,
-        history: list[tuple[str, str]] | None = None,
         expand: bool = False,
         model: str | None = None,
     ) -> Answer:
@@ -415,11 +413,7 @@ class RAGPipeline:
         warnings: list[str] = []
         llm = self._llm_for(model)
 
-        search_query = question
-        if history:
-            search_query = self._condense(question, history, llm) or question
-
-        hits = self.search(search_query, top_k=top_k, expand=expand)
+        hits = self.search(question, top_k=top_k, expand=expand)
         if not hits:
             return Answer(
                 question=question,
@@ -459,7 +453,6 @@ class RAGPipeline:
         question: str,
         *,
         top_k: int | None = None,
-        history: list[tuple[str, str]] | None = None,
         expand: bool = False,
         model: str | None = None,
     ) -> tuple[list[Hit], Iterator[str]]:
@@ -473,11 +466,7 @@ class RAGPipeline:
         Пустой список фрагментов означает, что поиск ничего не дал.
         """
         llm = self._llm_for(model)
-        search_query = question
-        if history:
-            search_query = self._condense(question, history, llm) or question
-
-        hits = self.search(search_query, top_k=top_k, expand=expand)
+        hits = self.search(question, top_k=top_k, expand=expand)
         if not hits:
             def nothing_found() -> Iterator[str]:
                 yield "В базе знаний нет информации по этому вопросу."
@@ -488,19 +477,6 @@ class RAGPipeline:
         return hits, llm.stream(SYSTEM_PROMPT, prompt)
 
     # ------------------------------------------------------------ служебное
-
-    def _condense(self, question: str, history: list[tuple[str, str]],
-                  llm: LLM | None = None) -> str | None:
-        window = self.cfg.history.window
-        recent = history[-window:] if window > 0 else []
-        formatted = "\n".join(f"Пользователь: {q}\nАссистент: {a}" for q, a in recent)
-        try:
-            return (llm or self.llm).generate(
-                "Ты переформулируешь вопросы.",
-                CONDENSE_PROMPT.format(history=formatted, question=question),
-            ).strip()
-        except Exception:
-            return None
 
     def cited_sources(self, text: str, hits: list[Hit]) -> list[dict[str, Any]]:
         """Собирает список реально процитированных источников по маркерам [N].

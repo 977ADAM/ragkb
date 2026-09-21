@@ -1,15 +1,15 @@
 <script>
-	import { chat, copyText, rateMessage, regenerateMessage } from '$lib/chat.svelte.js';
+	import { chat, copyText, regenerateMessage } from '$lib/chat.svelte.js';
 	import SourcesModal from './SourcesModal.svelte';
 
 	/**
 	 * Одна реплика: текст, ошибка потока, предупреждения, источники, мета.
 	 *
-	 * @type {{ message: { id?: number, role: 'user' | 'assistant', text: string,
+	 * @type {{ message: { role: 'user' | 'assistant', text: string,
 	 *   sources?: Array<{n?: number, citation?: string, source?: string, page?: number | null,
 	 *   text?: string, available?: boolean | undefined}>,
 	 *   warnings?: string[], elapsed?: number | null,
-	 *   model?: string, error?: string, feedback?: 'up' | 'down' | null },
+	 *   model?: string, error?: string },
 	 *   isLast?: boolean, streaming?: boolean }}
 	 */
 	let { message, isLast = false, streaming = false } = $props();
@@ -58,24 +58,11 @@
 	/** @param {MouseEvent} event */
 	async function regenerate(event) {
 		event.preventDefault();
-		if (regenBusy || message.id === undefined || streaming) return;
+		if (regenBusy || !isLast || streaming) return;
 		regenBusy = true;
-		const ok = await regenerateMessage(message.id);
+		const ok = await regenerateMessage();
 		regenBusy = false;
 		if (ok && message.error) delete message.error;
-	}
-
-	let ratingBusy = $state(false);
-	let ratingError = $state('');
-
-	/** @param {'up' | 'down'} rating */
-	async function rate(rating) {
-		if (ratingBusy || message.id === undefined || streaming) return;
-		ratingBusy = true;
-		ratingError = '';
-		const ok = await rateMessage(message.id, rating);
-		if (!ok) ratingError = 'Не удалось сохранить оценку';
-		ratingBusy = false;
 	}
 
 	/** Действия нужны, когда у сообщения есть что скопировать или показать. */
@@ -156,7 +143,7 @@
 			>
 				{copied ? '✓' : '⧉'}
 			</button>
-			{#if message.role === 'assistant' && message.id !== undefined && isLast}
+			{#if message.role === 'assistant' && isLast}
 				<button
 					type="button"
 					class="btn-icon rounded text-base opacity-70 hover:opacity-100"
@@ -164,23 +151,6 @@
 					onclick={regenerate}
 					title="Перегенерировать ответ"
 				>↻</button>
-			{/if}
-			{#if message.role === 'assistant' && message.id !== undefined}
-				<button
-					class="btn-icon rounded text-base opacity-70 {message.feedback === 'up' ? 'opacity-100 ring-1 ring-current' : ''}"
-					disabled={ratingBusy}
-					onclick={() => rate('up')}
-					title="Полезный ответ"
-				>👍</button>
-				<button
-					class="btn-icon rounded text-base opacity-70 {message.feedback === 'down' ? 'opacity-100 ring-1 ring-current' : ''}"
-					disabled={ratingBusy}
-					onclick={() => rate('down')}
-					title="Ответ не помог"
-				>👎</button>
-			{/if}
-			{#if ratingError}
-				<span class="text-xs text-red-600 dark:text-red-400">{ratingError}</span>
 			{/if}
 		</div>
 	{/if}

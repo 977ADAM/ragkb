@@ -10,17 +10,12 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase
 
-from ragkb.core.config import Settings
 
 EXPECTED_REVISION = "0008_corpus_documents"
 
 
 class Base(DeclarativeBase):
     pass
-
-
-def needs_database(cfg: Settings) -> bool:
-    return cfg.history.enabled or cfg.auth.mode == "session"
 
 
 def alembic_sync_url(url: str) -> str:

@@ -1,14 +1,7 @@
 <script>
-	/**
-	 * Переписка и поле ввода. Одинаковы на /new и на /chat/{id} — отличается
-	 * только то, что страницы делают при входе.
-	 */
 	import { chat } from '$lib/chat.svelte.js';
 	import ChatFeed from '$lib/components/chat/ChatFeed.svelte';
 	import ChatComposer from '$lib/components/chat/ChatComposer.svelte';
-
-	/** @type {{ onCreated?: (id: string) => void }} */
-	let { onCreated } = $props();
 
 	const isEmpty = $derived(chat.messages.length === 0);
 </script>
@@ -25,10 +18,10 @@
 		</p>
 		<!-- Поле ввода в центре шире обычного — ему не тесно под лентой. -->
 		<div class="w-full max-w-[42rem]">
-			<ChatComposer {onCreated} />
+			<ChatComposer />
 		</div>
 	</div>
 {:else}
 	<ChatFeed />
-	<ChatComposer {onCreated} />
+	<ChatComposer />
 {/if}

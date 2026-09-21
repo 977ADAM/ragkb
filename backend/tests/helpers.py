@@ -26,25 +26,6 @@ from ragkb.version import __version__
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
-def database_url() -> str:
-    url = os.environ.get("RAGKB_TEST_DATABASE_URL") or os.environ.get(
-        "RAGKB_DATABASE_URL", ""
-    )
-    if not url:
-        raise RuntimeError(
-            "Для тестов нужен Postgres: задайте RAGKB_TEST_DATABASE_URL "
-            "или RAGKB_DATABASE_URL (postgresql+asyncpg://…)."
-        )
-    return url
-
-
-def migrate() -> None:
-    os.environ["RAGKB_DATABASE_URL"] = database_url()
-    cfg = AlembicConfig(str(BACKEND_ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(BACKEND_ROOT / "migrations"))
-    command.upgrade(cfg, "head")
-
-
 def make_app(cfg: Settings) -> FastAPI:
     raise_multipart_part_limit()
     setup_logging(level=cfg.logging.level, log_dir=cfg.logging.dir or None)
@@ -68,7 +49,6 @@ def make_app(cfg: Settings) -> FastAPI:
     )
     engine = EngineCache(cfg)
     app.state.cfg = cfg
-    app.state.auth = cfg.auth
     app.state.storage = Storage(cfg)
     app.state.engine = engine
     app.state.index = ConfigIndex(cfg, engine)

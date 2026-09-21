@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-.PHONY: help sync sync-frontend migrate backend frontend test check up down logs deploy
+.PHONY: help sync sync-frontend migrate api backend frontend test check up down logs deploy
 
 help:
 	@echo "sync            uv sync (backend, migrations + dev)"
@@ -9,11 +9,11 @@ help:
 	@echo "migrate         alembic upgrade head"
 	@echo "api			   uvicorn ragkb.main:app --host 127.0.0.1 --port 8000"
 	@echo "frontend        bun run dev, BFF → 127.0.0.1:8000"
-	@echo "test            pytest (backend); нужна RAGKB_TEST_DATABASE_URL"
+	@echo "test            pytest (backend); временная SQLite"
 	@echo "check           svelte-check (frontend)"
-	@echo "up              docker compose up postgres migrate ensure-admin rag frontend"
+	@echo "up              docker compose up postgres migrate rag frontend"
 	@echo "down            docker compose down"
-	@echo "logs            docker compose logs -f postgres migrate ensure-admin rag frontend"
+	@echo "logs            docker compose logs -f postgres migrate rag frontend"
 	@echo "deploy          ./deploy.sh (LAN rsync; .env на сервере не трогает)"
 
 sync:
@@ -24,6 +24,8 @@ sync-frontend:
 
 migrate:
 	cd backend && uv run alembic upgrade head
+
+backend: api
 
 api:
 	cd backend && uv run uvicorn ragkb.main:app --host 127.0.0.1 --port 8000

@@ -15,12 +15,12 @@ if str(_BACKEND_ROOT) not in sys.path:
 
 from ragkb.core.config import Settings
 from ragkb.core.database import Base, alembic_sync_url
-from ragkb.db.models import UserRow
+from ragkb.db.models import CorpusDocumentRow
 
 config = context.config
 target_metadata = Base.metadata
 
-assert UserRow.metadata is target_metadata
+assert CorpusDocumentRow.metadata is target_metadata
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 

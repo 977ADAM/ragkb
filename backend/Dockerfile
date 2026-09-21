@@ -21,12 +21,10 @@ RUN uv sync --locked --extra migrations --extra local-models --no-install-projec
 COPY ragkb ./ragkb
 COPY migrations ./migrations
 COPY alembic.ini ./
-COPY scripts ./scripts
 
 RUN uv sync --locked --extra migrations --extra local-models --no-editable
 
 ENV HF_HOME=/app/data/hf \
-    RAGKB_AUTH_MODE=session \
     RAGKB_EMBEDDING_BACKEND=sentence-transformers \
     RAGKB_LLM_BACKEND=openai \
     RAGKB_LOG_DIR=/app/data/logs

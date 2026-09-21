@@ -20,7 +20,6 @@ class AnswerEngine(Protocol):
         question: str,
         *,
         top_k: int | None = None,
-        history: list[tuple[str, str]] | None = None,
         expand: bool = False,
         model: str | None = None,
     ) -> tuple[list[Hit], Iterator[str]]: ...

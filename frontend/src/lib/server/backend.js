@@ -1,7 +1,7 @@
 /**
  * Единственное место, где фронт знает про адрес FastAPI.
  *
- * Браузер к бэкенду не ходит: и адрес, и заголовки идентификации живут
+ * Браузер к бэкенду не ходит: адрес живёт
  * только на сервере SvelteKit. Наружу торчит один BFF.
  */
 import { json } from '@sveltejs/kit';
@@ -26,48 +26,6 @@ function backendPath(path) {
 }
 
 /**
- * Заголовки идентификации для бэкенда.
- *
- * В боевом контуре их проставляет Angie перед SvelteKit — тогда
- * пробрасываем пришедшие как есть. Имена — те же, что читает ragkb/auth.py
- * (семейство X-Forwarded-*, НЕ X-Auth-Request-*).
- *
- * RAGKB_DEV_USER подставляет логин на локальном запуске, где прокси нет,
- * а бэкенд работает в режиме auth.mode: proxy. Пробрасывается только
- * тогда, когда заголовка от прокси нет: в общем контуре подделать личность
- * переменной окружения фронта не выйдет.
- */
-/**
- * @param {Request} request
- * @returns {Record<string, string>}
- */
-function identity(request) {
-	/** @type {Record<string, string>} */
-	const headers = { 'content-type': 'application/json' };
-	const forwarded = [
-		'x-forwarded-preferred-username',
-		'x-forwarded-user',
-		'x-forwarded-email',
-		'x-forwarded-groups'
-	];
-	let identified = false;
-	for (const name of forwarded) {
-		const value = request.headers.get(name);
-		if (value) {
-			headers[name] = value;
-			identified = true;
-		}
-	}
-	if (!identified && env.RAGKB_DEV_USER) {
-		headers['x-forwarded-preferred-username'] = env.RAGKB_DEV_USER;
-		if (env.RAGKB_DEV_GROUPS) headers['x-forwarded-groups'] = env.RAGKB_DEV_GROUPS;
-	}
-	const cookie = request.headers.get('cookie');
-	if (cookie) headers.cookie = cookie;
-	return headers;
-}
-
-/**
  * Запрос к бэкенду. Возвращает сырой Response — стрим нельзя буферизовать.
  *
  * @param {string} path
@@ -77,7 +35,7 @@ function identity(request) {
 export function backend(path, request, init = {}) {
 	return fetch(`${BASE}${backendPath(path)}`, {
 		...init,
-		headers: { ...identity(request), .../** @type {Record<string, string>} */ (init.headers ?? {}) }
+		headers: { 'content-type': 'application/json', .../** @type {Record<string, string>} */ (init.headers ?? {}) }
 	});
 }
 
@@ -96,7 +54,6 @@ export async function failureText(response) {
 	} catch {
 		/* тело не JSON — обойдёмся кодом */
 	}
-	if (response.status === 401) return 'Вы не аутентифицированы — войдите заново.';
 	if (response.status === 403) return detail || 'Недостаточно прав для этой операции.';
 	if (response.status === 422) {
 		// FastAPI отдаёт для 422 список объектов, а не строку: показывать
@@ -130,30 +87,6 @@ export async function proxyJson(path, request, init = {}) {
 		return json({ detail: await failureText(upstream) }, { status: upstream.status });
 	}
 	return json(await upstream.json(), { status: upstream.status });
-}
-
-/**
- * @param {string} path
- * @param {Request} request
- * @param {RequestInit} [init]
- */
-export async function proxyAuth(path, request, init = {}) {
-	let upstream;
-	try {
-		upstream = await backend(path, request, init);
-	} catch (error) {
-		return json({ detail: unreachable(error) }, { status: 502 });
-	}
-	const headers = new Headers();
-	headers.set('content-type', upstream.headers.get('content-type') || 'application/json');
-	for (const cookie of upstream.headers.getSetCookie?.() ?? []) {
-		headers.append('set-cookie', cookie);
-	}
-	if (upstream.status === 204) {
-		return new Response(null, { status: 204, headers });
-	}
-	const body = await upstream.arrayBuffer();
-	return new Response(body, { status: upstream.status, headers });
 }
 
 /** @param {unknown} error */

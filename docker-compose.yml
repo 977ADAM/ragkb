@@ -1,10 +1,6 @@
 x-backend: &backend
   build: ./backend
   image: ragkb:local
-  environment:
-    # Вход обязателен: учётку заводит ensure-admin (ADMIN_LOGIN/ADMIN_PASSWORD)
-    # или админ на /admin/users. Публичной регистрации нет.
-    RAGKB_AUTH_MODE: session
 
 services:
   postgres:
@@ -26,18 +22,10 @@ services:
     env_file: .env
     command: alembic upgrade head
 
-  ensure-admin:
-    <<: *backend
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-    env_file: .env
-    command: python -m scripts.ensure_admin
-
   rag:
     <<: *backend
     depends_on:
-      ensure-admin:
+      migrate:
         condition: service_completed_successfully
     volumes:
       - ./data/docs:/app/data/docs

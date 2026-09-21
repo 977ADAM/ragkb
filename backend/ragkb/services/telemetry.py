@@ -7,7 +7,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-from ragkb.domain.entities import User
 from ragkb.domain.ports import EventSink
 
 EVENT_BATCH_LIMIT = 100
@@ -37,13 +36,12 @@ class TelemetryService:
     def __init__(self, sink: EventSink):
         self.sink = sink
 
-    def ingest(self, user: User, batch: EventBatch) -> dict[str, int]:
+    def ingest(self, batch: EventBatch) -> dict[str, int]:
         received_at = datetime.now(timezone.utc).isoformat()
         for event in batch.events:
             self.sink.emit(
                 {
                     "event": event.name,
-                    "user": user.name,
                     "session_id": str(batch.session_id),
                     "ts": event.ts,
                     "received_at": received_at,

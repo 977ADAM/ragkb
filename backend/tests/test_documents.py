@@ -15,9 +15,7 @@ from ragkb.core.database import make_engine, make_session_factory
 from ragkb.core.errors import EngineUnavailable, InvalidRequest, NotFound, PayloadTooLarge
 from ragkb.core.index import ConfigIndex
 from ragkb.core.pipeline import RAGPipeline, build_index, update_documents
-from ragkb.db.repos.auth import PostgresAccounts
 from ragkb.domain.entities import ORIGIN_EXTERNAL, ORIGIN_UI, CorpusDocument
-from ragkb.services.auth import hash_password
 from ragkb.services.documents import MAX_UPLOAD_BYTES, DocumentsService
 
 
@@ -464,16 +462,9 @@ def _migrate_sqlite(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
     command.upgrade(cfg, "head")
 
 
-async def _seed_admin_and_user(url: str) -> None:
-    engine = make_engine(url)
-    store = PostgresAccounts(make_session_factory(engine))
-    await store.ready()
-    await store.create_user("ada", hash_password("password1"), role="admin")
-    await store.create_user("bob", hash_password("password1"), role="user")
-    await engine.dispose()
 
 
-def _session_client_cfg(tmp_path: Path, url: str) -> Settings:
+def _public_client_cfg(tmp_path: Path, url: str) -> Settings:
     docs = tmp_path / "docs"
     docs.mkdir()
     (docs / "policy.md").write_text("# Политика\n\nТекст про отпуск: 28 дней.\n", encoding="utf-8")
@@ -484,18 +475,10 @@ def _session_client_cfg(tmp_path: Path, url: str) -> Settings:
     )
     cfg.store.backend = "numpy"
     cfg.database_url = url
-    cfg.auth.mode = "session"
-    cfg.history.enabled = True
     cfg.logging.dir = str(tmp_path / "logs")
     return cfg
 
 
-def _signin(client: TestClient, username: str) -> None:
-    res = client.post(
-        "/api/v1/auths/signin",
-        json={"username": username, "password": "password1"},
-    )
-    assert res.status_code == 200
 
 
 @pytest.fixture
@@ -503,34 +486,22 @@ def sqlite_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     db = tmp_path / "ragkb.sqlite3"
     url = f"sqlite+aiosqlite:///{db}"
     _migrate_sqlite(url, monkeypatch)
-    asyncio.run(_seed_admin_and_user(url))
     return url
 
 
-def test_non_admin_forbidden_on_documents(tmp_path, sqlite_url):
-    cfg = _session_client_cfg(tmp_path, sqlite_url)
-    with TestClient(make_app(cfg)) as client:
-        _signin(client, "bob")
-        assert client.get("/api/v1/admin/documents").status_code == 403
-        assert client.post(
-            "/api/v1/admin/documents", files={"file": ("x.md", b"# X", "text/markdown")}
-        ).status_code == 403
-        assert client.delete("/api/v1/admin/documents/x.md").status_code == 403
 
 
-def test_admin_gets_document_list(tmp_path, sqlite_url):
-    cfg = _session_client_cfg(tmp_path, sqlite_url)
+def test_public_gets_document_list(tmp_path, sqlite_url):
+    cfg = _public_client_cfg(tmp_path, sqlite_url)
     with TestClient(make_app(cfg)) as client:
-        _signin(client, "ada")
         body = client.get("/api/v1/admin/documents").json()
         assert body["index"] == "no_index"
         assert body["corpus"][0]["name"] == "policy.md"
 
 
-def test_admin_upload_and_list(tmp_path, sqlite_url):
-    cfg = _session_client_cfg(tmp_path, sqlite_url)
+def test_public_upload_and_list(tmp_path, sqlite_url):
+    cfg = _public_client_cfg(tmp_path, sqlite_url)
     with TestClient(make_app(cfg)) as client:
-        _signin(client, "ada")
         res = client.post(
             "/api/v1/admin/documents",
             files={"file": ("new.md", "# Новый\n\nПравило: 28 дней.\n".encode(), "text/markdown")},
@@ -542,11 +513,10 @@ def test_admin_upload_and_list(tmp_path, sqlite_url):
         assert len(body["corpus"]) == 2
 
 
-def test_admin_accept_flow(tmp_path, sqlite_url):
+def test_public_accept_flow(tmp_path, sqlite_url):
     """Файл из каталога сначала вне корпуса, после принятия — в индексе."""
-    cfg = _session_client_cfg(tmp_path, sqlite_url)
+    cfg = _public_client_cfg(tmp_path, sqlite_url)
     with TestClient(make_app(cfg)) as client:
-        _signin(client, "ada")
         before = client.get("/api/v1/admin/documents").json()
         assert before["registry"] == "on"
         row = before["corpus"][0]
@@ -562,28 +532,26 @@ def test_admin_accept_flow(tmp_path, sqlite_url):
         row = after["corpus"][0]
         assert row["state"] == "indexed"
         assert row["origin"] == "external"
-        assert row["uploaded_by"] == "ada"
+        assert row["uploaded_by"] == ""
         assert after["summary"]["external_files"] == 0
 
         names = client.get("/api/v1/admin/documents").json()["corpus"]
         assert names[0]["name"] == "policy.md"
 
 
-def test_admin_rebuild_without_accepted_documents_is_400(tmp_path, sqlite_url):
+def test_public_rebuild_without_accepted_documents_is_400(tmp_path, sqlite_url):
     """Пока в корпус ничего не принято, собирать индекс не из чего."""
-    cfg = _session_client_cfg(tmp_path, sqlite_url)
+    cfg = _public_client_cfg(tmp_path, sqlite_url)
     with TestClient(make_app(cfg)) as client:
-        _signin(client, "ada")
         res = client.post("/api/v1/index/rebuild")
         assert res.status_code == 400
         assert "примите" in res.json()["detail"].lower()
 
 
-def test_admin_batch_upload_uses_single_rebuild(tmp_path, sqlite_url):
+def test_public_batch_upload_uses_single_rebuild(tmp_path, sqlite_url):
     """Очередь загрузки не индексирует каждый файл по отдельности."""
-    cfg = _session_client_cfg(tmp_path, sqlite_url)
+    cfg = _public_client_cfg(tmp_path, sqlite_url)
     with TestClient(make_app(cfg)) as client:
-        _signin(client, "ada")
         for name in ("one.md", "two.md"):
             res = client.post(
                 "/api/v1/admin/documents",
@@ -609,18 +577,16 @@ def test_admin_batch_upload_uses_single_rebuild(tmp_path, sqlite_url):
         assert after["summary"]["external_files"] == 1
 
 
-def test_admin_accept_unknown_file_is_404(tmp_path, sqlite_url):
-    cfg = _session_client_cfg(tmp_path, sqlite_url)
+def test_public_accept_unknown_file_is_404(tmp_path, sqlite_url):
+    cfg = _public_client_cfg(tmp_path, sqlite_url)
     with TestClient(make_app(cfg)) as client:
-        _signin(client, "ada")
         res = client.post("/api/v1/admin/documents/accept", json={"names": ["nope.md"]})
         assert res.status_code == 404
 
 
-def test_admin_upload_bad_extension_is_400(tmp_path, sqlite_url):
-    cfg = _session_client_cfg(tmp_path, sqlite_url)
+def test_public_upload_bad_extension_is_400(tmp_path, sqlite_url):
+    cfg = _public_client_cfg(tmp_path, sqlite_url)
     with TestClient(make_app(cfg)) as client:
-        _signin(client, "ada")
         res = client.post(
             "/api/v1/admin/documents",
             files={"file": ("evil.exe", b"x", "application/octet-stream")},
@@ -628,13 +594,12 @@ def test_admin_upload_bad_extension_is_400(tmp_path, sqlite_url):
         assert res.status_code == 400
 
 
-def test_admin_upload_too_large_is_413(tmp_path, sqlite_url, monkeypatch):
+def test_public_upload_too_large_is_413(tmp_path, sqlite_url, monkeypatch):
     import ragkb.services.documents as documents_module
 
     monkeypatch.setattr(documents_module, "MAX_UPLOAD_BYTES", 10)
-    cfg = _session_client_cfg(tmp_path, sqlite_url)
+    cfg = _public_client_cfg(tmp_path, sqlite_url)
     with TestClient(make_app(cfg)) as client:
-        _signin(client, "ada")
         res = client.post(
             "/api/v1/admin/documents",
             files={"file": ("big.md", b"a" * 20, "text/markdown")},
@@ -642,10 +607,9 @@ def test_admin_upload_too_large_is_413(tmp_path, sqlite_url, monkeypatch):
         assert res.status_code == 413
 
 
-def test_admin_delete(tmp_path, sqlite_url):
-    cfg = _session_client_cfg(tmp_path, sqlite_url)
+def test_public_delete(tmp_path, sqlite_url):
+    cfg = _public_client_cfg(tmp_path, sqlite_url)
     with TestClient(make_app(cfg)) as client:
-        _signin(client, "ada")
         client.post(
             "/api/v1/admin/documents",
             files={"file": ("new.md", "# N\n\nТекст.\n".encode(), "text/markdown")},

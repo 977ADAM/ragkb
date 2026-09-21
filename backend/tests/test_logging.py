@@ -42,8 +42,6 @@ def test_access_log_writes_method_status_and_ms(tmp_path: Path) -> None:
     """Каждый HTTP-запрос пишет access-строку с методом, статусом и временем."""
     log_dir = tmp_path / "logs"
     cfg = Settings(logging=Settings.LoggingConfig(level="INFO", dir=str(log_dir)))
-    cfg.auth.mode = "disabled"
-    cfg.history.enabled = False
     from fastapi.testclient import TestClient
 
     with TestClient(make_app(cfg)) as client:
@@ -62,8 +60,6 @@ def test_unhandled_exception_returns_json_500(tmp_path: Path) -> None:
     """Неперехваченное исключение даёт JSON 500 и попадает в errors.log."""
     log_dir = tmp_path / "logs"
     cfg = Settings(logging=Settings.LoggingConfig(level="INFO", dir=str(log_dir)))
-    cfg.auth.mode = "disabled"
-    cfg.history.enabled = False
     from fastapi.testclient import TestClient
 
     app = make_app(cfg)

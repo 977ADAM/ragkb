@@ -476,14 +476,6 @@ def test_env_overrides_nested_section():
         os.environ.pop("RAGKB_LLM_URL", None)
 
 
-def test_env_overrides_auth_mode():
-    import os
-
-    os.environ["RAGKB_AUTH_MODE"] = "session"
-    try:
-        assert Settings().auth.mode == "session"
-    finally:
-        os.environ.pop("RAGKB_AUTH_MODE", None)
 
 
 def test_empty_env_keeps_default():
@@ -496,14 +488,6 @@ def test_empty_env_keeps_default():
         os.environ.pop("RAGKB_LLM_MODEL", None)
 
 
-def test_history_enabled_env_parsing():
-    import os
-
-    os.environ["RAGKB_HISTORY_ENABLED"] = "false"
-    try:
-        assert Settings().history.enabled is False
-    finally:
-        os.environ.pop("RAGKB_HISTORY_ENABLED", None)
 
 
 def test_db_url_keeps_host_and_quotes_password():

@@ -9,20 +9,16 @@ from fastapi.responses import JSONResponse
 from ragkb.core.errors import (
     Conflict,
     EngineUnavailable,
-    Forbidden,
     InvalidRequest,
     NotFound,
     PayloadTooLarge,
     RagkbError,
-    Unauthenticated,
 )
 
 log = logging.getLogger("ragkb")
 
 _STATUS = {
     NotFound: 404,
-    Unauthenticated: 401,
-    Forbidden: 403,
     InvalidRequest: 400,
     PayloadTooLarge: 413,
     Conflict: 409,

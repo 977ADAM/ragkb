@@ -73,22 +73,10 @@ class Settings(BaseSettings):
         timeout: int = 600
         available: list[dict[str, str]] = []
 
-    class AuthConfig(BaseModel):
-        mode: str = "disabled"
-        header: str = "X-Forwarded-Preferred-Username"
-        email_header: str = "X-Forwarded-Email"
-        groups_header: str = "X-Forwarded-Groups"
-        admin_group: str = "ragkb-admins"
-
     class OrganizationConfig(BaseModel):
         name: str = ""
         id: str = ""
         description: str = ""
-
-    class HistoryConfig(BaseModel):
-        enabled: bool = True
-        retention_days: int = 90
-        window: int = 3
 
     class LoggingConfig(BaseModel):
         level: str = "INFO"
@@ -108,9 +96,7 @@ class Settings(BaseSettings):
     store: StoreConfig = StoreConfig()
     retrieval: RetrievalConfig = RetrievalConfig()
     llm: LLMConfig = LLMConfig()
-    auth: AuthConfig = AuthConfig()
     organization: OrganizationConfig = OrganizationConfig()
-    history: HistoryConfig = HistoryConfig()
     logging: LoggingConfig = LoggingConfig()
 
     postgresql_password: str = Field(default="", validation_alias="POSTGRES_PASSWORD")
@@ -141,11 +127,6 @@ class Settings(BaseSettings):
         "RAGKB_RERANKER_URL": ("retrieval", "reranker_url"),
         "RAGKB_RERANKER_API_KEY": ("retrieval", "reranker_api_key"),
         "RAGKB_MIN_RERANK_SCORE": ("retrieval", "min_rerank_score"),
-        "RAGKB_AUTH_MODE": ("auth", "mode"),
-        "RAGKB_AUTH_HEADER": ("auth", "header"),
-        "RAGKB_AUTH_GROUPS_HEADER": ("auth", "groups_header"),
-        "RAGKB_AUTH_EMAIL_HEADER": ("auth", "email_header"),
-        "RAGKB_AUTH_ADMIN_GROUP": ("auth", "admin_group"),
         "RAGKB_ORG_NAME": ("organization", "name"),
         "RAGKB_ORG_ID": ("organization", "id"),
         "RAGKB_LOG_LEVEL": ("logging", "level"),
@@ -164,13 +145,6 @@ class Settings(BaseSettings):
             # Значение приходит строкой, а поле может быть числом или флагом:
             # без приведения «0.7» из окружения сломало бы арифметику.
             setattr(target, attr, _coerce(getattr(target, attr), value))
-        raw_history = os.environ.get("RAGKB_HISTORY_ENABLED")
-        if raw_history not in (None, ""):
-            self.history.enabled = raw_history.strip().lower() not in {
-                "false",
-                "0",
-                "no",
-            }
 
     @property
     def db_url(self) -> str:

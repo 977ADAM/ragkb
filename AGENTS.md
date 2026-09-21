@@ -1,73 +1,62 @@
 # ragkb — ориентиры для агента
 
 Монорепозиторий: Python-сервис в `backend/`, SvelteKit в `frontend/`.
-Пакет Python по-прежнему называется `ragkb`.
+Пакет Python называется `ragkb`.
 
-## Где что лежит
+## Архитектура
 
-Пять каталогов в `backend/ragkb/` — раскладка по слоям, как в clustering:
+Пять каталогов в `backend/ragkb/`:
 
-- `api/` — FastAPI: роутеры, схемы, Depends-фабрики, HTTP-хендлер ошибок.
-- `core/` — ядро поиска и генерации; конфиг, движок БД (`database.py`),
-  доменные ошибки (`errors.py`). Не импортирует `api/`, `db/`, `domain/`,
-  `services/` и не знает FastAPI (кроме исключений в сигнатурах нет).
-- `db/` — SQLAlchemy-модели и адаптеры хранения: `models.py`, `repos/`
-  (Postgres и память: `PostgresAccounts`, `PostgresHistory`,
-  `EphemeralHistory`).
+- `api/` — FastAPI: роутеры, схемы, Depends-фабрики и HTTP-ошибки.
+- `core/` — поиск, генерация, конфиг, движок БД и ошибки. Не импортирует
+  `api/`, `db/`, `domain/`, `services/` и не зависит от FastAPI.
+- `db/` — SQLAlchemy-модель и адаптер реестра документов.
 - `domain/` — чистые сущности и порты без SQLAlchemy/pydantic/FastAPI.
-- `services/` — сценарии (use cases) без FastAPI, SQLAlchemy, пайплайна и
-  каталогов моделей. Данные и LLM приходят через порты
-  (`domain/ports.py`, `core/ports.py`).
-- Сборка: `backend/ragkb/main.py` кладёт на
-  `app.state` отдельные объекты: `db/storage.py`, `core/engine.py`,
-  `core/index.py`, `core/catalogs/`. Класса `Container` нет.
+- `services/` — сценарии через порты, без FastAPI, SQLAlchemy, пайплайна
+  и каталогов моделей.
 
-- История диалогов и локальные аккаунты: Postgres (SQLAlchemy async в
-  `db/`). Схема — Alembic в `backend/migrations/`. Приложение схему не
-  накатывает. URL: `RAGKB_DATABASE_URL`.
-- Конфиг: `backend/config.yaml`, перекрывается `RAGKB_*`.
-- Документы корпуса: `data/docs/` в корне репозитория. В базу знаний они
-  попадают **только через интерфейс** `/admin/documents`: реестр в Postgres
-  (`corpus_documents`, `db/repos/corpus_documents.py`) — источник истины, и
-  индекс собирается по нему. Файл в каталоге мимо интерфейса не индексируется,
-  пока админ не нажмёт «Принять». Без БД реестра нет и индексируется весь
-  каталог (страница об этом предупреждает).
-- Контракт API: `docs/superpowers/specs/2026-08-21-hexagonal-slices-design.md`
-  (там `web/` значит `frontend/`; каталоги `features/`/`platform/` в тексте
-  — историческая раскладка, актуальную смотри в этом файле и в README).
+`main.py` собирает Storage, EngineCache, ConfigIndex, каталог моделей и sink
+телеметрии в app.state. Класса Container нет.
 
-## Как запускать
+## Чат и документы
 
-Для `auth.mode: session` или включённой истории нужен `RAGKB_DATABASE_URL`
-и `alembic upgrade head`. `make backend` — SQLite `data/ragkb.sqlite3`,
-`auth.mode: session` (Postgres не нужен). Compose остаётся на Postgres.
+- Авторизации, аккаунтов, ролей и истории нет. Сайт сразу открывает чат.
+  Управление документами и индексацией доступно всем посетителям.
+- POST `/api/v1/ask` — независимый вопрос. NDJSON: token, затем done
+  с источниками и truncated. Сервер не сохраняет переписку даже в памяти.
+- Текущая лента хранится только в памяти браузерной страницы. Повтор ответа
+  — новый запрос с тем же вопросом. Оценок и серверных идентификаторов сообщений нет.
+- Браузер обращается только к BFF `frontend/src/routes/api/`:
+  `/api/…` → FastAPI `/api/v1/…`. GET `/health` без версии.
+- Реестр `corpus_documents` — источник истины при подключённой БД. Файлы
+  в `data/docs/` принимаются через `/admin/documents`. Файл мимо интерфейса
+  не индексируется до принятия. Без БД индексируется весь каталог с предупреждением UI.
+- Postgres (Compose) или SQLite (локально) нужны только реестру документов.
+  URL — `RAGKB_DATABASE_URL`. Миграции — `backend/migrations/`;
+  приложение не накатывает схему само.
+- Старые таблицы аккаунтов и переписки сохранены миграциями, но не используются.
+  Не уничтожать существующие данные автоматически.
+- Конфиг — `backend/ragkb/core/config.py`, перекрывается окружением `RAGKB_*`.
+- Актуальное решение: `docs/superpowers/specs/2026-09-21-without-auth-and-history-design.md`.
+  Прежние документы об авторизации и истории описывают старый контракт.
 
-```
-cd backend
-uv sync --extra migrations --extra dev
-alembic upgrade head
-uv run uvicorn ragkb.main:app
-cd ../frontend && bun run dev
-```
+## Запуск и проверки
 
-CLI (`ragkb serve` / `index` / `ask`) нет. Индекс — `POST /api/v1/index/rebuild`.
-Тесты: `RAGKB_TEST_DATABASE_URL=… cd backend && uv run pytest`.
+Из корня: `make sync`, `make sync-frontend`, затем задать URL БД и пути
+RAGKB_DOCS_DIR/RAGKB_INDEX_DIR. `make migrate`, `make api`, в другом терминале
+`make frontend`. `make backend` — псевдоним `make api`.
 
-## Чего не делать
+Тесты backend: `cd backend && uv run pytest` (временная SQLite, внешняя БД не нужна).
+Frontend: `cd frontend && bun test && bun run check && bun run build`.
 
-- Не возвращать HTML из FastAPI и не заводить второй UI рядом с `frontend/`.
-- Не импортировать `sqlalchemy`/`alembic` в `backend/ragkb/core/` (кроме
-  `core/database.py`, который владеет движком и `Base`).
-  SQLAlchemy — только в `backend/ragkb/db/`; Alembic — только
-  `backend/migrations/`.
-- Не ходить из браузера в FastAPI напрямую: только BFF `frontend/src/routes/api/`
-  (BFF `/api/…` → FastAPI `/api/v1/…`; `GET /health` без версии).
-- Compose: `RAGKB_AUTH_MODE=session`, вход формой `/login` (учётку создаёт
-  админ на `/admin/users`). `/register` остаётся публичной страницей-пояснением.
-  `RAGKB_DEV_USER` сессию не заменяет. На сервере Angie не должен требовать
-  OIDC на `/login`, `/register`, `/api/auths`. oauth2-proxy и Keycloak в стеке нет.
-- LLM не поднимать в compose: OpenAI-совместимый HTTP (`RAGKB_LLM_URL`).
-  Эмбеддинги в контейнере `rag` — HuggingFace (`sentence-transformers`,
-  модель `BAAI/bge-m3`). Ollama в стеке нет.
-- Исторические планы в `docs/superpowers/plans/` не переписывать под новую
-  раскладку — это слепок прошлого.
+## Ограничения
+
+- Не возвращать HTML из FastAPI и не заводить второй UI рядом с frontend.
+- SQLAlchemy — в db/, исключение core/database.py владеет движком и Base.
+  Alembic — только backend/migrations/.
+- В Compose нет ensure-admin, oauth2-proxy, Keycloak, Ollama и LLM-сервера.
+  Angie проксирует frontend без прежней проверки входа.
+- LLM — OpenAI-совместимый HTTP (`RAGKB_LLM_URL`). Эмбеддинги в контейнере
+  rag — sentence-transformers, модель BAAI/bge-m3.
+- CLI serve/index/ask нет. Индекс перестраивается через API и интерфейс.
+- Исторические планы и миграции не переписывать под новую архитектуру.

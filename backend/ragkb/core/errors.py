@@ -15,14 +15,6 @@ class NotFound(RagkbError):
     pass
 
 
-class Unauthenticated(RagkbError):
-    pass
-
-
-class Forbidden(RagkbError):
-    pass
-
-
 class InvalidRequest(RagkbError):
     pass
 
