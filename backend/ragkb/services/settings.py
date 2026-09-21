@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,8 @@ from ragkb.core.config import Settings
 from ragkb.core.embeddings import embedder_name
 from ragkb.core.errors import EngineUnavailable, InvalidRequest
 
+log = logging.getLogger("ragkb")
+
 
 class SettingsService:
     def __init__(
@@ -28,10 +31,13 @@ class SettingsService:
         cfg: Settings,
         invalidate: Callable[[], None],
         index: Any | None = None,
+        models: Callable[[], list[dict[str, Any]]] | None = None,
     ):
         self.cfg = cfg
         self._invalidate = invalidate
         self._index = index
+        # Каталог моделей эмбеддингов: список вариантов для поля «Модель».
+        self._models = models
         # Значения окружения и умолчаний: страница показывает, к чему
         # вернётся поле, если снять переопределение.
         self._defaults = Settings()
@@ -69,12 +75,28 @@ class SettingsService:
 
     def _field_payload(self, item: core.Field, overrides: dict[str, Any]) -> dict[str, Any]:
         value = core.value_at(self.cfg, item.path)
+        options = list(item.options)
+        labels: dict[str, str] = {}
+        if item.options_from:
+            for option in self._available_models(item.options_from):
+                model_id = str(option.get("id") or "")
+                if not model_id:
+                    continue
+                options.append(model_id)
+                label = str(option.get("label") or "")
+                if label:
+                    labels[model_id] = label
+            if value and str(value) not in options:
+                # Текущее значение показываем всегда, даже если модели уже нет
+                # в Ollama: иначе поле выглядело бы пустым и непонятно почему.
+                options.insert(0, str(value))
         return {
             "path": item.path,
             "label": item.label,
             "kind": item.kind,
             "help": item.help,
-            "options": list(item.options),
+            "options": options,
+            "option_labels": labels,
             "minimum": item.minimum,
             "maximum": item.maximum,
             "requires": item.requires,
@@ -83,6 +105,35 @@ class SettingsService:
             "default": core.masked(item, core.value_at(self._defaults, item.path)),
             "source": core.source_of(item.path, overrides),
         }
+
+    def _available_models(self, source: str) -> list[dict[str, Any]]:
+        """Варианты для поля-списка. Каталог недоступен — список пуст."""
+        if source != "embedding_models" or self._models is None:
+            return []
+        try:
+            return list(self._models())
+        except Exception as exc:
+            log.warning("не удалось получить список моделей эмбеддингов: %s", exc)
+            return []
+
+    def _check_choice(self, item: core.Field, value: Any) -> None:
+        """Проверяет выбор из динамического списка, если он доступен.
+
+        Когда каталог модели не отвечает, значение принимаем: проверит его
+        Ollama при индексации, а отказ по неполным данным только мешал бы
+        администратору.
+        """
+        if not item.options_from:
+            return
+        available = {
+            str(option.get("id") or "")
+            for option in self._available_models(item.options_from)
+        }
+        available.discard("")
+        if available and str(value) not in available:
+            raise InvalidRequest(
+                f"«{item.label}»: доступны — {', '.join(sorted(available))}"
+            )
 
     def index_state(self) -> dict[str, Any]:
         """Чем собран индекс и не разошёлся ли он с текущими настройками."""
@@ -147,7 +198,8 @@ class SettingsService:
                 + ". Доступные перечисляет GET /api/v1/admin/settings"
             )
 
-        overrides = core.read_overrides(self.cfg.settings_file)
+        previous_overrides = core.read_overrides(self.cfg.settings_file)
+        overrides = dict(previous_overrides)
         changed: list[str] = []
         for path, raw in values.items():
             item = core.FIELDS_BY_PATH[path]
@@ -156,6 +208,7 @@ class SettingsService:
             if item.secret and raw in {"", "***"}:
                 continue
             parsed = core.coerce(item, raw)
+            self._check_choice(item, parsed)
             # «Изменилось» — это про значение, а не про факт записи в файл:
             # от этого зависят предупреждения о пересборке и перезапуске.
             if core.value_at(self.cfg, path) != parsed:
@@ -169,6 +222,15 @@ class SettingsService:
         # Накладываем весь файл: сброшенные поля должны вернуться к значениям
         # окружения, а не остаться прежними в памяти.
         reapply(self.cfg, overrides)
+
+        problems = core.inconsistencies(self.cfg)
+        if problems:
+            # Настройки записались бы в нерабочее состояние — возвращаем как было.
+            core.write_overrides(self.cfg.settings_file, previous_overrides)
+            reapply(self.cfg, previous_overrides)
+            self._invalidate()
+            raise InvalidRequest("; ".join(problems))
+
         if changed:
             self._invalidate()
 

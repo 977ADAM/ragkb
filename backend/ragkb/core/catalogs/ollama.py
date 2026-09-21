@@ -9,6 +9,12 @@ from ragkb.core.config import Settings
 
 
 def installed_models(base_url: str) -> list[dict[str, Any]]:
+    """Что установлено в Ollama: возможности, контекст и длина вектора.
+
+    `/api/show` отдаёт `capabilities` (completion, tools, embedding, vision) и
+    `model_info`. По ним каталог решает, годится модель для генерации или для
+    эмбеддингов, — это надёжнее, чем угадывать по имени.
+    """
     try:
         import httpx
 
@@ -24,6 +30,8 @@ def installed_models(base_url: str) -> list[dict[str, Any]]:
                     "id": model_id,
                     "context_window": None,
                     "supports_tools": False,
+                    "capabilities": [],
+                    "embedding_dim": None,
                 }
                 try:
                     shown = client.post(
@@ -32,15 +40,56 @@ def installed_models(base_url: str) -> list[dict[str, Any]]:
                 except Exception:
                     out.append(info)
                     continue
-                info["supports_tools"] = "tools" in (shown.get("capabilities") or [])
-                for key, value in (shown.get("model_info") or {}).items():
-                    if key.endswith(".context_length") and isinstance(value, int):
-                        info["context_window"] = value
-                        break
+                _apply_show(info, shown)
                 out.append(info)
             return out
     except Exception:
         return []
+
+
+def _apply_show(info: dict[str, Any], shown: dict[str, Any]) -> None:
+    capabilities = [str(item) for item in (shown.get("capabilities") or [])]
+    info["capabilities"] = capabilities
+    info["supports_tools"] = "tools" in capabilities
+    for key, value in (shown.get("model_info") or {}).items():
+        if not isinstance(value, int):
+            continue
+        if key.endswith(".context_length") and info["context_window"] is None:
+            info["context_window"] = value
+        elif key.endswith("embedding_length") and info["embedding_dim"] is None:
+            info["embedding_dim"] = value
+
+
+def embedding_options(installed: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Модели, которыми можно считать эмбеддинги.
+
+    Признак — возможность `embedding` из /api/show. Если Ollama о возможностях
+    не сообщает вовсе (старые версии), показываем всё установленное: выбрать
+    неподходящую модель всё равно не даст проверка при индексации, а пустой
+    список был бы хуже.
+    """
+    known = [item for item in installed if item.get("capabilities")]
+    source = known or installed
+    return [
+        {
+            "id": item["id"],
+            "dim": item.get("embedding_dim"),
+            "label": _embedding_label(item),
+        }
+        for item in source
+        if not known or "embedding" in item.get("capabilities", [])
+    ]
+
+
+def _embedding_label(item: dict[str, Any]) -> str:
+    dim = item.get("embedding_dim")
+    size = item.get("size")
+    parts: list[str] = []
+    if isinstance(dim, int) and dim > 0:
+        parts.append(f"{dim} координат")
+    if isinstance(size, int) and size > 0:
+        parts.append(f"{size / 1e9:.2f} ГБ")
+    return ", ".join(parts)
 
 
 class OllamaCatalog:

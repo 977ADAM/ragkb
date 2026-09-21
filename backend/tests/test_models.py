@@ -1,7 +1,9 @@
-from ragkb.core.catalogs.ollama import OllamaCatalog
+from ragkb.core.catalogs import embedding_models
+from ragkb.core.catalogs.ollama import OllamaCatalog, embedding_options
 from ragkb.core.catalogs.openai import OpenAICatalog
 from ragkb.core.catalogs.static import StaticCatalog
 from ragkb.core.config import Settings
+from ragkb.services.models import ModelsService
 
 
 def test_openai_catalog_short_name_for_gguf_path():
@@ -51,3 +53,78 @@ def test_ollama_catalog_filters_and_resolve():
         raise AssertionError("ожидали ValueError")
     except ValueError:
         pass
+
+
+# ------------------------------------------------- модели эмбеддингов
+
+
+def test_embedding_options_keep_only_embedding_capability():
+    installed = [
+        {"id": "qwen3:4b", "capabilities": ["completion", "tools"], "embedding_dim": None},
+        {
+            "id": "qwen3-embedding:0.6b",
+            "capabilities": ["embedding"],
+            "embedding_dim": 1024,
+            "size": 639_000_000,
+        },
+        {"id": "qwen2.5:7b-instruct", "capabilities": ["completion"], "embedding_dim": None},
+    ]
+
+    options = embedding_options(installed)
+
+    assert [item["id"] for item in options] == ["qwen3-embedding:0.6b"]
+    assert options[0]["dim"] == 1024
+    assert "1024 координат" in options[0]["label"]
+
+
+def test_embedding_options_fall_back_when_capabilities_unknown():
+    """Старые сборки Ollama о возможностях не сообщают — показываем всё."""
+    installed = [{"id": "nomic-embed-text", "capabilities": [], "embedding_dim": 768}]
+
+    assert [item["id"] for item in embedding_options(installed)] == ["nomic-embed-text"]
+
+
+def test_embedding_models_empty_for_test_backend():
+    cfg = Settings(embedding=Settings.EmbeddingConfig(backend="fake", fake_dim=64))
+
+    assert embedding_models(cfg) == []
+
+
+def test_chat_catalog_hides_vector_only_models():
+    """Модель, считающая только векторы, не предлагается для генерации."""
+    catalog = StaticCatalog(Settings.LLMConfig(model="qwen3-embedding:0.6b"))
+    service = ModelsService(
+        catalog, embedding_models=lambda: [{"id": "qwen3-embedding:0.6b"}]
+    )
+
+    assert service.list() == []
+
+
+def test_chat_catalog_keeps_generation_models():
+    catalog = StaticCatalog(Settings.LLMConfig(model="qwen2.5:7b-instruct"))
+    service = ModelsService(
+        catalog, embedding_models=lambda: [{"id": "qwen3-embedding:0.6b"}]
+    )
+
+    items = service.list()
+
+    assert [item.id for item in items] == ["qwen2.5:7b-instruct"]
+    assert items[0].is_default is True
+
+
+def test_chat_catalog_without_provider_lists_everything():
+    catalog = StaticCatalog(Settings.LLMConfig(model="qwen3-embedding:0.6b"))
+
+    assert [item.id for item in ModelsService(catalog).list()] == ["qwen3-embedding:0.6b"]
+
+
+def test_chat_catalog_survives_broken_provider():
+    """Каталог эмбеддингов недоступен — список генерации не должен падать."""
+    def broken():
+        raise RuntimeError("Ollama недоступна")
+
+    catalog = StaticCatalog(Settings.LLMConfig(model="qwen2.5:7b-instruct"))
+
+    assert [item.id for item in ModelsService(catalog, embedding_models=broken).list()] == [
+        "qwen2.5:7b-instruct"
+    ]

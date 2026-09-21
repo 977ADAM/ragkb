@@ -4,6 +4,7 @@
 	/**
 	 * @typedef {{
 	 *   path: string, label: string, kind: string, help: string, options: string[],
+	 *   option_labels?: Record<string, string>,
 	 *   minimum: number | null, maximum: number | null, requires: string | null,
 	 *   secret: boolean, value: any, default: any, source: string
 	 * }} Field
@@ -176,7 +177,10 @@
 			не сохранено: {changedCount}
 		</span>
 	{/if}
-	<button class="btn ml-auto" onclick={save} disabled={saving || changedCount === 0}>
+	<button class="btn ml-auto" onclick={load} disabled={loading || saving}>
+		Обновить список моделей
+	</button>
+	<button class="btn" onclick={save} disabled={saving || changedCount === 0}>
 		{saving ? 'Сохранение…' : 'Сохранить'}
 	</button>
 </div>
@@ -252,7 +256,11 @@
 							{:else if field.kind === 'select'}
 								<select id={field.path} bind:value={draft[field.path]} disabled={wasReset}>
 									{#each field.options as option}
-										<option value={option}>{option}</option>
+										<option value={option}>
+											{field.option_labels?.[option]
+												? `${option} — ${field.option_labels[option]}`
+												: option}
+										</option>
 									{/each}
 								</select>
 							{:else if field.kind === 'textarea'}

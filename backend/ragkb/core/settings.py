@@ -37,6 +37,9 @@ class Field:
     options: tuple[str, ...] = ()
     minimum: float | None = None
     maximum: float | None = None
+    # Источник вариантов для полей-списков: список приходит из каталога
+    # моделей, а не из кода (у эмбеддингов, как у генерации).
+    options_from: str | None = None
     requires: Requires | None = None
     secret: bool = False
     # Разрешено ли снять переопределение и вернуться к значению окружения.
@@ -63,7 +66,9 @@ FIELDS: tuple[Field, ...] = (
         "embedding.model",
         "Модель",
         "Эмбеддинги",
-        help="Тег модели в Ollama, например qwen3-embedding:0.6b",
+        kind="select",
+        options_from="embedding_models",
+        help="Список берётся у Ollama: только модели, умеющие считать эмбеддинги",
         requires="reindex",
     ),
     _f(
@@ -343,7 +348,7 @@ READONLY: tuple[tuple[str, str, str], ...] = (
     (
         "database_url",
         "База данных",
-        "Пусто — реестр выключен, индексируется весь каталог",
+        "Реестр документов: без него загружать документы некуда",
     ),
 )
 
@@ -416,12 +421,35 @@ def coerce(item: Field, value: Any) -> Any:
         return int(number) if number.is_integer() and isinstance(value, (int, str)) else number
     if item.kind == "select":
         text = str(value)
+        if item.options_from and not item.options:
+            # Варианты приходят из каталога моделей: проверяет их сервис,
+            # у которого этот список есть, а окончательно — Ollama при индексации.
+            return text
         if text not in item.options:
             raise InvalidRequest(
                 f"«{item.label}»: допустимые значения — {', '.join(item.options)}"
             )
         return text
     return "" if value is None else str(value)
+
+
+def inconsistencies(cfg: Settings) -> list[str]:
+    """Сочетания настроек, при которых сервис заведомо не работает.
+
+    Проверяются перед сохранением: лучше отказать с объяснением, чем записать
+    в файл состояние, из которого не собирается ни индекс, ни ответ.
+    """
+    problems: list[str] = []
+    if cfg.embedding.backend.lower() == "ollama" and not cfg.embedding.base_url.strip():
+        problems.append(
+            "«Адрес Ollama» не может быть пустым при бэкенде ollama: "
+            "без него индекс не собрать"
+        )
+    if not cfg.retrieval.use_dense and not cfg.retrieval.use_bm25:
+        problems.append(
+            "Оба поиска выключены (плотный и лексический): искать будет нечем"
+        )
+    return problems
 
 
 def requirements(paths: list[str]) -> dict[str, bool]:

@@ -21,17 +21,29 @@ from ragkb.core.pipeline import build_index
 from ragkb.core.settings import FIELDS, GROUP_ORDER
 from ragkb.services.settings import SettingsService
 
+EMBEDDING_MODELS = [
+    {"id": "qwen3-embedding:0.6b", "dim": 1024, "label": "1024 координат"},
+    {"id": "bge-m3", "dim": 1024, "label": "1024 координат"},
+]
+
 
 def _service(
     cfg: Settings,
     invalidated: list[int] | None = None,
     *,
     index: bool = False,
+    models: list[dict] | None = EMBEDDING_MODELS,
 ) -> SettingsService:
     """Сервис настроек; с `index=True` — как в приложении, со сведениями об индексе."""
     calls = invalidated if invalidated is not None else []
     engine = ConfigIndex(cfg, lambda: pytest.fail("движок для настроек не нужен"))
-    return SettingsService(cfg, lambda: calls.append(1), index=engine if index else None)
+    provider = (lambda: models) if models is not None else None
+    return SettingsService(
+        cfg,
+        lambda: calls.append(1),
+        index=engine if index else None,
+        models=provider,
+    )
 
 
 # ------------------------------------------------------------- описание полей
@@ -150,16 +162,16 @@ def test_update_skips_empty_secret(cfg):
 
 
 def test_reset_returns_value_from_environment(cfg, monkeypatch):
-    monkeypatch.setenv("RAGKB_EMBEDDING_MODEL", "bge-m3")
+    monkeypatch.setenv("RAGKB_EMBEDDING_MODEL", "qwen3-embedding:0.6b")
     fresh = Settings()
     fresh.settings_file = cfg.settings_file
     service = _service(fresh)
-    service.update({"embedding.model": "другая:модель"})
-    assert fresh.embedding.model == "другая:модель"
+    service.update({"embedding.model": "bge-m3"})
+    assert fresh.embedding.model == "bge-m3"
 
     payload = service.update({}, reset=["embedding.model"])
 
-    assert fresh.embedding.model == "bge-m3"
+    assert fresh.embedding.model == "qwen3-embedding:0.6b"
     assert "embedding.model" not in core.read_overrides(fresh.settings_file)
     field = next(
         item
@@ -198,7 +210,7 @@ def test_requirements_are_reported(indexed):
     """Правка поля, влияющего на индекс, требует пересборки — если он собран."""
     service = _service(indexed, index=True)
 
-    reindex = service.update({"embedding.model": "qwen3-embedding:8b"})
+    reindex = service.update({"embedding.model": "bge-m3"})
     restart = service.update({"llm.backend": "ollama"})
     none = service.update({"retrieval.top_k": 4})
 
@@ -209,7 +221,7 @@ def test_requirements_are_reported(indexed):
 
 def test_reindex_not_required_without_index(cfg):
     """Пересобирать нечего: страница сама предложит собрать индекс."""
-    payload = _service(cfg, index=True).update({"embedding.model": "qwen3-embedding:8b"})
+    payload = _service(cfg, index=True).update({"embedding.model": "bge-m3"})
 
     assert payload["index"]["status"] == "no_index"
     assert payload["requirements"]["reindex"] is False
@@ -308,3 +320,141 @@ def test_settings_api_reset(client, cfg):
     assert response.status_code == 200
     assert cfg.retrieval.top_k == 5
     assert core.read_overrides(cfg.settings_file) == {}
+
+
+# --------------------------------------------- выбор модели эмбеддингов
+
+
+def test_embedding_model_options_come_from_catalog(cfg):
+    payload = _service(cfg).describe()
+    field = next(
+        item
+        for group in payload["groups"]
+        for item in group["fields"]
+        if item["path"] == "embedding.model"
+    )
+
+    assert field["kind"] == "select"
+    assert field["options"] == ["qwen3-embedding:0.6b", "bge-m3"]
+    assert field["option_labels"]["bge-m3"] == "1024 координат"
+
+
+def test_current_embedding_model_stays_in_options(cfg):
+    """Модель выбрана, а в Ollama её уже нет — поле всё равно показывает её."""
+    cfg.embedding.model = "старая:модель"
+
+    payload = _service(cfg).describe()
+    field = next(
+        item
+        for group in payload["groups"]
+        for item in group["fields"]
+        if item["path"] == "embedding.model"
+    )
+
+    assert field["options"][0] == "старая:модель"
+
+
+def test_embedding_model_choice_is_limited_to_catalog(cfg):
+    with pytest.raises(InvalidRequest) as exc:
+        _service(cfg).update({"embedding.model": "нет-такой:модели"})
+
+    assert "qwen3-embedding:0.6b" in exc.value.detail
+
+
+def test_embedding_model_choice_accepts_catalog_value(indexed):
+    """Смена модели эмбеддингов на собранном индексе требует пересборки."""
+    payload = _service(indexed, index=True).update({"embedding.model": "bge-m3"})
+
+    assert indexed.embedding.model == "bge-m3"
+    assert payload["requirements"]["reindex"] is True
+
+
+def test_choice_is_accepted_when_catalog_is_unavailable(cfg):
+    """Каталог не ответил — не мешаем администратору: проверит Ollama."""
+    service = _service(cfg, models=None)
+
+    service.update({"embedding.model": "bge-m3"})
+
+    assert cfg.embedding.model == "bge-m3"
+
+
+def test_broken_catalog_does_not_break_settings_page(cfg):
+    def broken():
+        raise RuntimeError("Ollama недоступна")
+
+    payload = SettingsService(cfg, lambda: None, models=broken).describe()
+    field = next(
+        item
+        for group in payload["groups"]
+        for item in group["fields"]
+        if item["path"] == "embedding.model"
+    )
+
+    assert field["options"] == ["qwen3-embedding:0.6b"]  # только текущее значение
+
+
+# ------------------------------------------ нерабочие сочетания настроек
+
+
+def test_empty_ollama_address_is_rejected(cfg):
+    """Пустой адрес Ollama — не сохранение, а объяснение, что сломается.
+
+    Бэкенд задаём через те же настройки: при сохранении конфигурация
+    пересобирается из окружения и файла, поля объекта напрямую не переживают
+    это (см. `test_reapply_resets_to_environment`).
+    """
+    service = _service(cfg, models=None)
+    service.update(
+        {"embedding.backend": "ollama", "embedding.base_url": "http://127.0.0.1:11434"}
+    )
+
+    with pytest.raises(InvalidRequest) as exc:
+        service.update({"embedding.base_url": ""})
+
+    assert "Адрес Ollama" in exc.value.detail
+    assert cfg.embedding.base_url == "http://127.0.0.1:11434"
+    assert core.read_overrides(cfg.settings_file) == {
+        "embedding.backend": "ollama",
+        "embedding.base_url": "http://127.0.0.1:11434",
+    }
+
+
+def test_reapply_resets_to_environment(cfg, monkeypatch):
+    """Значения вне файла настроек берутся из окружения, а не из памяти."""
+    monkeypatch.setenv("RAGKB_EMBEDDING_KEEP_ALIVE", "5m")
+    cfg.embedding.keep_alive = "1h"
+
+    _service(cfg).update({"retrieval.top_k": 8})
+
+    assert cfg.embedding.keep_alive == "5m"
+
+
+def test_both_searches_off_is_rejected(cfg):
+    service = _service(cfg)
+
+    with pytest.raises(InvalidRequest) as exc:
+        service.update({"retrieval.use_dense": False, "retrieval.use_bm25": False})
+
+    assert "искать будет нечем" in exc.value.detail
+    assert cfg.retrieval.use_dense is True and cfg.retrieval.use_bm25 is True
+
+
+def test_rejected_patch_keeps_previous_overrides(cfg):
+    """Отказ не должен терять ранее сохранённые значения."""
+    service = _service(cfg)
+    service.update({"retrieval.top_k": 9})
+
+    with pytest.raises(InvalidRequest):
+        service.update({"retrieval.use_dense": False, "retrieval.use_bm25": False,
+                        "retrieval.top_k": 3})
+
+    assert core.read_overrides(cfg.settings_file) == {"retrieval.top_k": 9}
+    assert cfg.retrieval.top_k == 9
+
+
+def test_fake_backend_allows_empty_address(cfg):
+    """Бэкенду fake адрес не нужен."""
+    payload = _service(cfg).update({"embedding.backend": "fake", "embedding.base_url": ""})
+
+    assert payload["changed"]
+    assert cfg.embedding.backend == "fake"

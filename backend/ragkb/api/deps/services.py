@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from fastapi import Request
 
+from ragkb.core.catalogs import embedding_models
 from ragkb.services.ask import AskService
 from ragkb.services.bootstrap import BootstrapService
 from ragkb.services.documents import DocumentsService
@@ -28,8 +29,15 @@ def search_service(request: Request) -> SearchService:
     return SearchService(request.app.state.engine)
 
 
+def _embedding_models(request: Request):
+    """Провайдер списка моделей эмбеддингов: тот же Ollama, что считает векторы."""
+    return lambda: embedding_models(request.app.state.cfg)
+
+
 def models_service(request: Request) -> ModelsService:
-    return ModelsService(request.app.state.models)
+    return ModelsService(
+        request.app.state.models, embedding_models=_embedding_models(request)
+    )
 
 
 def organization_service(request: Request) -> OrganizationService:
@@ -63,6 +71,7 @@ def settings_service(request: Request) -> SettingsService:
         request.app.state.cfg,
         request.app.state.engine.invalidate,
         index=request.app.state.index,
+        models=_embedding_models(request),
     )
 
 
@@ -70,7 +79,9 @@ def bootstrap_service(request: Request) -> BootstrapService:
     cfg = request.app.state.cfg
     org = OrganizationService(cfg)
     return BootstrapService(
-        models=ModelsService(request.app.state.models),
+        models=ModelsService(
+            request.app.state.models, embedding_models=_embedding_models(request)
+        ),
         organization=org,
         index=IndexService(
             request.app.state.index,
