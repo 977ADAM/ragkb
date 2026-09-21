@@ -18,8 +18,3 @@ class OrganizationService:
             "name": org.name,
             "description": org.description,
         }
-
-    def require_id(self, organization_id: str) -> None:
-        configured = self.cfg.organization.id or self.cfg.organization.name
-        if not configured or organization_id != configured:
-            raise NotFound("Организация не найдена")

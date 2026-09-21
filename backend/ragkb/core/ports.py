@@ -25,14 +25,10 @@ class AnswerEngine(Protocol):
         model: str | None = None,
     ) -> tuple[list[Hit], Iterator[str]]: ...
 
-    def stats(self) -> dict[str, Any]: ...
-
     def cited_sources(self, text: str, hits: list[Hit]) -> list[dict[str, Any]]: ...
 
     def llm_available(self, model: str | None = None) -> bool:
         """Готова ли генерация: если нет, вопрос отклоняется до открытия потока."""
-
-    def document_paths(self) -> set[str] | None: ...
 
 
 class IndexEngine(Protocol):

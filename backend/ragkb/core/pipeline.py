@@ -387,18 +387,6 @@ class RagChain:
 
     # -------------------------------------------------------------- сведения
 
-    def stats(self) -> dict[str, Any]:
-        indexed = manifest.read(self.cfg)
-        return {
-            "chunks": int(indexed.get("n_chunks", 0)),
-            "documents": len(indexed.get("documents", [])),
-            "store": indexed.get("store"),
-            "embedder": indexed.get("embedder"),
-            "llm": chat_model_name(self.cfg.llm),
-            "llm_available": self.llm_available(),
-            "index_dir": str(self.cfg.index_dir),
-        }
-
     def llm_available(self, model: str | None = None) -> bool:
         """Готова ли генерация по конфигурации — без обращения к серверу.
 
@@ -406,13 +394,6 @@ class RagChain:
         моделей и так отдаёт bootstrap.
         """
         return bool(self.cfg.llm.base_url and (model or self.cfg.llm.model))
-
-    def document_paths(self) -> set[str] | None:
-        paths = {
-            str(document.metadata.get("source") or "")
-            for document in all_documents(self.store)
-        }
-        return {path for path in paths if path}
 
 
 def answer_prompt() -> ChatPromptTemplate:

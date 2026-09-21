@@ -104,7 +104,6 @@ class Settings(BaseSettings):
 
     docs_dir: str = "data/docs"
     index_dir: str = "data/index"
-    language: str = "ru"
     chunking: ChunkConfig = ChunkConfig()
     embedding: EmbeddingConfig = EmbeddingConfig()
     store: StoreConfig = StoreConfig()

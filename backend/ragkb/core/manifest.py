@@ -65,12 +65,6 @@ def write(
     return payload
 
 
-def remove(cfg: Settings) -> None:
-    path = manifest_path(cfg)
-    if path.exists():
-        path.unlink()
-
-
 def file_facts(path: str | Path, checksum: str) -> dict[str, Any]:
     """Факты о файле для манифеста.
 

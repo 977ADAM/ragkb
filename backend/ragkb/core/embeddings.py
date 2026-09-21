@@ -7,8 +7,6 @@
 """
 from __future__ import annotations
 
-from typing import Any
-
 from langchain_core.embeddings import DeterministicFakeEmbedding, Embeddings
 
 from .config import Settings
@@ -111,8 +109,3 @@ def embedding_dim(embeddings: Embeddings) -> int | None:
         if isinstance(value, int) and value > 0:
             return value
     return None
-
-
-def embed_probe(embeddings: Embeddings) -> dict[str, Any]:
-    """Дешёвая проба: бэкенд отвечает и какой длины вектор отдаёт."""
-    return {"ok": True, "dim": len(embeddings.embed_query("проверка"))}

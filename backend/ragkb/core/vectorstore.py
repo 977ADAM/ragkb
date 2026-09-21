@@ -161,10 +161,6 @@ def vectors_for(store: VectorStore, chunk_ids: list[str]) -> dict[str, list[floa
     }
 
 
-def document_count(store: VectorStore) -> int:
-    return len(all_documents(store))
-
-
 def delete_by_source(store: VectorStore, source: str) -> int:
     """Удаляет чанки документа по исходному пути. Возвращает их число."""
     if isinstance(store, InMemoryVectorStore):

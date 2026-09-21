@@ -35,13 +35,12 @@ class AskService:
         hits, tokens = engine.stream_answer(
             question, top_k=top_k, expand=expand, model=resolved
         )
-        return self._generate(tokens, hits, question, resolved, started, engine)
+        return self._generate(tokens, hits, resolved, started, engine)
 
     def _generate(
         self,
         tokens: Iterator[str],
         hits,
-        question: str,
         model: str,
         started: float,
         engine: AnswerEngine,

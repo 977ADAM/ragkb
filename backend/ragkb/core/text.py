@@ -81,14 +81,3 @@ def normalize(text: str) -> str:
     """Схлопывает пробелы и служебные символы — для сравнения и дедупликации."""
     text = text.replace(" ", " ").replace("​", "")
     return re.sub(r"\s+", " ", text).strip()
-
-
-def approx_tokens(text: str) -> int:
-    """Грубая оценка числа токенов LLM. Для русского ~3.5 символа на токен."""
-    return max(1, int(len(text) / 3.5))
-
-
-def truncate_to_tokens(text: str, limit: int) -> str:
-    if approx_tokens(text) <= limit:
-        return text
-    return text[: int(limit * 3.5)].rsplit(" ", 1)[0] + "…"

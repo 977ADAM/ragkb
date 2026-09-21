@@ -78,14 +78,6 @@ def make_service(cfg: Settings, registry=None, invalidate=None) -> DocumentsServ
     )
 
 
-def _chroma_available() -> bool:
-    try:
-        import chromadb  # noqa: F401
-        return True
-    except ImportError:
-        return False
-
-
 async def test_list_after_build(tmp_path):
     cfg = make_cfg(tmp_path)
     build_index(cfg)
