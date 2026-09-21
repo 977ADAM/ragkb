@@ -41,9 +41,6 @@ setup_logging(level=cfg.logging.level, log_dir=cfg.logging.dir or None)
 app = FastAPI(
     title="RAG База знаний",
     version=__version__,
-    docs_url=None,
-    redoc_url=None,
-    openapi_url=None,
     lifespan=lifespan,
 )
 engine = EngineCache(cfg)
