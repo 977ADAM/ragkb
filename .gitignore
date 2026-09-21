@@ -2,13 +2,16 @@ ragkb.egg-info
 
 .venv
 
-# Артефакты сборки индекса — пересоздаются командой ragkb index
+# Артефакты сборки индекса и сам корпус: у каждой установки свои документы
 data/index/
+data/docs/
 
 # Переписка пользователей — не должна попадать в репозиторий.
 # data/history/ — подкаталог для тома с базой диалогов в Docker
 # (RAGKB_HISTORY_PATH=/app/data/history/history.sqlite3, см. docker-compose.yml).
 data/*.sqlite3*
+# Настройки со страницы управления: у каждой установки свои
+data/settings.json
 data/history/
 
 # Журналы приложения (rotate в data/logs)

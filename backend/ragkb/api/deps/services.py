@@ -3,13 +3,14 @@ from __future__ import annotations
 
 from fastapi import Request
 
-from ragkb.services.bootstrap import BootstrapService
 from ragkb.services.ask import AskService
+from ragkb.services.bootstrap import BootstrapService
 from ragkb.services.documents import DocumentsService
 from ragkb.services.index import IndexService
 from ragkb.services.models import ModelsService
 from ragkb.services.organization import OrganizationService
 from ragkb.services.search import SearchService
+from ragkb.services.settings import SettingsService
 from ragkb.services.telemetry import TelemetryService
 
 
@@ -54,6 +55,14 @@ def documents_service(request: Request) -> DocumentsService:
         request.app.state.index,
         request.app.state.engine.invalidate,
         registry=storage.corpus,
+    )
+
+
+def settings_service(request: Request) -> SettingsService:
+    return SettingsService(
+        request.app.state.cfg,
+        request.app.state.engine.invalidate,
+        index=request.app.state.index,
     )
 
 

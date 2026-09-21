@@ -34,6 +34,8 @@
 		<a class="no-underline hover:underline" href="/admin/documents">Документы</a>
 		·
 		<a class="no-underline hover:underline" href="/admin/reports">Отчёты</a>
+		·
+		<a class="no-underline hover:underline" href="/admin/settings">Настройки</a>
 	</p>
 {:else}
 	<p class="text-stone-500 dark:text-stone-400">Загрузка…</p>

@@ -25,6 +25,7 @@ from ragkb.core.engine import EngineCache
 from ragkb.core.errors import RagkbError
 from ragkb.core.index import ConfigIndex
 from ragkb.core.logging_config import setup_logging
+from ragkb.core.settings import apply_overrides, read_overrides
 from ragkb.core.text import tokenize
 from ragkb.db.storage import Storage
 from ragkb.services.stdout_sink import StdoutSink
@@ -34,6 +35,8 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
 def make_app(cfg: Settings) -> FastAPI:
+    # Как в main.py: сохранённые настройки перекрывают конфигурацию.
+    apply_overrides(cfg, read_overrides(cfg.settings_file))
     raise_multipart_part_limit()
     setup_logging(level=cfg.logging.level, log_dir=cfg.logging.dir or None)
 

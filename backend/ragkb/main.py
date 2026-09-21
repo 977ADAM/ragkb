@@ -15,6 +15,7 @@ from ragkb.core.engine import EngineCache
 from ragkb.core.errors import RagkbError
 from ragkb.core.index import ConfigIndex
 from ragkb.core.logging_config import setup_logging
+from ragkb.core.settings import apply_overrides, read_overrides
 from ragkb.db.storage import Storage
 from ragkb.services.stdout_sink import StdoutSink
 from ragkb.version import __version__
@@ -35,6 +36,9 @@ def health(request: Request) -> dict[str, str]:
 
 
 cfg = Settings()
+# Настройки со страницы управления лежат файлом и перекрывают окружение:
+# правка из интерфейса должна переживать перезапуск сервиса.
+apply_overrides(cfg, read_overrides(cfg.settings_file))
 raise_multipart_part_limit()
 setup_logging(level=cfg.logging.level, log_dir=cfg.logging.dir or None)
 

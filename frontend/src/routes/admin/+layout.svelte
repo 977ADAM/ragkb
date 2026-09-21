@@ -7,6 +7,7 @@
 		<a class="no-underline hover:underline" href="/admin">Организация</a>
 		<a class="no-underline hover:underline" href="/admin/documents">Документы</a>
 		<a class="no-underline hover:underline" href="/admin/reports">Отчёты</a>
+		<a class="no-underline hover:underline" href="/admin/settings">Настройки</a>
 		<a class="no-underline hover:underline" href="/new">К чату</a>
 	</nav>
 	{@render children()}

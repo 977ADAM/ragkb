@@ -50,7 +50,7 @@ def client(indexed: Settings):
 
 
 @pytest.fixture(autouse=True)
-def isolated_environment(monkeypatch):
+def isolated_environment(monkeypatch, tmp_path):
     """Never connect tests to credentials from a developer's .env."""
     for key in tuple(os.environ):
         if key.startswith('RAGKB_') or key.startswith('POSTGRES_'):
@@ -62,3 +62,6 @@ def isolated_environment(monkeypatch):
     # получают и те Settings(), которые тесты собирают вручную.
     monkeypatch.setenv('RAGKB_EMBEDDING_BACKEND', 'fake')
     monkeypatch.setenv('RAGKB_STORE_BACKEND', 'memory')
+    # Настройки со страницы управления пишутся файлом: в тестах он свой,
+    # иначе тест правил бы рабочий data/settings.json.
+    monkeypatch.setenv('RAGKB_SETTINGS_FILE', str(tmp_path / 'settings.json'))

@@ -77,8 +77,8 @@ class Settings(BaseSettings):
     class LLMConfig(BaseModel):
         # Генерация — OpenAI-совместимый HTTP (langchain-openai): vLLM,
         # llama.cpp, LM Studio, Ollama (её корень с /v1). Поле backend
-        # выбирает только источник каталога моделей.
-        backend: str = "extractive"
+        # выбирает только источник каталога моделей: openai | ollama | static.
+        backend: str = "openai"
         model: str = ""
         base_url: str = ""
         api_key: str = ""
@@ -104,6 +104,9 @@ class Settings(BaseSettings):
 
     docs_dir: str = "data/docs"
     index_dir: str = "data/index"
+    # Переопределения со страницы настроек: накладываются поверх окружения
+    # при старте, чтобы правка из интерфейса переживала перезапуск.
+    settings_file: str = "data/settings.json"
     chunking: ChunkConfig = ChunkConfig()
     embedding: EmbeddingConfig = EmbeddingConfig()
     store: StoreConfig = StoreConfig()
@@ -120,6 +123,7 @@ class Settings(BaseSettings):
     _ENV: ClassVar[dict[str, tuple[str | None, str]]] = {
         "RAGKB_DOCS_DIR": (None, "docs_dir"),
         "RAGKB_INDEX_DIR": (None, "index_dir"),
+        "RAGKB_SETTINGS_FILE": (None, "settings_file"),
         "RAGKB_EMBEDDING_BACKEND": ("embedding", "backend"),
         "RAGKB_EMBEDDING_MODEL": ("embedding", "model"),
         "RAGKB_EMBEDDING_URL": ("embedding", "base_url"),
@@ -148,6 +152,15 @@ class Settings(BaseSettings):
         "RAGKB_LOG_LEVEL": ("logging", "level"),
         "RAGKB_LOG_DIR": ("logging", "dir"),
     }
+
+    @classmethod
+    def env_overrides(cls) -> dict[str, tuple[str | None, str]]:
+        """Таблица «переменная окружения → путь в конфигурации».
+
+        Нужна странице настроек: она показывает, какие значения пришли из
+        окружения, а какие выставлены в интерфейсе.
+        """
+        return dict(cls._ENV)
 
     def model_post_init(self, __context: Any) -> None:
         self._apply_env()

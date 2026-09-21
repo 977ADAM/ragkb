@@ -43,7 +43,11 @@
   `alembic stamp --purge 0001_corpus_documents` — без `--purge` не выйдет,
   прежней ревизии больше нет в каталоге версий. Не уничтожать существующие
   данные автоматически.
-- Конфиг — `backend/ragkb/core/config.py`, перекрывается окружением `RAGKB_*`.
+- Конфиг — `backend/ragkb/core/config.py`, перекрывается окружением `RAGKB_*`,
+  а поверх него — файл настроек со страницы `/admin/settings`
+  (`data/settings.json`, путь задаёт `RAGKB_SETTINGS_FILE`). Каталог полей,
+  которые вообще можно править, — `backend/ragkb/core/settings.py`; страница
+  рисуется по ответу `GET /api/v1/admin/settings` и не знает про `Settings`.
 - Актуальное решение: `docs/superpowers/specs/2026-09-21-without-auth-and-history-design.md`.
   Прежние документы об авторизации и истории описывают старый контракт.
 
