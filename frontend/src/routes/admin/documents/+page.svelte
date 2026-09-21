@@ -14,19 +14,16 @@
 	 *   uploaded_by: string,
 	 *   uploaded_at: string
 	 * }} CorpusRow
-	 * @typedef {{ title?: string, source?: string, chunks?: number }} Orphan
-	 * @typedef {{ corpus_files: number, indexed_docs: number, chunks: number, external_files: number }} Summary
+	 * @typedef {{ corpus_files: number, indexed_docs: number, chunks: number }} Summary
 	 * @typedef {{
 	 *   id: string, name: string, size: number, file: File,
 	 *   status: 'wait' | 'upload' | 'done' | 'error', percent: number, error: string
 	 * }} QueueItem
-	 * @typedef {{ files?: number, chunks?: number, excluded?: string[], accepted?: string[], elapsed_sec?: number }} Report
+	 * @typedef {{ files?: number, chunks?: number, elapsed_sec?: number }} Report
 	 */
 
 	/** @type {CorpusRow[]} */
 	let corpus = $state([]);
-	/** @type {Orphan[]} */
-	let orphans = $state([]);
 	/** @type {unknown[]} */
 	let skipped = $state([]);
 	/** @type {Summary | null} */
@@ -42,7 +39,6 @@
 	let queue = $state([]);
 	let uploading = $state(false);
 	let indexing = $state(false);
-	let accepting = $state(false);
 	let dragging = $state(false);
 	/** @type {Report | null} */
 	let report = $state(null);
@@ -59,7 +55,6 @@
 				return;
 			}
 			corpus = body.corpus ?? [];
-			orphans = body.orphans ?? [];
 			skipped = body.skipped ?? [];
 			summary = body.summary ?? null;
 			registryOn = body.registry !== 'off';
@@ -68,15 +63,13 @@
 		}
 	}
 
-	const external = $derived(corpus.filter((row) => row.state === 'external'));
-
 	/** @param {string | null | undefined} state */
 	function stateLabel(state) {
 		if (state === 'indexed') return 'в индексе';
 		if (state === 'new') return 'ожидает индексации';
 		if (state === 'stale') return 'изменён, нужна переиндексация';
 		if (state === 'unknown') return 'в индексе (дата неизвестна)';
-		if (state === 'external') return 'вне корпуса — в индекс не попадёт';
+		if (state === 'missing') return 'файла нет — удалён мимо интерфейса';
 		return 'индекс не собран';
 	}
 
@@ -84,7 +77,7 @@
 	function stateClass(state) {
 		if (state === 'stale') return 'text-amber-600 dark:text-amber-400';
 		if (state === 'new') return 'text-red-600 dark:text-red-400';
-		if (state === 'external') return 'text-amber-600 dark:text-amber-400';
+		if (state === 'missing') return 'text-red-600 dark:text-red-400';
 		return '';
 	}
 
@@ -234,33 +227,6 @@
 		}
 	}
 
-	/** @param {string[]} names */
-	async function accept(names) {
-		if (!names.length || accepting) return;
-		accepting = true;
-		error = '';
-		try {
-			const response = await fetch('/api/admin/documents/accept', {
-				method: 'POST',
-				credentials: 'include',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ names })
-			});
-			const body = await response.json().catch(() => ({}));
-			if (!response.ok) {
-				error =
-					typeof body.detail === 'string' ? body.detail : 'Не удалось принять документы';
-				return;
-			}
-			report = body;
-		} catch (err) {
-			error = String(err);
-		} finally {
-			accepting = false;
-			await load();
-		}
-	}
-
 	/** @param {string} name */
 	async function remove(name) {
 		if (busy) return;
@@ -306,35 +272,15 @@
 		Файлов: <b>{summary.corpus_files}</b>
 		· В индексе: <b>{summary.indexed_docs}</b>
 		· Чанков: <b>{summary.chunks}</b>
-		{#if summary.external_files}
-			· Вне корпуса: <b>{summary.external_files}</b>
-		{/if}
 	</p>
 {/if}
 
 {#if !registryOn}
 	<p class="mb-3 rounded-md border border-amber-500 bg-amber-50 p-2 text-sm dark:bg-amber-950">
-		Реестр документов недоступен (нет базы данных), поэтому индексируется весь каталог:
-		в базу знаний попадёт и то, что положили мимо интерфейса. Задайте
-		<code>RAGKB_DATABASE_URL</code>, чтобы работала загрузка только через интерфейс.
+		Реестр документов недоступен: нет базы данных. Документы добавляются только загрузкой
+		через эту страницу, поэтому задайте <code>RAGKB_DATABASE_URL</code> и перезапустите сервис —
+		без реестра ни загрузка, ни индексация не работают.
 	</p>
-{/if}
-
-{#if external.length}
-	<div class="mb-4 rounded-md border border-amber-500 bg-amber-50 p-3 text-sm dark:bg-amber-950">
-		<p class="m-0">
-			<b>{external.length}</b> документ(ов) лежат в каталоге корпуса мимо интерфейса — в индекс
-			они не попадут, пока их не примут.
-		</p>
-		<button
-			class="btn mt-2"
-			type="button"
-			disabled={accepting || busy}
-			onclick={() => accept(external.map((row) => row.name))}
-		>
-			Принять все в корпус
-		</button>
-	</div>
 {/if}
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -387,14 +333,8 @@
 {/if}
 {#if report && !indexing}
 	<p class="mb-3 text-sm text-stone-500 dark:text-stone-400">
-		{#if report.accepted}
-			Принято документов: <b>{report.accepted.length}</b>.
-		{/if}
 		Проиндексировано файлов: <b>{report.files ?? 0}</b>, чанков: <b>{report.chunks ?? 0}</b>, за
 		<b>{report.elapsed_sec ?? 0}</b> с.
-		{#if report.excluded?.length}
-			Вне корпуса осталось: <b>{report.excluded.length}</b>.
-		{/if}
 	</p>
 {/if}
 
@@ -456,9 +396,6 @@
 				</td>
 				<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">
 					{row.uploaded_by || '—'}
-					{#if row.origin === 'external'}
-						<span class="text-xs text-stone-500 dark:text-stone-400">(принят из каталога)</span>
-					{/if}
 				</td>
 				<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">
 					{formatSize(row.size)}
@@ -470,17 +407,7 @@
 				<td
 					class="border-b border-stone-300 px-2 py-1.5 whitespace-nowrap dark:border-stone-700"
 				>
-					{#if row.state === 'external'}
-						<button
-							class="btn mr-1"
-							type="button"
-							disabled={accepting || busy}
-							onclick={() => accept([row.name])}
-						>
-							Принять
-						</button>
-					{/if}
-					<button class="btn" type="button" disabled={busy || accepting} onclick={() => remove(row.name)}>
+					<button class="btn" type="button" disabled={busy} onclick={() => remove(row.name)}>
 						Удалить
 					</button>
 				</td>
@@ -490,37 +417,6 @@
 </table>
 {#if corpus.length === 0 && !error}
 	<p class="text-stone-500 dark:text-stone-400">Документов нет.</p>
-{/if}
-
-{#if orphans.length}
-	<h2 class="mt-6 mb-1 text-lg font-semibold">Сироты</h2>
-	<p class="text-stone-500 dark:text-stone-400">
-		документа нет в каталоге — исчезнет при полной переиндексации
-	</p>
-	<table class="mt-2 w-full border-collapse text-left">
-		<thead>
-			<tr>
-				<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Название</th>
-				<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Источник</th>
-				<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Чанки</th>
-			</tr>
-		</thead>
-		<tbody>
-			{#each orphans as orphan, i (orphan.source ?? i)}
-				<tr>
-					<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">
-						{orphan.title ?? ''}
-					</td>
-					<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">
-						{orphan.source ?? ''}
-					</td>
-					<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">
-						{orphan.chunks ?? 0}
-					</td>
-				</tr>
-			{/each}
-		</tbody>
-	</table>
 {/if}
 
 {#if skipped.length}

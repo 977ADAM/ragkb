@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 import pytest
-from helpers import KeywordEmbeddings, ScriptedChatModel
+from helpers import KeywordEmbeddings, ScriptedChatModel, corpus_names
 
 from ragkb.core import loaders, manifest
 from ragkb.core.config import Settings
@@ -127,7 +127,7 @@ def test_citation_skips_repeated_document_title(tmp_path):
 def test_build_index_writes_manifest(tmp_path, keyword_embeddings):
     cfg = _cfg(tmp_path)
 
-    report = build_index(cfg)
+    report = build_index(cfg, corpus_names(cfg))
 
     assert report.files == 1
     assert report.chunks >= 3
@@ -144,42 +144,44 @@ def test_build_index_writes_manifest(tmp_path, keyword_embeddings):
     assert {"mtime", "size", "sha256"} <= set(indexed["documents"][0])
 
 
-def test_build_index_without_files_is_reported(tmp_path, keyword_embeddings):
+def test_build_index_reports_missing_file(tmp_path, keyword_embeddings):
+    """Запись в корпусе есть, файла нет — это ошибка с причиной, а не пустой индекс."""
     cfg = _cfg(tmp_path)
     Path(cfg.docs_dir, "policy.md").unlink()
 
-    with pytest.raises(FileNotFoundError):
-        build_index(cfg)
+    with pytest.raises(ValueError) as exc:
+        build_index(cfg, frozenset({"policy.md"}))
+
+    assert "файл не найден" in str(exc.value)
 
 
-def test_build_index_excludes_unaccepted_files(tmp_path, keyword_embeddings):
-    cfg = _cfg(tmp_path, **{"accepted.md": "", "rejected.md": ""})
-    (Path(cfg.docs_dir) / "accepted.md").write_text("# Принят\n\nТекст.\n", encoding="utf-8")
-    (Path(cfg.docs_dir) / "rejected.md").write_text("# Нет\n\nТекст.\n", encoding="utf-8")
+def test_build_index_indexes_only_named_documents(tmp_path, keyword_embeddings):
+    """Индексируются документы корпуса, а не всё, что лежит в каталоге."""
+    cfg = _cfg(
+        tmp_path,
+        **{"accepted.md": "# Принят\n\nТекст.\n", "rejected.md": "# Нет\n\nТекст.\n"},
+    )
 
-    report = build_index(cfg, allow=lambda name: name == "accepted.md")
+    report = build_index(cfg, frozenset({"accepted.md"}))
 
     assert report.files == 1
-    assert [Path(p).name for p in report.excluded] == ["rejected.md"]
-    assert [d["source"] for d in manifest.read(cfg)["documents"]] == [
-        str(Path(cfg.docs_dir) / "accepted.md")
-    ]
+    assert [Path(d["source"]).name for d in manifest.read(cfg)["documents"]] == ["accepted.md"]
 
 
-def test_build_index_with_nothing_accepted_explains_what_to_do(tmp_path, keyword_embeddings):
+def test_build_index_with_empty_corpus_explains_what_to_do(tmp_path, keyword_embeddings):
     cfg = _cfg(tmp_path)
 
     with pytest.raises(ValueError) as exc:
-        build_index(cfg, allow=lambda _name: False)
+        build_index(cfg, frozenset())
 
-    assert "Примите их на странице" in str(exc.value)
+    assert "загрузите их на странице" in str(exc.value).lower()
 
 
 def test_build_index_reports_unreadable_file(tmp_path, keyword_embeddings):
     cfg = _cfg(tmp_path)
     (Path(cfg.docs_dir) / "broken.pdf").write_bytes(b"not a pdf")
 
-    report = build_index(cfg)
+    report = build_index(cfg, corpus_names(cfg))
 
     assert report.files == 1
     assert [Path(path).name for path, _reason in report.skipped] == ["broken.pdf"]
@@ -190,7 +192,7 @@ def test_every_file_gets_its_own_document(tmp_path, keyword_embeddings):
         tmp_path, **{"first.md": "# Первый\n\nТекст.\n", "second.md": "# Второй\n\nТекст.\n"}
     )
 
-    report = build_index(cfg)
+    report = build_index(cfg, corpus_names(cfg))
 
     assert report.files == 2
     assert len(manifest.read(cfg)["documents"]) == 2
@@ -201,7 +203,7 @@ def test_every_file_gets_its_own_document(tmp_path, keyword_embeddings):
 
 def test_search_finds_fragment_by_exact_term(tmp_path, keyword_embeddings):
     cfg = _cfg(tmp_path)
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
     chain = RagChain(cfg)
 
     hits = chain.search("сколько суточные в командировке", top_k=3)
@@ -212,7 +214,7 @@ def test_search_finds_fragment_by_exact_term(tmp_path, keyword_embeddings):
 
 def test_hit_payload_keeps_api_contract(tmp_path, keyword_embeddings):
     cfg = _cfg(tmp_path)
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
     chain = RagChain(cfg)
 
     payload = chain.search("отпуск", top_k=1)[0].to_dict()
@@ -236,7 +238,7 @@ def test_hit_payload_keeps_api_contract(tmp_path, keyword_embeddings):
 
 def test_min_score_drops_unrelated_hits(tmp_path, keyword_embeddings):
     cfg = _cfg(tmp_path)
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
     cfg.retrieval.min_score = 0.9
     chain = RagChain(cfg)
 
@@ -245,7 +247,7 @@ def test_min_score_drops_unrelated_hits(tmp_path, keyword_embeddings):
 
 def test_chain_rejects_index_of_another_embedder(tmp_path, keyword_embeddings):
     cfg = _cfg(tmp_path)
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
     cfg.embedding.fake_dim = 64
 
     with pytest.raises(ValueError) as exc:
@@ -255,7 +257,7 @@ def test_chain_rejects_index_of_another_embedder(tmp_path, keyword_embeddings):
 
 def test_chain_rejects_index_of_another_store(tmp_path, keyword_embeddings):
     cfg = _cfg(tmp_path)
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
     cfg.store.backend = "chroma"
 
     with pytest.raises(ValueError) as exc:
@@ -273,7 +275,7 @@ def test_chain_requires_manifest(tmp_path, keyword_embeddings):
 
 def test_stream_answer_yields_tokens_and_hits(tmp_path, keyword_embeddings, monkeypatch):
     cfg = _cfg(tmp_path)
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
     monkeypatch.setattr(
         "ragkb.core.pipeline.build_chat_model",
         lambda *_args, **_kwargs: ScriptedChatModel(responses=["Отпускные — за три дня [1]."]),
@@ -290,7 +292,7 @@ def test_stream_answer_yields_tokens_and_hits(tmp_path, keyword_embeddings, monk
 
 def test_ask_returns_answer_with_sources(tmp_path, keyword_embeddings, monkeypatch):
     cfg = _cfg(tmp_path)
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
     monkeypatch.setattr(
         "ragkb.core.pipeline.build_chat_model",
         lambda *_args, **_kwargs: ScriptedChatModel(responses=["Суточные — 1200 рублей [1]."]),
@@ -307,7 +309,7 @@ def test_ask_returns_answer_with_sources(tmp_path, keyword_embeddings, monkeypat
 
 def test_llm_unavailable_without_address(tmp_path, keyword_embeddings):
     cfg = _cfg(tmp_path)
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
     cfg.llm.base_url = ""
     chain = RagChain(cfg)
 
@@ -316,7 +318,7 @@ def test_llm_unavailable_without_address(tmp_path, keyword_embeddings):
 
 def test_cited_sources_skip_uncited_and_unknown_numbers(tmp_path, keyword_embeddings):
     cfg = _cfg(tmp_path)
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
     chain = RagChain(cfg)
     hits = chain.search("отпуск", top_k=3)
 
@@ -328,7 +330,7 @@ def test_cited_sources_skip_uncited_and_unknown_numbers(tmp_path, keyword_embedd
 
 def test_stats_describe_index_without_building_engine(tmp_path, keyword_embeddings):
     cfg = _cfg(tmp_path)
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
 
     stats = ConfigIndex(cfg, lambda: pytest.fail("движок не нужен")).stats()
 
@@ -366,7 +368,7 @@ def test_expanded_queries_drop_repeats_of_question():
 
 def test_expand_search_merges_variants(tmp_path, keyword_embeddings, monkeypatch):
     cfg = _cfg(tmp_path)
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
     monkeypatch.setattr(
         "ragkb.core.pipeline.build_chat_model",
         lambda *_args, **_kwargs: ScriptedChatModel(
@@ -422,7 +424,7 @@ def test_hit_dataclass_contract():
 
 def test_manifest_json_is_readable(tmp_path, keyword_embeddings):
     cfg = _cfg(tmp_path)
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
 
     payload = json.loads((Path(cfg.index_dir) / "manifest.json").read_text(encoding="utf-8"))
 

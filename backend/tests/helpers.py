@@ -28,6 +28,7 @@ from ragkb.core.logging_config import setup_logging
 from ragkb.core.settings import apply_overrides, read_overrides
 from ragkb.core.text import tokenize
 from ragkb.db.storage import Storage
+from ragkb.domain.entities import ORIGIN_UI, CorpusDocument
 from ragkb.services.stdout_sink import StdoutSink
 from ragkb.version import __version__
 
@@ -70,6 +71,65 @@ def make_app(cfg: Settings) -> FastAPI:
     app.add_api_route("/health", health, methods=["GET"])
     app.include_router(api_router, prefix="/api/v1")
     return app
+
+
+class MemoryRegistry:
+    """Реестр документов в памяти — замена Postgres в тестах сервисов."""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, CorpusDocument] = {}
+
+    def add(self, cfg: Settings, *names: str) -> MemoryRegistry:
+        """Заводит в реестре файлы, которые уже лежат в каталоге корпуса."""
+        for name in names or tuple(p.name for p in Path(cfg.docs_dir).iterdir()):
+            data = (Path(cfg.docs_dir) / name).read_bytes()
+            self.rows[name] = CorpusDocument(
+                name=name,
+                origin=ORIGIN_UI,
+                uploaded_at="2026-09-10T00:00:00+00:00",
+                size=len(data),
+                sha256=hashlib.sha256(data).hexdigest(),
+            )
+        return self
+
+    def index_names(self) -> frozenset[str]:
+        return frozenset(self.rows)
+
+    async def names(self) -> set[str]:
+        return set(self.rows)
+
+    async def list_all(self) -> list[CorpusDocument]:
+        return list(self.rows.values())
+
+    async def record(
+        self,
+        name: str,
+        *,
+        origin: str = ORIGIN_UI,
+        uploaded_by: str = "",
+        size: int = 0,
+        sha256: str = "",
+    ) -> None:
+        self.rows[name] = CorpusDocument(
+            name=name,
+            origin=origin,
+            uploaded_by=uploaded_by,
+            uploaded_at="2026-09-10T00:00:00+00:00",
+            size=size,
+            sha256=sha256,
+        )
+
+    async def forget(self, name: str) -> bool:
+        return self.rows.pop(name, None) is not None
+
+
+def corpus_names(cfg: Settings) -> frozenset[str]:
+    """Имена файлов каталога — тест объявляет их корпусом вместо реестра.
+
+    В приложении состав корпуса задаёт реестр; в тестах, где реестра нет,
+    его роль играет этот список.
+    """
+    return frozenset(p.name for p in Path(cfg.docs_dir).iterdir() if p.is_file())
 
 
 class KeywordEmbeddings(Embeddings):

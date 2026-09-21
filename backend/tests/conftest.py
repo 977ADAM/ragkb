@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from helpers import make_app
+from helpers import corpus_names, make_app
 
 from ragkb.core.config import Settings
 from ragkb.core.pipeline import build_index
@@ -39,7 +39,7 @@ def cfg(tmp_path: Path) -> Settings:
 
 @pytest.fixture
 def indexed(cfg: Settings) -> Settings:
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
     return cfg
 
 

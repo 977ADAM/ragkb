@@ -37,11 +37,9 @@ class IndexEngine(Protocol):
     def probe(self) -> str:
         """«ok» или «no_index» — дешёвая проверка без сборки движка."""
 
-    def rebuild(self, allow: frozenset[str] | None = None) -> Any:
-        """Переиндексация; `allow` — имена документов, принятых в корпус."""
+    def rebuild(self, names: frozenset[str]) -> Any:
+        """Переиндексация; `names` — имена документов из реестра корпуса."""
 
     def manifest(self) -> dict[str, Any]: ...
 
-    def reindex_after_delete(
-        self, path: str, allow: frozenset[str] | None = None
-    ) -> None: ...
+    def reindex_after_delete(self, path: str, names: frozenset[str]) -> None: ...

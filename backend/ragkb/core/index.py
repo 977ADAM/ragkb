@@ -12,7 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ragkb.core import loaders, manifest
+from ragkb.core import manifest
 from ragkb.core.config import Settings
 from ragkb.core.errors import Conflict, InvalidRequest
 from ragkb.core.llm import chat_model_name
@@ -49,11 +49,11 @@ class ConfigIndex:
     def manifest(self) -> dict[str, Any]:
         return manifest.read(self.cfg)
 
-    def rebuild(self, allow: frozenset[str] | None = None):
-        """Полная переиндексация документов, принятых в корпус.
+    def rebuild(self, names: frozenset[str]):
+        """Полная переиндексация документов корпуса.
 
-        `allow` — имена из реестра документов; None значит «индексировать
-        всё, что нашлось в каталоге» (режим без реестра).
+        `names` — имена документов из реестра: каталог не обходится, состав
+        корпуса задаётся только загрузкой через интерфейс.
 
         Сборка идёт по одной за раз: параллельные пересборки не ускоряются
         (ядра общие), а коллекция и память общие.
@@ -61,37 +61,26 @@ class ConfigIndex:
         if not self._rebuild_lock.acquire(blocking=False):
             raise Conflict("Индексация уже идёт — дождитесь её завершения")
         try:
-            return build_index(self.cfg, allow=_by_registry(allow))
+            return build_index(self.cfg, names)
         finally:
             self._rebuild_lock.release()
 
-    def reindex_after_delete(self, path: str, allow: frozenset[str] | None = None) -> None:
+    def reindex_after_delete(self, path: str, names: frozenset[str]) -> None:
+        """Обновляет индекс после удаления документа.
+
+        `names` — то, что осталось в реестре. Пустой реестр означает, что
+        корпус опустел: индекс и манифест снимаются целиком, чтобы /health
+        честно говорил «не собран».
+        """
         if not manifest.exists(self.cfg):
             return
-        root = Path(self.cfg.docs_dir)
-        predicate = _by_registry(allow)
-        # «Корпус опустел» считаем по принятым документам, а не по каталогу:
-        # файлы мимо интерфейса в индексе не участвуют, и оставшийся из них
-        # каталог не повод держать индекс, которого больше не на чем собрать.
-        remaining = [
-            candidate
-            for candidate in loaders.discover(root)
-            if predicate is None or predicate(loaders.relative_name(candidate, root))
-        ]
-        if not remaining:
+        if not names:
             shutil.rmtree(Path(self.cfg.index_dir), ignore_errors=True)
             return
         if self.cfg.store.backend.lower() == "chroma":
             remove_document(self.cfg, path)
             return
         try:
-            build_index(self.cfg, allow=predicate)
+            build_index(self.cfg, names)
         except ValueError as exc:
             raise InvalidRequest(f"Не удалось пересобрать индекс: {exc}") from exc
-
-
-def _by_registry(allow: frozenset[str] | None):
-    """Предикат «документ принят в корпус» для ядра индексации."""
-    if allow is None:
-        return None
-    return lambda name: name in allow

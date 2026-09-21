@@ -34,15 +34,18 @@ class IndexService:
             return {"status": "no_index", "detail": exc.detail}
 
     async def rebuild(self) -> dict[str, Any]:
-        allow = None
-        if self._registry is not None:
-            allow = frozenset(await self._registry.names())
+        if self._registry is None:
+            raise InvalidRequest(
+                "Реестр документов не подключён: задайте RAGKB_DATABASE_URL. "
+                "Документы добавляются только загрузкой через страницу «Документы»."
+            )
+        names = frozenset(await self._registry.names())
         # Индексация синхронная и тяжёлая: уводим её с цикла событий, иначе
         # на время сборки перестают отвечать все остальные запросы.
         try:
-            report = await asyncio.to_thread(self._index.rebuild, allow)
+            report = await asyncio.to_thread(self._index.rebuild, names)
         except (ValueError, FileNotFoundError) as exc:
-            # «Ни один файл не принят в корпус» — это ошибка запроса, а не сбой
+            # «В корпусе нет документов» — это ошибка запроса, а не сбой
             # сервиса: администратору нужно объяснение, что делать дальше.
             raise InvalidRequest(str(exc)) from exc
         self._invalidate()
@@ -50,6 +53,5 @@ class IndexService:
             "files": report.files,
             "chunks": report.chunks,
             "skipped": report.skipped,
-            "excluded": report.excluded,
             "elapsed_sec": round(report.elapsed, 1),
         }

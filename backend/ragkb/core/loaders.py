@@ -58,20 +58,21 @@ def relative_name(path: str | Path, root: str | Path) -> str:
         return path.name
 
 
-def discover(root: str | Path) -> list[Path]:
-    """Рекурсивно находит все поддерживаемые файлы, игнорируя служебные."""
-    root = Path(root)
-    if root.is_file():
-        return [root] if root.suffix.lower() in SUPPORTED_EXTENSIONS else []
-    files = []
-    for path in sorted(root.rglob("*")):
-        if not path.is_file():
-            continue
-        if path.name.startswith(".") or "~$" in path.name:
-            continue
-        if path.suffix.lower() in SUPPORTED_EXTENSIONS:
-            files.append(path)
-    return files
+def document_path(root: str | Path, name: str) -> Path:
+    """Путь документа внутри каталога корпуса.
+
+    Имя приходит из реестра (или из имени загруженного файла), поэтому выход
+    за пределы каталога запрещён: иначе запись в реестре вида `../../etc/passwd`
+    читала бы файлы вне корпуса.
+    """
+    if not name or name.startswith((".", "~$")):
+        raise UnsupportedFormat("Недопустимое имя файла")
+    root_path = Path(root).expanduser()
+    candidate = (root_path / name).resolve()
+    root_resolved = root_path.resolve()
+    if candidate != root_resolved and root_resolved not in candidate.parents:
+        raise UnsupportedFormat("Недопустимое имя файла")
+    return candidate
 
 
 def load(path: str | Path) -> LoadedDocument:

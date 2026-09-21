@@ -1,10 +1,10 @@
 """Корпус документов: реестр, состояние и операции над файлами.
 
-Реестр (таблица `corpus_documents`) — источник истины о том, что принадлежит
-базе знаний. Индекс собирается только по нему, поэтому файл, положенный в
-каталог мимо интерфейса, в ответы не попадёт, пока его не примут
-его на странице документов. Без реестра (нет БД) сервис работает по-прежнему:
-индексируется всё, что лежит в каталоге.
+Реестр (таблица `corpus_documents`) — единственный источник документов:
+попасть в базу знаний можно только загрузкой через страницу «Документы».
+Файлы, положенные в каталог мимо интерфейса, не индексируются и в списке
+не показываются — каталог не обходится вовсе. Без реестра (нет
+`RAGKB_DATABASE_URL`) операции недоступны: загружать документы некуда.
 """
 from __future__ import annotations
 
@@ -19,12 +19,19 @@ from ragkb.core import loaders
 from ragkb.core.config import Settings
 from ragkb.core.errors import EngineUnavailable, InvalidRequest, NotFound, PayloadTooLarge
 from ragkb.core.ports import IndexEngine
-from ragkb.domain.entities import ORIGIN_EXTERNAL, ORIGIN_UI, CorpusDocument
+from ragkb.domain.entities import ORIGIN_UI, CorpusDocument
 from ragkb.domain.ports import DocumentRegistry
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 _HIDDEN_PREFIXES = (".", "~$")
+
+# Один текст на все операции без реестра: документы берутся только из него,
+# поэтому без базы знаний работать не с чем — и это надо сказать прямо.
+_NO_REGISTRY = (
+    "Реестр документов не подключён: задайте RAGKB_DATABASE_URL. "
+    "Документы добавляются только загрузкой через эту страницу."
+)
 
 
 class DocumentsService:
@@ -48,24 +55,22 @@ class DocumentsService:
 
     async def list_documents(self) -> dict[str, Any]:
         docs_dir = Path(self.cfg.docs_dir)
-        files = loaders.discover(docs_dir)
         registry = await self._rows()
         try:
             manifest = self._index.manifest()
         except EngineUnavailable:
-            return self._view(files, docs_dir, registry, manifest=None)
-        return self._view(files, docs_dir, registry, manifest=manifest)
+            return self._view(docs_dir, registry, manifest=None)
+        return self._view(docs_dir, registry, manifest=manifest)
 
-    async def _rows(self) -> dict[str, CorpusDocument] | None:
+    async def _rows(self) -> dict[str, CorpusDocument]:
         if self._registry is None:
-            return None
+            return {}
         return {doc.name: doc for doc in await self._registry.list_all()}
 
     def _view(
         self,
-        files: list[Path],
         docs_dir: Path,
-        registry: dict[str, CorpusDocument] | None,
+        registry: dict[str, CorpusDocument],
         *,
         manifest: dict[str, Any] | None,
     ) -> dict[str, Any]:
@@ -80,14 +85,12 @@ class DocumentsService:
         corpus: list[dict[str, Any]] = []
         indexed_docs = 0
         total_chunks = 0
-        external = 0
-        for path in files:
-            name = loaders.relative_name(path, docs_dir)
-            row = _file_row(path, name)
-            entry = by_source.get(str(path)) or by_name.get(path.name)
-            registered = registry is None or name in registry
-            if not registered:
-                external += 1
+        for name in sorted(registry):
+            target = _document_file(docs_dir, name)
+            exists = target.is_file()
+            document = registry[name]
+            row = _file_row(target, name, document) if exists else _missing_row(name, document)
+            entry = by_source.get(str(target)) or by_name.get(Path(name).name)
             if entry is not None:
                 indexed_docs += 1
                 total_chunks += int(entry.get("chunks", 0))
@@ -95,40 +98,30 @@ class DocumentsService:
                 {
                     **row,
                     **_registry_fields(registry, name),
-                    "registered": registered,
                     "indexed": entry is not None,
                     "chunks": entry.get("chunks", 0) if entry else 0,
                     "state": _file_state(
-                        path,
+                        target,
                         row,
                         entry,
                         built_at,
-                        registered=registered,
+                        exists=exists,
                         has_index=manifest is not None,
                     ),
                 }
             )
 
-        file_paths = {str(f) for f in files}
-        names = {f.name for f in files}
-        orphans = [
-            {k: d.get(k) for k in ("title", "source", "chunks")}
-            for d in documents
-            if d["source"] not in file_paths and Path(d["source"]).name not in names
-        ]
         return {
             "docs_dir": str(docs_dir.expanduser().resolve()),
             "index": "ok" if manifest is not None else "no_index",
-            "registry": "on" if registry is not None else "off",
+            "registry": "on" if self._registry is not None else "off",
             "built_at": built_at_raw,
             "corpus": corpus,
-            "orphans": orphans,
             "skipped": list((manifest or {}).get("skipped", [])),
             "summary": {
-                "corpus_files": len(files),
+                "corpus_files": len(registry),
                 "indexed_docs": indexed_docs,
                 "chunks": total_chunks,
-                "external_files": external,
             },
         }
 
@@ -142,6 +135,8 @@ class DocumentsService:
         `index=False` — файл только принимается: так грузится пачка, и одну
         индексацию делают в конце, а не после каждого файла.
         """
+        if self._registry is None:
+            raise InvalidRequest(_NO_REGISTRY)
         name = Path(filename).name
         if not name or name.startswith(_HIDDEN_PREFIXES):
             raise InvalidRequest("Недопустимое имя файла")
@@ -159,14 +154,13 @@ class DocumentsService:
         docs_dir.mkdir(parents=True, exist_ok=True)
         target = docs_dir / name
         target.write_bytes(content)
-        if self._registry is not None:
-            await self._registry.record(
-                name,
-                origin=ORIGIN_UI,
-                uploaded_by=user,
-                size=len(content),
-                sha256=hashlib.sha256(content).hexdigest(),
-            )
+        await self._registry.record(
+            name,
+            origin=ORIGIN_UI,
+            uploaded_by=user,
+            size=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+        )
         if not index:
             self._invalidate()
             return {
@@ -175,7 +169,6 @@ class DocumentsService:
                 "files": 0,
                 "chunks": 0,
                 "skipped": [],
-                "excluded": [],
                 "elapsed_sec": 0.0,
             }
         try:
@@ -184,69 +177,37 @@ class DocumentsService:
             # Документ не прошёл индексацию — не оставляем его ни файлом,
             # ни записью в реестре, иначе он будет висеть «новым» навсегда.
             target.unlink(missing_ok=True)
-            if self._registry is not None:
-                await self._registry.forget(name)
+            await self._registry.forget(name)
             raise InvalidRequest(f"Не удалось проиндексировать: {exc}") from exc
         self._invalidate()
         return _report_payload(report, registered=name, indexed=True)
 
-    async def accept(self, names: list[str], user: str = "") -> dict[str, Any]:
-        """Принимает в корпус файлы, положенные в каталог мимо интерфейса."""
-        if self._registry is None:
-            raise InvalidRequest(
-                "Реестр документов недоступен: без него индексируется весь "
-                "каталог, принимать отдельные файлы не нужно."
-            )
-        if not names:
-            raise InvalidRequest("Не указан ни один документ")
-        docs_dir = Path(self.cfg.docs_dir)
-        accepted: list[str] = []
-        for raw in names:
-            name = loaders.relative_name(raw, docs_dir) if Path(raw).is_absolute() else raw
-            target = _safe_target(docs_dir, name)
-            if not target.is_file():
-                raise NotFound(f"Файл «{name}» не найден в каталоге документов")
-            await self._registry.record(
-                name,
-                origin=ORIGIN_EXTERNAL,
-                uploaded_by=user,
-                size=target.stat().st_size,
-                sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
-            )
-            accepted.append(name)
-        try:
-            report = await self._rebuild()
-        except (ValueError, FileNotFoundError) as exc:
-            raise InvalidRequest(f"Не удалось проиндексировать: {exc}") from exc
-        self._invalidate()
-        return {**_report_payload(report), "accepted": accepted}
-
     async def delete(self, name: str) -> None:
+        if self._registry is None:
+            raise InvalidRequest(_NO_REGISTRY)
         docs_dir = Path(self.cfg.docs_dir)
-        target = _safe_target(docs_dir, name)
-        if not target.is_file():
-            raise NotFound(f"Файл «{name}» не найден в каталоге документов")
-        target.unlink()
-        key = loaders.relative_name(target, docs_dir)
-        if self._registry is not None:
-            await self._registry.forget(key)
-        allow = await self._allowed_names()
-        await asyncio.to_thread(self._index.reindex_after_delete, str(target), allow)
+        # Удаляем только документы корпуса: файл, положенный в каталог мимо
+        # интерфейса, в базе знаний не участвует, и трогать его мы не вправе.
+        if name not in await self._rows():
+            raise NotFound(f"Документа «{name}» нет в корпусе")
+        target = _document_file(docs_dir, name)
+        # Файла может уже не быть (его убрали мимо интерфейса) — тогда
+        # удаление просто приводит реестр и индекс в порядок.
+        target.unlink(missing_ok=True)
+        # Документ уходит из реестра первым: индекс пересобирается по тому,
+        # что в нём осталось, и удалённый файл в корпус уже не вернётся.
+        await self._registry.forget(loaders.relative_name(target, docs_dir))
+        remaining = frozenset(await self._registry.names())
+        await asyncio.to_thread(self._index.reindex_after_delete, str(target), remaining)
         self._invalidate()
 
     # ------------------------------------------------------------- служебное
 
-    async def _allowed_names(self) -> frozenset[str] | None:
-        """Имена принятых документов; None — реестра нет, индексируем всё."""
-        if self._registry is None:
-            return None
-        return frozenset(await self._registry.names())
-
     async def _rebuild(self):
-        allow = await self._allowed_names()
+        names = frozenset(await self._registry.names()) if self._registry else frozenset()
         # Индексация синхронная и тяжёлая: уводим её с цикла событий, иначе
         # на время сборки перестают отвечать все остальные запросы.
-        return await asyncio.to_thread(self._index.rebuild, allow)
+        return await asyncio.to_thread(self._index.rebuild, names)
 
 
 def _report_payload(report: Any, **extra: Any) -> dict[str, Any]:
@@ -254,27 +215,21 @@ def _report_payload(report: Any, **extra: Any) -> dict[str, Any]:
         "files": report.files,
         "chunks": report.chunks,
         "skipped": report.skipped,
-        "excluded": report.excluded,
         "elapsed_sec": round(report.elapsed, 1),
         **extra,
     }
 
 
-def _safe_target(docs_dir: Path, name: str) -> Path:
-    """Путь файла внутри каталога корпуса. Выход за каталог запрещён."""
-    if not name or name.startswith(_HIDDEN_PREFIXES):
-        raise InvalidRequest("Недопустимое имя файла")
-    root = docs_dir.resolve()
-    candidate = (docs_dir / name).resolve()
-    if candidate != root and root not in candidate.parents:
-        raise InvalidRequest("Недопустимое имя файла")
-    return candidate
+def _document_file(docs_dir: Path, name: str) -> Path:
+    """Путь документа корпуса без выхода за каталог (имя приходит из реестра)."""
+    try:
+        return loaders.document_path(docs_dir, name)
+    except Exception:
+        return docs_dir / name
 
 
-def _registry_fields(
-    registry: dict[str, CorpusDocument] | None, name: str
-) -> dict[str, Any]:
-    doc = (registry or {}).get(name)
+def _registry_fields(registry: dict[str, CorpusDocument], name: str) -> dict[str, Any]:
+    doc = registry.get(name)
     if doc is None:
         return {"origin": None, "uploaded_by": "", "uploaded_at": ""}
     return {
@@ -290,13 +245,13 @@ def _file_state(
     entry: dict[str, Any] | None,
     built_at: datetime | None,
     *,
-    registered: bool,
+    exists: bool,
     has_index: bool,
 ) -> str | None:
-    """Состояние документа: реестр, файл и запись в индексе вместе."""
-    if not registered:
-        # Файл лежит мимо интерфейса: в индекс он не попадёт, пока его не примут.
-        return "external"
+    """Состояние документа: файл на диске и запись в индексе вместе."""
+    if not exists:
+        # Запись в реестре есть, файла нет: его удалили мимо интерфейса.
+        return "missing"
     if not has_index:
         return None
     if entry is None:
@@ -304,12 +259,23 @@ def _file_state(
     return _document_state(path, row, entry, built_at)
 
 
-def _file_row(path: Path, name: str) -> dict[str, Any]:
+def _file_row(path: Path, name: str, document: CorpusDocument) -> dict[str, Any]:
     stat = path.stat()
     return {
         "name": name,
         "size": stat.st_size,
         "mtime": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+        "sha256": document.sha256,
+    }
+
+
+def _missing_row(name: str, document: CorpusDocument) -> dict[str, Any]:
+    """Строка документа, файла которого нет: показываем то, что знает реестр."""
+    return {
+        "name": name,
+        "size": document.size,
+        "mtime": document.uploaded_at,
+        "sha256": document.sha256,
     }
 
 

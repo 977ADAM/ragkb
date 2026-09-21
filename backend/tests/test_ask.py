@@ -3,7 +3,7 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
-from helpers import ScriptedChatModel, make_app
+from helpers import ScriptedChatModel, corpus_names, make_app
 
 from ragkb.core.config import Settings
 from ragkb.core.pipeline import build_index
@@ -26,7 +26,7 @@ def public_app(tmp_path, monkeypatch):
             responses=['Ежегодный отпуск — 28 календарных дней [1].']
         ),
     )
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
     return make_app(cfg)
 
 

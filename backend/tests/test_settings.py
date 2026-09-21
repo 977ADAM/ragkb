@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 import pytest
+from helpers import corpus_names
 
 from ragkb.core import settings as core
 from ragkb.core.config import Settings
@@ -255,7 +256,7 @@ def test_index_state_reports_drift_after_embedder_change(indexed):
 
 
 def test_index_state_reports_drift_after_chunking_change(cfg):
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
     service = _service(cfg, index=True)
 
     service.update({"chunking.size": 400})

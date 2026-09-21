@@ -1,8 +1,8 @@
 """HTTP-слой управления документами корпуса.
 
-Документы попадают в базу знаний только отсюда: файлы, положенные в каталог
-корпуса мимо интерфейса, видны в списке как «вне корпуса» и индексируются
-лишь после явного принятия.
+Документы попадают в базу знаний только отсюда: загрузка, удаление и
+пересборка индекса. Каталог документов не обходится — файл, положенный в него
+мимо интерфейса, не индексируется и в списке не появляется.
 """
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 
 from ragkb.api.deps.services import documents_service
-from ragkb.api.schemas.documents import AcceptRequest
 from ragkb.services.documents import MAX_UPLOAD_BYTES, DocumentsService
 
 log = logging.getLogger("ragkb")
@@ -43,20 +42,6 @@ async def upload_document(
         )
     else:
         log.info("принят документ %s без индексации", name)
-    return result
-
-
-@router.post("/documents/accept")
-async def accept_documents(
-    body: AcceptRequest,
-    svc: DocsService,
-) -> dict:
-    result = await svc.accept(body.names)
-    log.info(
-        "принято в корпус документов %s (%s чанков)",
-        len(result["accepted"]),
-        result["chunks"],
-    )
     return result
 
 

@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 import time
@@ -14,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from helpers import make_app
+from helpers import MemoryRegistry, corpus_names, make_app
 
 from ragkb.core import manifest
 from ragkb.core.config import Settings
@@ -53,8 +54,11 @@ def _forbidden_engine():
 
 async def test_document_listing_does_not_build_engine(tmp_path):
     cfg = _cfg(tmp_path)
-    build_index(cfg)
-    svc = DocumentsService(cfg, ConfigIndex(cfg, _forbidden_engine()), lambda: None)
+    registry = MemoryRegistry().add(cfg)
+    build_index(cfg, registry.index_names())
+    svc = DocumentsService(
+        cfg, ConfigIndex(cfg, _forbidden_engine()), lambda: None, registry
+    )
 
     body = await svc.list_documents()
 
@@ -64,7 +68,7 @@ async def test_document_listing_does_not_build_engine(tmp_path):
 
 def test_status_does_not_build_engine(tmp_path):
     cfg = _cfg(tmp_path)
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
 
     status = IndexService(ConfigIndex(cfg, _forbidden_engine()), lambda: None).status()
 
@@ -81,7 +85,7 @@ def test_probe_reports_missing_index_without_engine(tmp_path):
     with pytest.raises(EngineUnavailable):
         index.manifest()
 
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
     assert index.probe() == "ok"
 
 
@@ -92,7 +96,7 @@ def test_health_does_not_build_engine(tmp_path, monkeypatch):
         raise AssertionError("движок собран на проверке живости")
 
     cfg = _cfg(tmp_path)
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
     monkeypatch.setattr("ragkb.core.engine.RagChain", boom)
     with TestClient(make_app(cfg)) as client:
         assert client.get("/health").json() == {"status": "ok"}
@@ -114,7 +118,7 @@ def test_health_reports_missing_index(tmp_path, monkeypatch):
 def test_manifest_records_what_index_was_built_with(tmp_path):
     cfg = _cfg(tmp_path)
 
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
 
     indexed = manifest.read(cfg)
     assert indexed["store"] == "memory"
@@ -126,7 +130,7 @@ def test_manifest_records_what_index_was_built_with(tmp_path):
 
 def test_broken_manifest_is_reported(tmp_path):
     cfg = _cfg(tmp_path)
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
     (Path(cfg.index_dir) / "manifest.json").write_text("{не json", encoding="utf-8")
 
     with pytest.raises(EngineUnavailable) as exc:
@@ -137,7 +141,7 @@ def test_broken_manifest_is_reported(tmp_path):
 def test_manifest_documents_keep_file_facts(tmp_path):
     cfg = _cfg(tmp_path)
 
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
 
     document = manifest.read(cfg)["documents"][0]
     assert document["source"].endswith("policy.md")
@@ -162,11 +166,12 @@ def test_rebuild_is_single_flight(tmp_path, monkeypatch):
 
     monkeypatch.setattr("ragkb.core.index.build_index", slow_build)
     index = ConfigIndex(cfg, _forbidden_engine())
+    names = corpus_names(cfg)
     results: list[object] = []
 
     def worker() -> None:
         try:
-            results.append(index.rebuild())
+            results.append(index.rebuild(names))
         except Conflict as exc:
             results.append(exc)
 
@@ -193,29 +198,34 @@ def test_rebuild_lock_is_released_after_failure(tmp_path, monkeypatch):
     index = ConfigIndex(cfg, _forbidden_engine())
     for _ in range(2):
         with pytest.raises(ValueError):
-            index.rebuild()
+            index.rebuild(corpus_names(cfg))
 
 
-def test_rebuild_reports_unavailable_ollama_as_503(client, cfg):
+def test_rebuild_reports_unavailable_ollama(tmp_path):
     """Администратор должен увидеть причину, а не «внутреннюю ошибку»."""
+    cfg = _cfg(tmp_path)
+    registry = MemoryRegistry().add(cfg)
     cfg.embedding.backend = "ollama"
     cfg.embedding.base_url = "http://127.0.0.1:1"
+    service = IndexService(
+        ConfigIndex(cfg, _forbidden_engine()), lambda: None, registry=registry
+    )
 
-    response = client.post("/api/v1/index/rebuild")
+    with pytest.raises(EngineUnavailable) as exc:
+        asyncio.run(service.rebuild())
 
-    assert response.status_code == 503
-    assert "Ollama недоступна" in response.json()["detail"]
+    assert "Ollama недоступна" in exc.value.detail
 
 
 def test_rebuild_after_delete_drops_manifest_when_corpus_is_empty(tmp_path):
     """Удаление последнего документа убирает индекс целиком."""
     cfg = _cfg(tmp_path)
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
     target = Path(cfg.docs_dir) / "policy.md"
     index = ConfigIndex(cfg, _forbidden_engine())
 
     target.unlink()
-    index.reindex_after_delete(str(target))
+    index.reindex_after_delete(str(target), frozenset())
 
     assert not Path(cfg.index_dir).exists()
     assert manifest.exists(cfg) is False
@@ -224,12 +234,12 @@ def test_rebuild_after_delete_drops_manifest_when_corpus_is_empty(tmp_path):
 def test_rebuild_after_delete_removes_chunks_of_one_document(tmp_path):
     cfg = _cfg(tmp_path)
     (Path(cfg.docs_dir) / "second.md").write_text("# Второй\n\nТекст.\n", encoding="utf-8")
-    build_index(cfg)
+    build_index(cfg, corpus_names(cfg))
     target = Path(cfg.docs_dir) / "second.md"
     index = ConfigIndex(cfg, _forbidden_engine())
 
     target.unlink()
-    index.reindex_after_delete(str(target))
+    index.reindex_after_delete(str(target), frozenset({"policy.md"}))
 
     indexed = manifest.read(cfg)
     assert [Path(d["source"]).name for d in indexed["documents"]] == ["policy.md"]

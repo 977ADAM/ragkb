@@ -14,7 +14,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Collection, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -76,11 +76,6 @@ class IndexReport:
     elapsed: float
     embedder: str
     store_backend: str = ""
-    warnings: list[str] = field(default_factory=list)
-    # Файлы, которые лежат в каталоге, но в корпус не приняты: их индексация
-    # не касается. Показываем их вызывающему коду — иначе пропажа документов
-    # из выдачи выглядела бы необъяснимой.
-    excluded: list[str] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------- индексация
@@ -88,32 +83,25 @@ class IndexReport:
 
 def build_index(
     cfg: Settings,
+    names: Collection[str],
     *,
     docs_dir: str | Path | None = None,
     progress: Callable[[str], None] | None = None,
-    allow: Callable[[str], bool] | None = None,
 ) -> IndexReport:
-    """Полная переиндексация каталога документов.
+    """Полная переиндексация документов корпуса.
 
-    `allow` — предикат по имени файла относительно каталога корпуса:
-    индексируются только те документы, которые приняты в корпус (реестр
-    ведёт прикладной слой). Без предиката берётся всё, что нашлось.
+    `names` — имена документов из реестра (пути относительно каталога
+    корпуса). Каталог не обходится: документ попадает в корпус только
+    загрузкой через интерфейс, а реестр — источник истины о его составе.
     """
     started = time.time()
     say = progress or (lambda _msg: None)
     source = Path(docs_dir or cfg.docs_dir)
-
-    files, excluded = _accepted_only(loaders.discover(source), source, allow)
-    for path in excluded:
-        say(f"  × вне корпуса, пропущен {path.name}")
-    if not files:
-        if excluded:
-            raise ValueError(
-                f"Ни один файл не принят в корпус: {len(excluded)} файл(ов) лежат "
-                f"в каталоге {source} мимо интерфейса. Примите их на странице "
-                f"«Документы» или загрузите документы через интерфейс."
-            )
-        raise FileNotFoundError(f"В каталоге {source} не найдено поддерживаемых файлов")
+    wanted = sorted(set(names))
+    if not wanted:
+        raise ValueError(
+            "В корпусе нет документов: загрузите их на странице «Документы»"
+        )
 
     say(f"Эмбеддинги: {embedder_name(cfg.embedding)}")
     # Модель проверяется до разбора корпуса: чтение и нарезка всех файлов —
@@ -125,24 +113,35 @@ def build_index(
     skipped: list[tuple[str, str]] = []
     facts: dict[str, dict[str, Any]] = {}
     indexed_files = 0
-    for path in files:
+    for name in wanted:
+        try:
+            path = loaders.document_path(source, name)
+        except Exception as exc:
+            skipped.append((name, str(exc)))
+            say(f"  ! пропущен {name}: {exc}")
+            continue
+        if not path.is_file():
+            skipped.append((name, "файл не найден в каталоге документов"))
+            say(f"  ! нет файла: {name}")
+            continue
         try:
             loaded = loaders.load(path)
         except Exception as exc:
-            skipped.append((str(path), str(exc)))
-            say(f"  ! пропущен {path.name}: {exc}")
+            skipped.append((name, str(exc)))
+            say(f"  ! пропущен {name}: {exc}")
             continue
         if not loaded.blocks:
-            skipped.append((str(path), "не удалось извлечь текст (возможно, скан без OCR)"))
-            say(f"  ! пустой текст: {path.name}")
+            skipped.append((name, "не удалось извлечь текст (возможно, скан без OCR)"))
+            say(f"  ! пустой текст: {name}")
             continue
         facts[loaded.path] = manifest.file_facts(path, loaded.checksum)
         sections.extend(section_documents(loaded))
         indexed_files += 1
-        say(f"  + {path.name}: {len(loaded.blocks)} блоков")
+        say(f"  + {name}: {len(loaded.blocks)} блоков")
 
     if not sections:
-        raise ValueError("После разбора не осталось текста — проверьте исходные файлы")
+        reasons = "; ".join(f"{name}: {reason}" for name, reason in skipped) or "нет файлов"
+        raise ValueError(f"Ни один документ корпуса не удалось прочитать — {reasons}")
 
     chunks = [
         with_scalar_metadata(chunk) for chunk in split_documents(sections, cfg.chunking)
@@ -176,22 +175,7 @@ def build_index(
         elapsed=time.time() - started,
         embedder=embedder_name(cfg.embedding),
         store_backend=cfg.store.backend.lower(),
-        excluded=[str(path) for path in excluded],
     )
-
-
-def _accepted_only(
-    files: list[Path], source: Path, allow: Callable[[str], bool] | None
-) -> tuple[list[Path], list[Path]]:
-    """Делит найденные файлы на принятые в корпус и оставшиеся в стороне."""
-    if allow is None:
-        return list(files), []
-    accepted: list[Path] = []
-    excluded: list[Path] = []
-    for path in files:
-        name = loaders.relative_name(path, source)
-        (accepted if allow(name) else excluded).append(path)
-    return accepted, excluded
 
 
 # ------------------------------------------------------------------------ RAG
