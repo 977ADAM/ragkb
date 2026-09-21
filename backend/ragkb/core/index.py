@@ -39,7 +39,7 @@ class ConfigIndex:
             # Проверка по конфигурации: живой список моделей отдаёт bootstrap,
             # а статус не должен ходить в сеть.
             "llm_available": bool(self.cfg.llm.base_url and self.cfg.llm.model),
-            "index_dir": str(self.cfg.index_dir),
+            "index_dir": str(Path(self.cfg.index_dir).expanduser().resolve()),
         }
 
     def probe(self) -> str:

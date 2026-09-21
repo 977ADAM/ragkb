@@ -117,7 +117,7 @@ class DocumentsService:
             if d["source"] not in file_paths and Path(d["source"]).name not in names
         ]
         return {
-            "docs_dir": str(docs_dir),
+            "docs_dir": str(docs_dir.expanduser().resolve()),
             "index": "ok" if manifest is not None else "no_index",
             "registry": "on" if registry is not None else "off",
             "built_at": built_at_raw,

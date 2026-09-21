@@ -190,6 +190,83 @@ cross-encoder не поддерживается: он требует torch, ко
 {"type":"done","sources":[],"warnings":[],"elapsed_sec":0.2,"model":"qwen2.5:7b-instruct","truncated":false}
 ```
 
+### Где сервис хранит данные
+
+Каталоги задаются в `Settings` и по умолчанию **относительные**: `data/docs`
+(документы), `data/index` (индекс), `data/settings.json` (настройки),
+`data/logs` (журналы). Относительный путь считается от **рабочего каталога
+процесса**, поэтому запускать сервис нужно из корня репозитория — так делает
+`make api` (он поднимает uvicorn с `--app-dir backend`, не меняя каталог).
+Если запустить из `backend/`, относительные пути уведут в `backend/data/`.
+
+Что сервис реально использует, видно в трёх местах: в журнале при старте
+(`рабочий каталог …, документы …, индекс …`), в `GET /api/v1/status`
+(`index_dir`) и на странице настроек в блоке «Задано вне интерфейса» — там
+показывается уже разрешённый абсолютный путь и рабочий каталог процесса.
+
+Переопределить каталоги можно только окружением: `RAGKB_DOCS_DIR`,
+`RAGKB_INDEX_DIR`, `RAGKB_SETTINGS_FILE`, `RAGKB_LOG_DIR` — абсолютными путями
+это удобнее всего для systemd и для нестандартных установок.
+
+### Развёртывание на сервере
+
+**Compose (рекомендуемый путь).** Пути уже прописаны в `docker-compose.yml`:
+`./data/docs` и `./data/logs` монтируются в контейнер, индекс живёт в томе
+`rag_index`, рабочий каталог образа — `/app`. Поэтому относительные значения по
+умолчанию попадают куда надо, и в `.env` пути указывать **не нужно** — только
+доступы и адреса:
+
+```bash
+POSTGRES_USER=ragkb
+POSTGRES_PASSWORD=…           # смените
+POSTGRES_DB=ragkb
+POSTGRES_HOST=postgres
+RAGKB_EMBEDDING_URL=http://host.docker.internal:11434
+RAGKB_EMBEDDING_MODEL=qwen3-embedding:0.6b
+RAGKB_LLM_URL=http://host.docker.internal:11434/v1
+RAGKB_LLM_MODEL=qwen2.5:7b-instruct
+```
+
+`ollama pull qwen3-embedding:0.6b` нужно выполнить на хосте до первой
+индексации; документы положить в `./data/docs` (или загрузить через
+`/admin/documents`).
+
+**Без контейнеров (venv + systemd).** Каталог установки — `/opt/ragkb`, данные
+рядом с ним; относительные пути считаются от `WorkingDirectory`:
+
+```ini
+[Unit]
+Description=ragkb — база знаний
+After=network-online.target
+
+[Service]
+User=ragkb
+WorkingDirectory=/opt/ragkb
+Environment=RAGKB_DOCS_DIR=/var/lib/ragkb/docs
+Environment=RAGKB_INDEX_DIR=/var/lib/ragkb/index
+Environment=RAGKB_SETTINGS_FILE=/var/lib/ragkb/settings.json
+Environment=RAGKB_LOG_DIR=/var/lib/ragkb/logs
+Environment=RAGKB_EMBEDDING_URL=http://127.0.0.1:11434
+Environment=RAGKB_LLM_URL=http://127.0.0.1:11434/v1
+Environment=RAGKB_LLM_MODEL=qwen2.5:7b-instruct
+ExecStart=/opt/ragkb/backend/.venv/bin/uvicorn ragkb.main:app --app-dir /opt/ragkb/backend --host 127.0.0.1 --port 8000
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Здесь пути к данным вынесены в `/var/lib/ragkb` и заданы абсолютно: так
+обновление кода (замена `/opt/ragkb`) не трогает корпус и индекс. Фронтенд
+собирается `bun run build` и запускается `node build` с
+`RAGKB_BACKEND_URL=http://127.0.0.1:8000`.
+
+Важно про индекс: в манифесте и в метаданных чанков хранятся пути к исходным
+файлам, поэтому смена `RAGKB_DOCS_DIR` (или переезд каталога документов)
+требует пересборки индекса — иначе страница документов покажет прежние пути
+как сирот. Смена модели эмбеддингов или нарезки — тоже пересборка: страница
+настроек предупреждает об этом сама.
+
 ### Настройки
 
 Страница `/admin/settings` правит то, что раньше требовало переменных окружения:

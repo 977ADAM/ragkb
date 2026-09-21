@@ -1,7 +1,9 @@
 """Точка входа: uvicorn ragkb.main:app."""
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 
@@ -19,6 +21,25 @@ from ragkb.core.settings import apply_overrides, read_overrides
 from ragkb.db.storage import Storage
 from ragkb.services.stdout_sink import StdoutSink
 from ragkb.version import __version__
+
+log = logging.getLogger("ragkb")
+
+
+def _effective_dirs(cfg: Settings) -> str:
+    """Куда сервис читает документы и пишет индекс и логи.
+
+    Относительные пути считаются от рабочего каталога процесса, поэтому при
+    запуске из другого места это первое, что стоит увидеть в логе.
+    """
+    return ", ".join(
+        f"{name} {Path(value).expanduser().resolve()}"
+        for name, value in (
+            ("документы", cfg.docs_dir),
+            ("индекс", cfg.index_dir),
+            ("настройки", cfg.settings_file),
+            ("логи", cfg.logging.dir or "—"),
+        )
+    )
 
 
 @asynccontextmanager
@@ -41,6 +62,7 @@ cfg = Settings()
 apply_overrides(cfg, read_overrides(cfg.settings_file))
 raise_multipart_part_limit()
 setup_logging(level=cfg.logging.level, log_dir=cfg.logging.dir or None)
+log.info("рабочий каталог %s; %s", Path.cwd(), _effective_dirs(cfg))
 
 app = FastAPI(
     title="RAG База знаний",

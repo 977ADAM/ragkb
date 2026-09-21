@@ -11,7 +11,7 @@
 	 * @typedef {{ path: string, label: string, help: string, value: any }} ReadonlyField
 	 * @typedef {{ status: string, chunks?: number, documents?: number, embedder?: string,
 	 *   store?: string, stale?: boolean, warnings?: string[], detail?: string }} IndexState
-	 * @typedef {{ file: string, groups: Group[], readonly: ReadonlyField[],
+	 * @typedef {{ file: string, cwd: string, groups: Group[], readonly: ReadonlyField[],
 	 *   overridden: string[], index: IndexState }} Payload
 	 */
 
@@ -305,6 +305,10 @@
 
 	<section class="mb-5">
 		<h2 class="mb-2 text-base font-semibold">Задано вне интерфейса</h2>
+		<p class="m-0 mb-2 text-xs text-stone-500 dark:text-stone-400">
+			Рабочий каталог процесса: <code>{data.cwd}</code> — относительные пути в конфигурации
+			считаются от него. Ниже показаны уже разрешённые пути.
+		</p>
 		<ul class="m-0 list-none p-0 text-sm">
 			{#each data.readonly as item (item.path)}
 				<li class="border-b border-stone-200 py-1 dark:border-stone-800">

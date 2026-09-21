@@ -488,11 +488,22 @@ def masked(item: Field, value: Any) -> Any:
     return value
 
 
+# Поля-каталоги: показываем эффективный путь, а не то, как он записан.
+PATH_FIELDS = frozenset({"docs_dir", "index_dir", "settings_file"})
+
+
 def masked_value(cfg: Settings, path: str) -> Any:
-    """Значение только для показа: пароль в строке подключения скрываем."""
+    """Значение только для показа: секреты и «сырые» пути не отдаём.
+
+    Относительный путь считается от рабочего каталога процесса, поэтому в
+    интерфейсе показываем уже разрешённый путь: иначе на сервере непонятно,
+    куда сервис на самом деле читает и пишет.
+    """
     value = value_at(cfg, path)
     if path == "database_url":
         return _hide_password(str(value))
+    if path in PATH_FIELDS and value:
+        return str(Path(str(value)).expanduser().resolve())
     return value
 
 

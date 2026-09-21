@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from ragkb.core import settings as core
@@ -49,7 +50,8 @@ class SettingsService:
             if fields:
                 groups.append({"title": title, "fields": fields})
         return {
-            "file": str(self.cfg.settings_file),
+            "file": str(Path(self.cfg.settings_file).expanduser().resolve()),
+            "cwd": str(Path.cwd()),
             "groups": groups,
             "readonly": [
                 {
