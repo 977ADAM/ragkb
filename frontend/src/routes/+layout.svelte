@@ -19,7 +19,7 @@
         <header class="flex flex-wrap items-center gap-x-2.5 gap-y-2">
             <img class="block shrink-0 rounded-md" src="/logo.png" alt="" width="28" height="28" />
             <h1 class="mr-auto text-xl font-semibold">
-                {chat.organization?.name ? `База знаний — ${chat.organization.name}` : 'База знаний'}
+                {chat.organization?.name ? `${chat.organization.id} - ${chat.organization.name}` : 'База знаний'}
             </h1>
             <a class="text-sm no-underline hover:underline" href="/admin">Управление</a>
             <a class="text-sm no-underline hover:underline" href="/admin/documents">Документы</a>
