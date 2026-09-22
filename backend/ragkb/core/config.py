@@ -113,9 +113,9 @@ class Settings(BaseSettings):
         available: list[dict[str, str]] = []
 
     class OrganizationConfig(BaseModel):
-        name: str = ""
-        id: str = ""
-        description: str = ""
+        id: str = "INTERPOOL"
+        name: str = "Единая база знаний"
+        description: str = "Продукты • возможности • механики • FAQ • возражения"
 
     class LoggingConfig(BaseModel):
         level: str = "INFO"
