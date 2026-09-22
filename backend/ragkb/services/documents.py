@@ -39,6 +39,21 @@ _NO_REGISTRY = (
 
 
 @dataclass(frozen=True)
+class PermissionChange:
+    """Фактически сохранённое изменение разрешения на выдачу оригинала.
+
+    Отдаётся сразу после сохранения записи реестра: дальше идут публикация
+    файла и индексация, и любая из них может не получиться. Событие об уже
+    сохранённом изменении теряться при этом не должно.
+    """
+
+    document_id: str
+    action: str
+    previous: bool
+    current: bool
+
+
+@dataclass(frozen=True)
 class UploadResult:
     """Итог загрузки: ответ для интерфейса и сведения для журнала.
 
@@ -159,6 +174,7 @@ class DocumentsService:
         *,
         index: bool = True,
         download_allowed: bool = False,
+        on_permission_change: Callable[[PermissionChange], None] | None = None,
     ) -> UploadResult:
         """Сохраняет документ и заводит его в реестре.
 
@@ -167,6 +183,11 @@ class DocumentsService:
         `download_allowed` — разрешение на выдачу оригинала; по умолчанию
         выключено, а при замене файла берётся из этого вызова, а не из
         прежней записи.
+
+        `on_permission_change` вызывается сразу после того, как изменение
+        разрешения сохранено, — до публикации файла и до индексации. Журнал
+        ведёт вызывающая сторона: сервис не знает ни про метку запроса, ни про
+        HTTP, и отдаёт только факт состоявшегося изменения.
         """
         if self._registry is None:
             raise InvalidRequest(_NO_REGISTRY)
@@ -209,6 +230,18 @@ class DocumentsService:
                 sha256=hashlib.sha256(content).hexdigest(),
                 download_allowed=download_allowed,
             )
+            if on_permission_change is not None:
+                # Событие отдаётся здесь: запись уже сохранена, а публикация
+                # файла и индексация могут не получиться — журнал не должен
+                # зависеть от их исхода.
+                on_permission_change(
+                    PermissionChange(
+                        document_id=outcome.document.document_id,
+                        action="upload" if outcome.created else "replace",
+                        previous=outcome.previous_download_allowed,
+                        current=outcome.document.download_allowed,
+                    )
+                )
             os.replace(staged, target)
         except Exception:
             staged.unlink(missing_ok=True)

@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 
 from ragkb.api.audit import log_permission_change, request_id
 from ragkb.api.deps.services import documents_service
-from ragkb.services.documents import MAX_UPLOAD_BYTES, DocumentsService
+from ragkb.services.documents import MAX_UPLOAD_BYTES, DocumentsService, PermissionChange
 
 log = logging.getLogger("ragkb")
 
@@ -40,17 +40,29 @@ async def upload_document(
     # Читаем не больше лимита+1 байта: память не растёт с размером файла.
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     name = file.filename or ""
+
+    def audit(change: PermissionChange) -> None:
+        """Событие пишется в момент сохранения, а не после индексации.
+
+        Если индексация следом падает (503), разрешение в реестре уже
+        изменено — и в журнале это изменение обязано остаться. Отказ самой
+        записи сюда не доходит: сервис зовёт этот колбэк только после того,
+        как изменение сохранено.
+        """
+        log_permission_change(
+            action=change.action,
+            document_id=change.document_id,
+            previous=change.previous,
+            current=change.current,
+            request_id=request_id(request),
+        )
+
     result = await svc.upload(
-        name, content, index=index, download_allowed=download_allowed
-    )
-    # Прежнее и новое разрешение — из самой записи реестра: журнал не должен
-    # показывать устаревшее «старое» значение. Наружу уходит только payload.
-    log_permission_change(
-        action="replace" if result.replaced else "upload",
-        document_id=result.document_id,
-        previous=result.previous_download_allowed,
-        current=result.download_allowed,
-        request_id=request_id(request),
+        name,
+        content,
+        index=index,
+        download_allowed=download_allowed,
+        on_permission_change=audit,
     )
     payload = result.payload
     if payload.get("indexed"):

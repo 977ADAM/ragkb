@@ -312,6 +312,9 @@ def test_failed_replacement_does_not_publish_new_content(
         assert served.content == PDF, "новый контент не должен быть доступен"
 
     assert [path.name for path in Path(cfg.docs_dir).iterdir()] == ["spec.pdf"]
+    lines = _audit_lines(cfg)
+    assert len(lines) == 1, lines
+    assert "old=false" in lines[0] and "new=true" in lines[0]
 
 
 async def test_failed_replacement_keeps_old_bytes_under_permission(
@@ -741,6 +744,53 @@ def test_refused_change_is_not_logged_as_saved(tmp_path, sqlite_url):
         assert response.status_code == 404
 
     assert _audit_lines(cfg) == []
+
+
+def test_permission_change_is_audited_when_indexing_fails(
+    tmp_path, sqlite_url, monkeypatch
+):
+    """Сохранённое разрешение попадает в журнал, даже если индексация упала.
+
+    Загрузка возвращает 503 после того, как запись и файл уже сохранены:
+    новый файл скачивается, поэтому событие false→true обязано быть в журнале
+    ровно один раз.
+    """
+    from ragkb.core.errors import EngineUnavailable
+    from ragkb.core.index import ConfigIndex
+
+    cfg = _cfg(tmp_path, sqlite_url)
+
+    def failing_rebuild(self, names):
+        # Пересборка индекса синхронная: сервис зовёт её в отдельном потоке.
+        raise EngineUnavailable("эмбеддер недоступен")
+
+    with TestClient(make_app(cfg)) as client:
+        _upload(client, "spec.pdf", PDF)
+        row = _row(client, "spec.pdf")
+        download, _ = _urls(row)
+        assert row["download_allowed"] is False
+        assert client.get(download).status_code == 404
+
+        monkeypatch.setattr(ConfigIndex, "rebuild", failing_rebuild)
+        replacement = PDF + "замена".encode()
+        failed = client.post(
+            "/api/v1/admin/documents",
+            params={"index": "true", "download_allowed": "true"},
+            files={"file": ("spec.pdf", replacement, "application/pdf")},
+            headers={"x-request-id": "req-index"},
+        )
+
+        assert failed.status_code == 503
+        assert _row(client, "spec.pdf")["download_allowed"] is True
+        served = client.get(download)
+        assert served.status_code == 200
+        assert served.content == replacement
+
+    changed = [line for line in _audit_lines(cfg) if "old=false" in line and "new=true" in line]
+    assert len(changed) == 1, _audit_lines(cfg)
+    assert "action=replace" in changed[0]
+    assert "request_id=req-index" in changed[0]
+    assert row["document_id"] in changed[0]
 
 
 # ------------------------------------------------------- дескрипторы
