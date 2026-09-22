@@ -10,7 +10,6 @@
 
 <svelte:head>
     <link rel="icon" href="/logo.png" />
-    <title>База знаний</title>
 </svelte:head>
 
 {#if management}
