@@ -41,6 +41,11 @@ def test_download_policy_asks_for_the_tool_even_with_a_context_answer():
     assert "ОРИГИНАЛЫ" in DOWNLOAD_POLICY
 
 
+def test_download_policy_tells_the_model_to_mention_the_attachment():
+    """Приложенный оригинал называется в ответе, а не молчит за карточкой."""
+    assert "что он приложен" in DOWNLOAD_POLICY
+
+
 def test_tool_prompt_joins_both_blocks():
     assert SYSTEM_PROMPT in TOOL_SYSTEM_PROMPT
     assert DOWNLOAD_POLICY in TOOL_SYSTEM_PROMPT
