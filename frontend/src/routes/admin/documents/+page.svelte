@@ -4,6 +4,8 @@
 	/**
 	 * @typedef {{
 	 *   name: string,
+	 *   document_id: string | null,
+	 *   download_allowed: boolean,
 	 *   size: number,
 	 *   mtime: string,
 	 *   indexed: boolean,
@@ -16,7 +18,7 @@
 	 * }} CorpusRow
 	 * @typedef {{ corpus_files: number, indexed_docs: number, chunks: number }} Summary
 	 * @typedef {{
-	 *   id: string, name: string, size: number, file: File,
+	 *   id: string, name: string, size: number, file: File, download_allowed: boolean,
 	 *   status: 'wait' | 'upload' | 'done' | 'error', percent: number, error: string
 	 * }} QueueItem
 	 * @typedef {{ files?: number, chunks?: number, elapsed_sec?: number }} Report
@@ -42,6 +44,10 @@
 	let dragging = $state(false);
 	/** @type {Report | null} */
 	let report = $state(null);
+	/** Разрешение на выдачу оригинала для новой пачки: по умолчанию выключено. */
+	let batchDownloadAllowed = $state(false);
+	/** Идентификаторы документов, у которых флаг сохраняется прямо сейчас. */
+	let savingPermissions = $state(/** @type {Record<string, boolean>} */ ({}));
 
 	onMount(load);
 
@@ -125,7 +131,16 @@
 		const clashes = files.filter((file) => corpus.some((row) => row.name === file.name));
 		if (clashes.length) {
 			const names = clashes.map((file) => file.name).join(', ');
-			if (!confirm(`Эти документы уже есть в корпусе и будут заменены: ${names}. Продолжить?`)) {
+			// При замене важно видеть итоговое разрешение: прежнее значение не
+			// наследуется, а берётся из переключателя пачки.
+			const permission = batchDownloadAllowed
+				? 'Оригиналы новых версий будут доступны для скачивания.'
+				: 'Оригиналы новых версий будут закрыты для скачивания.';
+			if (
+				!confirm(
+					`Эти документы уже есть в корпусе и будут заменены: ${names}. ${permission} Продолжить?`
+				)
+			) {
 				return;
 			}
 		}
@@ -135,6 +150,8 @@
 				name: file.name,
 				size: file.size,
 				file,
+				// Снимок переключателя: изменение флага не меняет уже начатую очередь.
+				download_allowed: batchDownloadAllowed,
 				status: 'wait',
 				percent: 0,
 				error: ''
@@ -180,7 +197,11 @@
 		return new Promise((resolve, reject) => {
 			const request = new XMLHttpRequest();
 			// index=false: файл принимается сразу, сборка будет одна на пачку.
-			request.open('POST', '/api/admin/documents?index=false');
+			const query = new URLSearchParams({
+				index: 'false',
+				download_allowed: item.download_allowed ? 'true' : 'false'
+			});
+			request.open('POST', `/api/admin/documents?${query}`);
 			request.withCredentials = true;
 			request.upload.onprogress = (event) => {
 				if (event.lengthComputable) {
@@ -224,6 +245,47 @@
 		} finally {
 			indexing = false;
 			await load();
+		}
+	}
+
+	/**
+	 * Сохраняет разрешение на скачивание у одного документа.
+	 *
+	 * Переключатель блокируется на время запроса, а при отказе возвращается к
+	 * прежнему значению: интерфейс не должен показывать несохранённое.
+	 *
+	 * @param {CorpusRow} row
+	 * @param {boolean} allowed
+	 */
+	async function setDownloadAllowed(row, allowed) {
+		const documentId = row.document_id;
+		if (!documentId || savingPermissions[documentId]) return;
+		const previous = row.download_allowed;
+		row.download_allowed = allowed;
+		savingPermissions[documentId] = true;
+		error = '';
+		try {
+			const response = await fetch(`/api/documents/${documentId}/download-permission`, {
+				method: 'PATCH',
+				headers: { 'content-type': 'application/json' },
+				credentials: 'include',
+				body: JSON.stringify({ download_allowed: allowed })
+			});
+			const body = await response.json().catch(() => ({}));
+			if (!response.ok) {
+				row.download_allowed = previous;
+				error =
+					typeof body.detail === 'string'
+						? body.detail
+						: 'Не удалось изменить разрешение на скачивание';
+				return;
+			}
+			row.download_allowed = body.download_allowed ?? allowed;
+		} catch (err) {
+			row.download_allowed = previous;
+			error = String(err);
+		} finally {
+			delete savingPermissions[documentId];
 		}
 	}
 
@@ -282,6 +344,18 @@
 		без реестра ни загрузка, ни индексация не работают.
 	</p>
 {/if}
+
+<label class="mb-2 flex items-center gap-2 text-sm">
+	<input
+		type="checkbox"
+		bind:checked={batchDownloadAllowed}
+		disabled={uploading || indexing}
+	/>
+	Разрешить скачивание оригинала у новых документов
+	<span class="text-stone-500 dark:text-stone-400">
+		(для уже загруженных флаг меняется в таблице; при замене берётся это значение)
+	</span>
+</label>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
@@ -358,6 +432,9 @@
 					<span class="w-20 text-right text-sm text-stone-500 dark:text-stone-400">
 						{formatSize(item.size)}
 					</span>
+					<span class="w-40 text-sm text-stone-500 dark:text-stone-400">
+						{item.download_allowed ? 'оригинал открыт' : 'оригинал закрыт'}
+					</span>
 					<span
 						class="w-56 text-sm {item.status === 'error'
 							? 'text-red-600 dark:text-red-400'
@@ -380,6 +457,9 @@
 			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Размер</th>
 			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Изменён</th>
 			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Чанков</th>
+			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">
+				Скачивание оригинала
+			</th>
 			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700"></th>
 		</tr>
 	</thead>
@@ -404,6 +484,28 @@
 					{formatTime(row.mtime)}
 				</td>
 				<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">{row.chunks}</td>
+				<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">
+					{#if row.document_id}
+						<label class="flex items-center gap-2">
+							<input
+								type="checkbox"
+								checked={row.download_allowed}
+								disabled={Boolean(savingPermissions[row.document_id])}
+								aria-label={`Разрешить скачивание оригинала: ${row.name}`}
+								onchange={(event) =>
+									setDownloadAllowed(
+										row,
+										/** @type {HTMLInputElement} */ (event.currentTarget).checked
+									)}
+							/>
+							<span class="text-sm text-stone-500 dark:text-stone-400">
+								{savingPermissions[row.document_id] ? 'сохранение…' : ''}
+							</span>
+						</label>
+					{:else}
+						<span class="text-stone-500 dark:text-stone-400">—</span>
+					{/if}
+				</td>
 				<td
 					class="border-b border-stone-300 px-2 py-1.5 whitespace-nowrap dark:border-stone-700"
 				>

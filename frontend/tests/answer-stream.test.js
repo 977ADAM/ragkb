@@ -22,3 +22,46 @@ test('missing terminal event reports incomplete answer', async () => {
     const bytes = new TextEncoder().encode('{"type":"token","text":"часть"}\n');
     await assert.rejects(readAnswer(stream([bytes]), () => {}), /Поток оборвался/);
 });
+
+test('done with attachments is delivered as is', async () => {
+	const documentId = '11111111-1111-4111-8111-111111111111';
+	const payload = {
+		type: 'done',
+		sources: [],
+		warnings: [],
+		elapsed_sec: 0.5,
+		model: 'test-model',
+		truncated: false,
+		attachments: [
+			{
+				document_id: documentId,
+				filename: 'spec.pdf',
+				url: `/api/documents/${documentId}/download`,
+				media_type: 'application/pdf',
+				size: 10
+			}
+		]
+	};
+	/** @type {any[]} */
+	const events = [];
+	const bytes = new TextEncoder().encode(
+		`{"type":"token","text":"готово"}\n${JSON.stringify(payload)}`
+	);
+
+	await readAnswer(stream([bytes]), (event) => events.push(event));
+
+	assert.equal(events.at(-1).attachments.length, 1);
+	assert.equal(events.at(-1).attachments[0].filename, 'spec.pdf');
+});
+
+test('old done without attachments is still accepted', async () => {
+	// Ответ прежнего сервера: поля вложений нет — карточек просто не будет.
+	/** @type {any[]} */
+	const events = [];
+	const bytes = new TextEncoder().encode('{"type":"done","sources":[],"warnings":[]}');
+
+	await readAnswer(stream([bytes]), (event) => events.push(event));
+
+	assert.equal(events.at(-1).attachments, undefined);
+	assert.deepEqual(events.at(-1).attachments ?? [], []);
+});

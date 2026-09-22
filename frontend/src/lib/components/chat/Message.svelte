@@ -1,5 +1,6 @@
 <script>
 	import { chat, copyText, regenerateMessage } from '$lib/chat.svelte.js';
+	import Attachments from './Attachments.svelte';
 	import SourcesModal from './SourcesModal.svelte';
 
 	/**
@@ -8,6 +9,8 @@
 	 * @type {{ message: { role: 'user' | 'assistant', text: string,
 	 *   sources?: Array<{n?: number, citation?: string, source?: string, page?: number | null,
 	 *   text?: string, available?: boolean | undefined}>,
+	 *   attachments?: Array<{document_id: string, filename: string, url: string,
+	 *   media_type: string, size: number}>,
 	 *   warnings?: string[], elapsed?: number | null,
 	 *   model?: string, error?: string },
 	 *   isLast?: boolean, streaming?: boolean }}
@@ -102,6 +105,9 @@
 	{/if}
 	{#if message.error}
 		<p class="mt-1 text-sm text-red-600 dark:text-red-400">{message.error}</p>
+	{/if}
+	{#if !streaming}
+		<Attachments attachments={message.attachments ?? []} />
 	{/if}
 	{#each message.warnings ?? [] as warning, w (w)}
 		<p class="mt-1 text-sm text-amber-600 dark:text-amber-400">{warning}</p>

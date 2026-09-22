@@ -5,8 +5,11 @@ import { readAnswer } from '$lib/answer-stream.js';
 /**
  * @typedef {{n?: number, citation?: string, source?: string, page?: number | null,
  * text?: string, available?: boolean}} Source
+ * @typedef {{document_id: string, filename: string, url: string,
+ * media_type: string, size: number}} Attachment
  * @typedef {{role: 'user' | 'assistant', text: string, sources?: Source[],
- * warnings?: string[], elapsed?: number | null, model?: string, error?: string}} Message
+ * attachments?: Attachment[], warnings?: string[], elapsed?: number | null,
+ * model?: string, error?: string}} Message
  */
 export const chat = $state({
     /** @type {Message[]} */
@@ -60,7 +63,10 @@ export async function ask() {
 async function answer(question) {
     chat.busy = true;
     chat.fatal = '';
-    chat.messages.push({role: 'assistant', text: '', sources: [], warnings: [], model: chat.model});
+    chat.messages.push({
+        role: 'assistant', text: '', sources: [], attachments: [], warnings: [],
+        model: chat.model
+    });
     const index = chat.messages.length - 1;
     try {
         const response = await fetch('/api/ask', {
@@ -77,6 +83,8 @@ async function answer(question) {
             if (event.type === 'token') message.text += event.text;
             if (event.type === 'done') {
                 message.sources = event.sources ?? [];
+                // Старый ответ вовсе без вложений — не ошибка: карточек нет.
+                message.attachments = event.attachments ?? [];
                 message.warnings = event.warnings ?? [];
                 message.elapsed = event.elapsed_sec ?? null;
                 message.model = event.model ?? message.model;
