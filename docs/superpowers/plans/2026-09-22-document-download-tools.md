@@ -167,7 +167,7 @@ class Attachment(BaseModel):
     size: int = Field(ge=0)
 ```
 
-- [ ] Написать API-тест с TestClient(make_app(cfg)), временной мигрированной
+- [x] Написать API-тест с TestClient(make_app(cfg)), временной мигрированной
   SQLite и файлом, загруженным существующим API. Сценарий:
 
 ```python
@@ -185,34 +185,34 @@ assert client.get(url).status_code == 404
 ```
 
   Создать pdf_bytes как небольшой валидный тестовый PDF; без реальных AdSmart.
-- [ ] Запустить `uv run pytest tests/test_downloads.py -q`, подтвердить RED.
-- [ ] Реализовать resolve: запись по ID → флаг → допустимый относительный путь
+- [x] Запустить `uv run pytest tests/test_downloads.py -q`, подтвердить RED.
+- [x] Реализовать resolve: запись по ID → флаг → допустимый относительный путь
   → существующий обычный файл. Не использовать fallback `_document_file`,
   допускающий возврат непроверенного пути после исключения. Запретить абсолютные
   имена, `..`, NUL и компоненты-симлинки. При открытии использовать no-follow
   проход по компонентам относительно открытого docs_dir; передавать файл
   из уже проверенного дескриптора, чтобы повторное открытие по имени не
   обходило проверку симлинка. Закрывать файловые дескрипторы при отказе/отмене.
-- [ ] В API добавить PATCH и GET/HEAD по ID. Resolve вызывается при каждом
+- [x] В API добавить PATCH и GET/HEAD по ID. Resolve вызывается при каждом
   GET/HEAD; нет записи/разрешения/файла — 404. Список возвращает новые поля,
   загрузка принимает `download_allowed: bool = Query(False)` вместе с index.
   MIME определять по имени, неизвестный тип application/octet-stream.
   Content-Disposition: attachment с корректным filename*; Cache-Control:
   no-store. Читать открытый файл порциями, не read_bytes целиком.
-- [ ] В первой версии не реализовывать частичные ответы: GET с Range отдаёт
+- [x] В первой версии не реализовывать частичные ответы: GET с Range отдаёт
   полный 200, HEAD только заголовки. Не рекламировать Accept-Ranges: bytes.
   BFF всё равно ограничивает такие запросы. Это избежать неоднозначной
   семантики частичных передач и повторного открытия FileResponse.
-- [ ] Добавить тесты 404 для запретного/несуществующего ID и файла вне реестра,
+- [x] Добавить тесты 404 для запретного/несуществующего ID и файла вне реестра,
   traversal, вложенного симлинка, подмены пути; кириллица/пробелы/# в имени;
   отключённая БД; сохранение флага без перестройки индекса; HEAD и Range.
-- [ ] Логировать сохранение разрешения через существующий logger: event,
+- [x] Логировать сохранение разрешения через существующий logger: event,
   UTC-время, request_id, ID, old/new. Не вводить зависимости HTTP в сервис:
   HTTP-граница получает результат операции и пишет событие после commit.
   Для upload/replace также вернуть внутренние old/new сведения для аудита,
   убрать их из публичного ответа через DTO или явное построение ответа.
-- [ ] Запустить `uv run pytest tests/test_downloads.py tests/test_documents.py tests/test_architecture.py -q`.
-- [ ] Коммит `feat: serve permitted document originals`.
+- [x] Запустить `uv run pytest tests/test_downloads.py tests/test_documents.py tests/test_architecture.py -q`.
+- [x] Коммит `feat: serve permitted document originals`.
 
 ## Task 3: BFF-поток, лимиты и журнал передачи
 
@@ -662,3 +662,60 @@ cd frontend && bun test && bun run check && bun run build
   (409/503 с повтором) — вопрос Task 2, здесь намеренно не расширялся.
 - `MemoryRegistry` в тестах блокировок не имеет: его операции не содержат
   `await` внутри изменения, поэтому в одном цикле событий они атомарны.
+
+### Task 2 — выполнено
+
+Новые единицы ответственности: `services/downloads.py` (проверка реестра,
+разрешения и пути, открытие файла без симлинков), `api/schemas/downloads.py`
+(DTO разрешения и вложения), `api/routes/downloads.py` (PATCH разрешения,
+GET/HEAD оригинала), `api/audit.py` (запись изменений разрешения в существующий
+журнал и `request_id`), `tests/test_downloads.py` (20 тестов). Изменены
+`api/router.py`, `api/deps/services.py`, `api/routes/documents.py`,
+`api/errors.py`, `services/documents.py`, `db/repos/corpus_documents.py`,
+`domain/entities.py`, `domain/ports.py`, `tests/helpers.py`,
+`tests/test_documents.py`, `tests/test_download_registry.py`.
+
+Отличия от буквы плана и их причины:
+
+- `DownloadDescriptor` получил поле `handle`: файл отдаётся из уже проверенного
+  дескриптора, а не повторным открытием по имени — иначе проверка симлинков
+  между проверкой и открытием ничего не значит. Путь по-прежнему не
+  сериализуется.
+- `DocumentRegistry.record` теперь возвращает `RecordOutcome` (признак создания,
+  прежнее разрешение, запись). Это требование ревью: аудит загрузки и замены
+  обязан брать old/new из самой записи, а не из чтения до неё. `record` на
+  SQLite тоже берёт блокировку записи до чтения — иначе два одновременных
+  запроса вернули бы одно и то же прежнее значение.
+- `DocumentsService.upload` возвращает `UploadResult` (публичный `payload` и
+  сведения для журнала): HTTP-граница пишет событие сама, а наружу отдаёт
+  только payload.
+- Добавлен `api/audit.py` — план не перечислял отдельный модуль, но одна общая
+  точка записи события лучше двух одинаковых строк в маршрутах. Заголовок метки
+  запроса — `X-Request-Id`; его будет присылать BFF в Task 3.
+- `api/errors.py` получил публичный `status_for(exc)`: отказы выдачи собираются
+  на месте, чтобы добавить `Cache-Control: no-store`, и статус берётся из той же
+  таблицы, что и в общем хендлере.
+- `uv`-запуск: `uv run pytest tests/test_downloads.py -q` сначала дал 17 падений
+  (нет маршрутов, нет `document_id` в списке, нет параметра загрузки) — RED по
+  делу, затем GREEN.
+
+Фактические результаты:
+
+- `uv run pytest tests/test_downloads.py -q` — 20 passed.
+- `uv run pytest tests/test_downloads.py tests/test_download_registry.py
+  tests/test_documents.py tests/test_architecture.py -q` — 77 passed.
+- Полный backend-набор — 242 passed, 1 deselected (`integration`).
+- `uv run ruff check ragkb migrations tests` — 11 замечаний, все прежние;
+  новых нет.
+
+Ограничения и открытые вопросы:
+
+- Postgres не проверена запуском (docker-демон недоступен). Ветка `FOR UPDATE`
+  в `set_download_allowed` и `record` не менялась, миграция на Postgres ждёт
+  Task 7.
+- Частичные ответы (Range) не реализованы: GET с Range отдаёт полный 200,
+  `Accept-Ranges` не рекламируется. Это решение плана, а не недосмотр.
+- Скачивание пока не ограничивается по частоте и не журналируется на границе:
+  это Task 3 (BFF). Backend пишет только отказ выдачи и изменение разрешения.
+- `document_id` в маршрутах принимается строкой, некорректный UUID даёт 404, а
+  не 422: ответ не должен подтверждать, что идентификатор «почти» верный.

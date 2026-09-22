@@ -30,7 +30,7 @@ from ragkb.core.logging_config import setup_logging
 from ragkb.core.settings import apply_overrides, read_overrides
 from ragkb.core.text import tokenize
 from ragkb.db.storage import Storage
-from ragkb.domain.entities import ORIGIN_UI, CorpusDocument
+from ragkb.domain.entities import ORIGIN_UI, CorpusDocument, RecordOutcome
 from ragkb.services.stdout_sink import StdoutSink
 from ragkb.version import __version__
 
@@ -128,9 +128,9 @@ class MemoryRegistry:
         size: int = 0,
         sha256: str = "",
         download_allowed: bool = False,
-    ) -> None:
+    ) -> RecordOutcome:
         previous = self.rows.get(name)
-        self.rows[name] = CorpusDocument(
+        saved = CorpusDocument(
             name=name,
             document_id=previous.document_id if previous else str(uuid4()),
             origin=origin,
@@ -139,6 +139,12 @@ class MemoryRegistry:
             size=size,
             sha256=sha256,
             download_allowed=download_allowed,
+        )
+        self.rows[name] = saved
+        return RecordOutcome(
+            created=previous is None,
+            previous_download_allowed=previous.download_allowed if previous else False,
+            document=saved,
         )
 
     async def set_download_allowed(

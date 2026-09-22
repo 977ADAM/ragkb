@@ -1,6 +1,6 @@
 """Порты реестра, каталога и телеметрии."""
 from typing import Any, Protocol
-from ragkb.domain.entities import ORIGIN_UI, CorpusDocument
+from ragkb.domain.entities import ORIGIN_UI, CorpusDocument, RecordOutcome
 
 
 class DocumentRegistry(Protocol):
@@ -24,11 +24,13 @@ class DocumentRegistry(Protocol):
         size: int = 0,
         sha256: str = "",
         download_allowed: bool = False,
-    ) -> None:
+    ) -> RecordOutcome:
         """Заводит документ или обновляет сведения о нём.
 
         Замена существующего имени сохраняет `document_id`, но не прежнее
-        разрешение: `download_allowed` берётся из этого вызова.
+        разрешение: `download_allowed` берётся из этого вызова. Прежнее
+        значение и признак создания возвращаются вместе с записью — из неё же,
+        а не из отдельного чтения до неё.
         """
     async def set_download_allowed(
         self, document_id: str, allowed: bool

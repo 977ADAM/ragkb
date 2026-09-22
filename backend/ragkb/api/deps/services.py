@@ -1,12 +1,15 @@
 """Зависимости FastAPI: use case из app.state."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import Request
 
 from ragkb.core.catalogs import embedding_models
 from ragkb.services.ask import AskService
 from ragkb.services.bootstrap import BootstrapService
 from ragkb.services.documents import DocumentsService
+from ragkb.services.downloads import DownloadsService
 from ragkb.services.index import IndexService
 from ragkb.services.models import ModelsService
 from ragkb.services.organization import OrganizationService
@@ -63,6 +66,14 @@ def documents_service(request: Request) -> DocumentsService:
         request.app.state.index,
         request.app.state.engine.invalidate,
         registry=storage.corpus,
+    )
+
+
+def downloads_service(request: Request) -> DownloadsService:
+    """Выдача оригинала: реестр решает, что и при каком разрешении отдавать."""
+    storage = _storage(request)
+    return DownloadsService(
+        Path(request.app.state.cfg.docs_dir), registry=storage.corpus
     )
 
 

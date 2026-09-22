@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,7 @@ from ragkb.core import loaders
 from ragkb.core.config import Settings
 from ragkb.core.errors import EngineUnavailable, InvalidRequest, NotFound, PayloadTooLarge
 from ragkb.core.ports import IndexEngine
-from ragkb.domain.entities import ORIGIN_UI, CorpusDocument
+from ragkb.domain.entities import ORIGIN_UI, CorpusDocument, RecordOutcome
 from ragkb.domain.ports import DocumentRegistry
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -32,6 +33,26 @@ _NO_REGISTRY = (
     "Реестр документов не подключён: задайте RAGKB_DATABASE_URL. "
     "Документы добавляются только загрузкой через эту страницу."
 )
+
+
+@dataclass(frozen=True)
+class UploadResult:
+    """Итог загрузки: ответ для интерфейса и сведения для журнала.
+
+    Прежнее и текущее разрешение на выдачу оригинала берутся из самой записи
+    реестра, поэтому журнал не может показать устаревшее «старое» значение.
+    Наружу уходит только `payload`.
+    """
+
+    payload: dict[str, Any]
+    document_id: str
+    created: bool
+    previous_download_allowed: bool
+    download_allowed: bool
+
+    @property
+    def replaced(self) -> bool:
+        return not self.created
 
 
 class DocumentsService:
@@ -135,7 +156,7 @@ class DocumentsService:
         *,
         index: bool = True,
         download_allowed: bool = False,
-    ) -> dict[str, Any]:
+    ) -> UploadResult:
         """Сохраняет документ и заводит его в реестре.
 
         `index=False` — файл только принимается: так грузится пачка, и одну
@@ -163,7 +184,7 @@ class DocumentsService:
         docs_dir.mkdir(parents=True, exist_ok=True)
         target = docs_dir / name
         target.write_bytes(content)
-        await self._registry.record(
+        outcome = await self._registry.record(
             name,
             origin=ORIGIN_UI,
             uploaded_by=user,
@@ -173,14 +194,17 @@ class DocumentsService:
         )
         if not index:
             self._invalidate()
-            return {
-                "registered": name,
-                "indexed": False,
-                "files": 0,
-                "chunks": 0,
-                "skipped": [],
-                "elapsed_sec": 0.0,
-            }
+            return _upload_result(
+                {
+                    "registered": name,
+                    "indexed": False,
+                    "files": 0,
+                    "chunks": 0,
+                    "skipped": [],
+                    "elapsed_sec": 0.0,
+                },
+                outcome,
+            )
         try:
             report = await self._rebuild()
         except (ValueError, FileNotFoundError) as exc:
@@ -190,7 +214,9 @@ class DocumentsService:
             await self._registry.forget(name)
             raise InvalidRequest(f"Не удалось проиндексировать: {exc}") from exc
         self._invalidate()
-        return _report_payload(report, registered=name, indexed=True)
+        return _upload_result(
+            _report_payload(report, registered=name, indexed=True), outcome
+        )
 
     async def delete(self, name: str) -> None:
         if self._registry is None:
@@ -230,6 +256,17 @@ def _report_payload(report: Any, **extra: Any) -> dict[str, Any]:
     }
 
 
+def _upload_result(payload: dict[str, Any], outcome: RecordOutcome) -> UploadResult:
+    """Собирает итог загрузки: ответ наружу и сведения для журнала."""
+    return UploadResult(
+        payload=payload,
+        document_id=outcome.document.document_id,
+        created=outcome.created,
+        previous_download_allowed=outcome.previous_download_allowed,
+        download_allowed=outcome.document.download_allowed,
+    )
+
+
 def _document_file(docs_dir: Path, name: str) -> Path:
     """Путь документа корпуса без выхода за каталог (имя приходит из реестра)."""
     try:
@@ -241,8 +278,16 @@ def _document_file(docs_dir: Path, name: str) -> Path:
 def _registry_fields(registry: dict[str, CorpusDocument], name: str) -> dict[str, Any]:
     doc = registry.get(name)
     if doc is None:
-        return {"origin": None, "uploaded_by": "", "uploaded_at": ""}
+        return {
+            "document_id": None,
+            "download_allowed": False,
+            "origin": None,
+            "uploaded_by": "",
+            "uploaded_at": "",
+        }
     return {
+        "document_id": doc.document_id,
+        "download_allowed": doc.download_allowed,
         "origin": doc.origin,
         "uploaded_by": doc.uploaded_by,
         "uploaded_at": doc.uploaded_at,

@@ -143,7 +143,7 @@ async def test_upload_without_index_is_new(tmp_path):
     build_index(cfg, registry.index_names())
     svc = make_service(cfg, registry)
 
-    result = await svc.upload("new.md", "# Новый\n\nТекст.\n".encode(), index=False)
+    result = (await svc.upload("new.md", "# Новый\n\nТекст.\n".encode(), index=False)).payload
 
     body = await svc.list_documents()
     row = next(r for r in body["corpus"] if r["name"] == "new.md")
@@ -198,7 +198,9 @@ async def test_upload_saves_file_and_indexes(tmp_path):
     dropped: list[bool] = []
     svc = make_service(cfg, registry, invalidate=lambda: dropped.append(True))
 
-    result = await svc.upload("new.md", "# Новый\n\nПравило: 28 дней.\n".encode(), "ada")
+    result = (
+        await svc.upload("new.md", "# Новый\n\nПравило: 28 дней.\n".encode(), "ada")
+    ).payload
 
     assert result["indexed"] is True
     assert result["files"] == 1

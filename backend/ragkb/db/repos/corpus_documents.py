@@ -5,14 +5,35 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import delete, select, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ragkb.core.errors import Conflict
 from ragkb.db.models import CorpusDocumentRow
-from ragkb.domain.entities import ORIGIN_UI, CorpusDocument
+from ragkb.domain.entities import ORIGIN_UI, CorpusDocument, RecordOutcome
+
+# Коды SQLite, которыми драйвер сообщает о занятости базы: SQLITE_BUSY и
+# SQLITE_LOCKED. Прочие коды — не занятость, и подменять их нельзя.
+_SQLITE_BUSY = 5
+_SQLITE_LOCKED = 6
+
+_BUSY_DETAIL = "База занята другим изменением — повторите запрос"
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _raise_conflict_if_locked(error: OperationalError) -> None:
+    """Занятость базы превращает в понятный отказ с повтором.
+
+    Только для кодов блокировки: остальные ошибки базы остаются собой — иначе
+    поломка схемы выглядела бы как временная занятость. Текст драйвера наружу
+    не уходит, в ответе только объяснение.
+    """
+    code = getattr(getattr(error, "orig", None), "sqlite_errorcode", None)
+    if code in (_SQLITE_BUSY, _SQLITE_LOCKED):
+        raise Conflict(_BUSY_DETAIL) from error
 
 
 async def _lock_document_write(session: AsyncSession) -> None:
@@ -94,11 +115,13 @@ class PostgresCorpusDocuments:
         сохраняется, а разрешение берётся из аргумента — прежнее значение
         молча не наследуется.
         """
-        async with self.session_factory() as session:
-            row = await session.get(CorpusDocumentRow, name)
-            if row is None:
-                session.add(
-                    CorpusDocumentRow(
+        try:
+            async with self.session_factory() as session:
+                await _lock_document_write(session)
+                row = await session.get(CorpusDocumentRow, name)
+                if row is None:
+                    created, previous = True, False
+                    row = CorpusDocumentRow(
                         name=name,
                         document_id=str(uuid4()),
                         origin=origin,
@@ -108,15 +131,20 @@ class PostgresCorpusDocuments:
                         sha256=sha256,
                         download_allowed=download_allowed,
                     )
-                )
-            else:
-                row.origin = origin
-                row.uploaded_by = uploaded_by
-                row.uploaded_at = _utcnow()
-                row.size = size
-                row.sha256 = sha256
-                row.download_allowed = download_allowed
-            await session.commit()
+                    session.add(row)
+                else:
+                    created, previous = False, bool(row.download_allowed)
+                    row.origin = origin
+                    row.uploaded_by = uploaded_by
+                    row.uploaded_at = _utcnow()
+                    row.size = size
+                    row.sha256 = sha256
+                    row.download_allowed = download_allowed
+                await session.commit()
+                return RecordOutcome(created, previous, row.to_domain())
+        except OperationalError as exc:
+            _raise_conflict_if_locked(exc)
+            raise
 
     async def set_download_allowed(
         self, document_id: str, allowed: bool
@@ -131,19 +159,23 @@ class PostgresCorpusDocuments:
         """
         if not document_id:
             return None
-        async with self.session_factory() as session:
-            await _lock_document_write(session)
-            row = await session.scalar(
-                select(CorpusDocumentRow)
-                .where(CorpusDocumentRow.document_id == document_id)
-                .with_for_update()
-            )
-            if row is None:
-                return None
-            previous = bool(row.download_allowed)
-            row.download_allowed = bool(allowed)
-            await session.commit()
-            return previous, row.to_domain()
+        try:
+            async with self.session_factory() as session:
+                await _lock_document_write(session)
+                row = await session.scalar(
+                    select(CorpusDocumentRow)
+                    .where(CorpusDocumentRow.document_id == document_id)
+                    .with_for_update()
+                )
+                if row is None:
+                    return None
+                previous = bool(row.download_allowed)
+                row.download_allowed = bool(allowed)
+                await session.commit()
+                return previous, row.to_domain()
+        except OperationalError as exc:
+            _raise_conflict_if_locked(exc)
+            raise
 
     async def forget(self, name: str) -> bool:
         async with self.session_factory() as session:

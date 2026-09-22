@@ -247,10 +247,14 @@ async def _sqlite_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 async def _contract(registry) -> None:
     """Сценарий, одинаковый для SQLAlchemy-адаптера и MemoryRegistry."""
-    await registry.record(
+    recorded = await registry.record(
         "spec.pdf", origin=ORIGIN_UI, uploaded_by="ada", size=10, sha256="c" * 64
     )
-    saved = next(doc for doc in await registry.list_all() if doc.name == "spec.pdf")
+    # Прежнее разрешение и признак создания приходят из самой записи: журнал
+    # загрузки не должен вычислять их отдельным чтением до неё.
+    assert recorded.created is True
+    assert recorded.previous_download_allowed is False
+    saved = recorded.document
     assert _is_uuid(saved.document_id), "новая запись получает идентификатор"
     assert saved.download_allowed is False
 
@@ -261,14 +265,17 @@ async def _contract(registry) -> None:
 
     # Замена файла: тот же документ, новая версия — идентификатор сохраняется,
     # а разрешение берётся из явного параметра, а не из прежней записи.
-    await registry.record(
+    replaced = await registry.record(
         "spec.pdf", origin=ORIGIN_UI, uploaded_by="ada", size=20, sha256="d" * 64
     )
-    replaced = await registry.get_by_id(saved.document_id)
-    assert replaced is not None
-    assert replaced.document_id == saved.document_id
-    assert replaced.size == 20
-    assert replaced.download_allowed is False
+    assert replaced.created is False
+    assert replaced.previous_download_allowed is True
+    assert replaced.document.download_allowed is False
+    current = await registry.get_by_id(saved.document_id)
+    assert current is not None
+    assert current.document_id == saved.document_id
+    assert current.size == 20
+    assert current.download_allowed is False
 
     # Удаление: идентификатор перестаёт работать, повторная загрузка даёт новый.
     assert await registry.forget("spec.pdf") is True

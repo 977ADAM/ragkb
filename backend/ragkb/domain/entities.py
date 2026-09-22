@@ -1,6 +1,6 @@
 """Чистые сущности корпуса."""
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 ORIGIN_UI = "ui"
 
@@ -41,3 +41,16 @@ class CorpusDocument:
             "sha256": self.sha256,
             "download_allowed": self.download_allowed,
         }
+
+
+class RecordOutcome(NamedTuple):
+    """Что дала запись в реестр.
+
+    Прежнее разрешение и признак создания приходят из самой записи: отдельное
+    чтение до неё показало бы устаревшее значение, если между чтением и
+    записью тот же документ заменил другой запрос.
+    """
+
+    created: bool
+    previous_download_allowed: bool
+    document: CorpusDocument

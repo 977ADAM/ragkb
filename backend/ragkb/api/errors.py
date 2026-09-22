@@ -26,8 +26,17 @@ _STATUS = {
 }
 
 
+def status_for(exc: RagkbError) -> int:
+    """HTTP-статус доменной ошибки: один источник правды с хендлером.
+
+    Нужен там, где ответ собирается на месте — например, чтобы добавить к
+    отказу выдачи оригинала `Cache-Control: no-store`.
+    """
+    return _STATUS.get(type(exc), 500)
+
+
 async def ragkb_error_handler(request: Request, exc: RagkbError) -> JSONResponse:
-    status = _STATUS.get(type(exc), 500)
+    status = status_for(exc)
     if status >= 500:
         log.exception("%s %s: %s", request.method, request.url.path, exc.detail)
     else:

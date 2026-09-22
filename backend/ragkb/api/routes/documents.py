@@ -9,8 +9,9 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 
+from ragkb.api.audit import log_permission_change, request_id
 from ragkb.api.deps.services import documents_service
 from ragkb.services.documents import MAX_UPLOAD_BYTES, DocumentsService
 
@@ -29,20 +30,34 @@ async def list_documents(svc: DocsService) -> dict:
 @router.post("/documents")
 async def upload_document(
     svc: DocsService,
+    request: Request,
     file: UploadFile = File(...),
     index: bool = Query(True, description="Индексировать сразу после загрузки"),
+    download_allowed: bool = Query(
+        False, description="Разрешить скачивание оригинала документа"
+    ),
 ) -> dict:
     # Читаем не больше лимита+1 байта: память не растёт с размером файла.
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     name = file.filename or ""
-    result = await svc.upload(name, content, index=index)
-    if result.get("indexed"):
-        log.info(
-            "загружен документ %s (%s чанков)", name, result["chunks"]
-        )
+    result = await svc.upload(
+        name, content, index=index, download_allowed=download_allowed
+    )
+    # Прежнее и новое разрешение — из самой записи реестра: журнал не должен
+    # показывать устаревшее «старое» значение. Наружу уходит только payload.
+    log_permission_change(
+        action="replace" if result.replaced else "upload",
+        document_id=result.document_id,
+        previous=result.previous_download_allowed,
+        current=result.download_allowed,
+        request_id=request_id(request),
+    )
+    payload = result.payload
+    if payload.get("indexed"):
+        log.info("загружен документ %s (%s чанков)", name, payload["chunks"])
     else:
         log.info("принят документ %s без индексации", name)
-    return result
+    return payload
 
 
 @router.delete("/documents/{name:path}", status_code=204)
