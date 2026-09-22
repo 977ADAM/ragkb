@@ -176,8 +176,6 @@ class Settings(BaseSettings):
         "RAGKB_RERANKER_URL": ("retrieval", "reranker_url"),
         "RAGKB_RERANKER_API_KEY": ("retrieval", "reranker_api_key"),
         "RAGKB_MIN_RERANK_SCORE": ("retrieval", "min_rerank_score"),
-        "RAGKB_ORG_NAME": ("organization", "name"),
-        "RAGKB_ORG_ID": ("organization", "id"),
         "RAGKB_LOG_LEVEL": ("logging", "level"),
         "RAGKB_LOG_DIR": ("logging", "dir"),
     }
