@@ -195,14 +195,25 @@ def test_range_request_is_answered_with_full_body(tmp_path, sqlite_url):
         assert "accept-ranges" not in response.headers
 
 
-def test_permission_change_needs_no_reindex_and_keeps_search(tmp_path, sqlite_url):
+def test_closed_document_stays_searchable_and_needs_no_reindex(tmp_path, sqlite_url):
+    """Закрытый для скачивания документ остаётся в поиске и не требует переиндексации.
+
+    Разрешение управляет только выдачей файла: ответы и цитаты по закрытому
+    документу работают как раньше. Поэтому поиск проверяется до включения
+    флага — иначе сценарий подтверждал бы не то, что заявлено.
+    """
     cfg = _cfg(tmp_path, sqlite_url)
     with TestClient(make_app(cfg)) as client:
         _upload(client, "policy.md", POLICY.encode(), index="true")
         row = _row(client, "policy.md")
         download, permission = _urls(row)
         built_at = client.get("/api/v1/admin/documents").json()["built_at"]
+        assert row["download_allowed"] is False
         assert client.get(download).status_code == 404
+
+        closed = client.post("/api/v1/search", json={"query": "отпуск", "top_k": 5})
+        assert closed.status_code == 200
+        assert closed.json()["results"], "закрытый документ должен находиться поиском"
 
         assert client.patch(permission, json={"download_allowed": True}).status_code == 200
 
@@ -210,10 +221,6 @@ def test_permission_change_needs_no_reindex_and_keeps_search(tmp_path, sqlite_ur
         assert after["built_at"] == built_at, "разрешение не требует переиндексации"
         assert _row(client, "policy.md")["download_allowed"] is True
         assert client.get(download).content == POLICY.encode()
-        # Закрытый для скачивания документ остаётся в поиске и цитатах.
-        found = client.post("/api/v1/search", json={"query": "отпуск", "top_k": 5})
-        assert found.status_code == 200
-        assert found.json()["results"]
 
 
 def test_replacement_keeps_id_and_resets_permission_without_explicit_flag(
@@ -304,6 +311,57 @@ def test_failed_replacement_does_not_publish_new_content(
         served = client.get(download)
         assert served.content == PDF, "новый контент не должен быть доступен"
 
+    assert [path.name for path in Path(cfg.docs_dir).iterdir()] == ["spec.pdf"]
+
+
+async def test_failed_replacement_keeps_old_bytes_under_permission(
+    tmp_path, sqlite_url, monkeypatch
+):
+    """Отказ записи оставляет под прежним разрешением прежний файл.
+
+    Проверка на уровне сервиса: имя уже разрешено, содержимое заменено, а
+    запись реестра не сохранилась. Новый файл не публикуется, поэтому выдача
+    обязана отдать прежние байты, а не закрытую замену.
+    """
+    from ragkb.core.database import make_engine, make_session_factory
+    from ragkb.core.errors import Conflict
+    from ragkb.core.index import ConfigIndex
+    from ragkb.db.repos.corpus_documents import PostgresCorpusDocuments
+    from ragkb.services.documents import DocumentsService
+    from ragkb.services.downloads import DownloadsService
+
+    cfg = _cfg(tmp_path, sqlite_url)
+    engine = make_engine(sqlite_url)
+    try:
+        registry = PostgresCorpusDocuments(make_session_factory(engine))
+        documents = DocumentsService(
+            cfg, ConfigIndex(cfg, lambda: None), lambda: None, registry
+        )
+        first = await documents.upload("spec.pdf", PDF, index=False, download_allowed=True)
+
+        async def failing_record(*args, **kwargs):
+            raise Conflict("занято другим изменением")
+
+        monkeypatch.setattr(registry, "record", failing_record)
+        with pytest.raises(Conflict):
+            await documents.upload(
+                "spec.pdf", PDF + "закрытая замена".encode(), index=False
+            )
+
+        stored = await registry.get_by_id(first.document_id)
+        assert stored.download_allowed is True, "прежнее разрешение не менялось"
+        assert stored.sha256 == hashlib.sha256(PDF).hexdigest()
+
+        downloads = DownloadsService(Path(cfg.docs_dir), registry)
+        descriptor = await downloads.resolve(first.document_id)
+        try:
+            served = descriptor.handle.read()
+        finally:
+            descriptor.close()
+    finally:
+        await engine.dispose()
+
+    assert served == PDF, "выдача не должна отдавать неопубликованную замену"
     assert [path.name for path in Path(cfg.docs_dir).iterdir()] == ["spec.pdf"]
 
 
