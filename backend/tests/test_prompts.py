@@ -32,6 +32,7 @@ def test_tool_answer_repeats_the_request_next_to_the_question():
     assert TOOL_NAME in text
     assert "Порядок действий" in text
     assert "не отменяет шаг 2" in text
+    assert "не пересказывай его" in text
     assert text.index("Порядок действий") > text.index("ВОПРОС")
 
 
