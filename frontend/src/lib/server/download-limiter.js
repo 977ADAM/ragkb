@@ -92,6 +92,9 @@ export function createDownloadLimiter(options) {
 	/** @type {Map<string, { tokens: number, refilledAt: number, active: number, lastSeen: number }>} */
 	const keys = new Map();
 
+	/** Текущее место обхода: продолжается между вызовами, а не начинается заново. */
+	let sweep = keys.entries();
+
 	/**
 	 * Доливает токены по прошедшему времени.
 	 * @param {{ tokens: number, refilledAt: number }} state
@@ -110,13 +113,25 @@ export function createDownloadLimiter(options) {
 	 * восстановленные и простаивающие дольше десяти минут. Просматривается не
 	 * больше PRUNE_PER_ACQUIRE записей, чтобы запрос не зависел от размера
 	 * хранилища.
+	 *
+	 * Обход продолжается с того места, где остановился прошлый: иначе при
+	 * первых занятых записях просроченные дальше не проверялись бы никогда.
+	 * Активные передачи не вытесняются, лимиты существующих адресов не
+	 * сбрасываются — удаляется только то, что уже полностью восстановилось.
+	 *
 	 * @param {number} at
 	 */
 	function prune(at) {
 		let checked = 0;
-		for (const [key, state] of keys) {
-			if (checked >= PRUNE_PER_ACQUIRE) return;
+		while (checked < PRUNE_PER_ACQUIRE) {
+			const step = sweep.next();
+			if (step.done) {
+				// Круг пройден: следующий вызов начнёт его заново.
+				sweep = keys.entries();
+				return;
+			}
 			checked += 1;
+			const [key, state] = step.value;
 			if (state.active > 0) continue;
 			refill(state, at);
 			if (at - state.lastSeen >= IDLE_MS && state.tokens >= burst - 1e-9) keys.delete(key);

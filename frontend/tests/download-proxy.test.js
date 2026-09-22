@@ -335,6 +335,35 @@ test('aborting while upstream is not answering frees the slot', async () => {
 	assert.equal(guard.acquire('192.0.2.1').ok, true, 'слот должен освободиться');
 });
 
+test('aborting with an unread buffered chunk frees the slot', async () => {
+	const controller = new AbortController();
+	const guard = limiter({ maxConcurrent: 1 });
+	let pulls = 0;
+	const h = harness({
+		guard,
+		request: request({ signal: controller.signal }),
+		upstream: () =>
+			new Response(
+				body([new TextEncoder().encode('буферизованная порция')], () => (pulls += 1)),
+				{ status: 200 }
+			)
+	});
+
+	const response = await h.run();
+	// Порция успевает попасть в буфер выходного потока: клиент её не читает.
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	assert.equal(response.status, 200);
+	assert.equal(pulls, 1, 'порция должна быть прочитана в буфер');
+
+	controller.abort('клиент ушёл');
+
+	// Ни `reader.read()`, ни `cancel()` здесь не вызываются: освобождение не
+	// должно зависеть от того, будет ли кто-то ещё читать поток.
+	assert.equal(guard.acquire('192.0.2.1').ok, true, 'слот остался занятым');
+	assert.equal(lastEvent(h.events).result, 'aborted');
+	assert.equal(lastEvent(h.events).reason, 'client_abort');
+});
+
 test('aborting the request stops the upstream transfer', async () => {
 	const controller = new AbortController();
 	let upstreamCancelled = false;

@@ -85,6 +85,8 @@ export async function proxyDownload({
 	// сигнал отмены, а сравнение с ним должно видеть актуальное значение, а не
 	// сужение типа по присваиванию.
 	const transfer = { result: /** @type {'aborted' | 'failed' | 'completed'} */ ('failed') };
+	/** Сколько байт уже ушло клиенту: нужно и обрыву, и завершению. */
+	let bytes = 0;
 
 	/**
 	 * @param {string} result
@@ -108,6 +110,10 @@ export async function proxyDownload({
 		const reason = request.signal?.reason ?? 'клиент отменил запрос';
 		upstreamAbort.abort(reason);
 		activeReader?.cancel(reason).catch(() => {});
+		// Передача завершается здесь же: при отмене в буфере выходного потока
+		// может остаться непрочитанная порция, и тогда ни `pull`, ни `cancel`
+		// больше не вызовутся — слот остался бы занятым навсегда.
+		finish('aborted', { bytes, reason: 'client_abort' });
 	};
 	if (request.signal?.aborted) onAbort();
 	else request.signal?.addEventListener?.('abort', onAbort, { once: true });
@@ -143,7 +149,6 @@ export async function proxyDownload({
 
 	const reader = upstream.body.getReader();
 	activeReader = reader;
-	let bytes = 0;
 	const body = new ReadableStream({
 		async pull(controller) {
 			try {

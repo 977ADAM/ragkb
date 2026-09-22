@@ -149,6 +149,36 @@ test('idle refilled keys are pruned so storage stays bounded', () => {
 	assert.ok(guard.size() <= 2, `хранилище не ограничено: ${guard.size()}`);
 });
 
+test('prune resumes its sweep instead of restarting it', () => {
+	const time = clock();
+	const guard = limiter({ burst: 1, maxConcurrent: 1, maxKeys: 65 }, time.now);
+
+	// Шестьдесят четыре адреса с активными передачами: их вытеснять нельзя.
+	/** @type {{ release: () => void }[]} */
+	const busy = [];
+	for (let i = 0; i < 64; i += 1) busy.push(take(guard, `192.0.2.${i}`));
+	// Шестьдесят пятая запись свободна и после простоя бесполезна.
+	take(guard, '198.51.100.1').release();
+	assert.equal(guard.size(), 65);
+
+	time.advance(10 * 60 * 1000 + 1);
+
+	// За запрос проверяется не больше 64 записей, но обход продолжается с
+	// прошлого места: до просроченной записи дело доходит за пару обращений.
+	const attempts = [
+		guard.acquire('203.0.113.1'),
+		guard.acquire('203.0.113.2'),
+		guard.acquire('203.0.113.3')
+	];
+	assert.ok(
+		attempts.some((attempt) => attempt.ok),
+		'просроченная запись не освободила место для нового адреса'
+	);
+	// Активная передача не вытеснена: её слот всё ещё занят.
+	assert.equal(guard.acquire('192.0.2.0').ok, false);
+	busy.forEach((slot) => slot.release());
+});
+
 test('configuration is parsed from the environment and rejected when broken', () => {
 	assert.deepEqual(readLimiterConfig({}), {
 		ratePerMinute: 10,
