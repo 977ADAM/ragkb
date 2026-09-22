@@ -1,0 +1,552 @@
+# Document Download Tools Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans for inline execution or superpowers:subagent-driven-development if the user selects delegated execution. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Чат выдаёт проверенные ссылки на оригиналы разрешённых документов через настоящий tool calling, сохраняя поиск и цитаты по всем документам.
+
+**Architecture:** Реестр владеет идентификаторами и разрешениями; прикладной слой разрешает скачивание и готовит кандидатов. Core выполняет цикл LangChain через внедрённый асинхронный callback, не импортируя верхние слои. FastAPI передаёт файл, BFF ограничивает скачивания и проксирует поток, Svelte показывает вложения и управление флагом.
+
+**Tech Stack:** Существующие Python/FastAPI/Pydantic, SQLAlchemy/Alembic, LangChain/ChatOpenAI, Svelte 5/SvelteKit 2 и Bun. Новые серверы, Hono, Redis и библиотеки UI не требуются.
+
+**Spec:** [Согласованная спецификация](../specs/2026-09-22-document-download-tools-design.md).
+
+## Global Constraints
+
+- Управление намеренно открыто всем; не вводить авторизацию и роли.
+- `download_allowed` по умолчанию false, включая существующие записи.
+- DOCX базы знаний остаётся источником ответов и фрагментов.
+- Только зарегистрированные документы; не обходить data/docs и не публиковать static-каталог.
+- Все модели поддерживают инструменты; не заменять tool calling разбором ссылок в тексте.
+- Каждый вопрос независим; история tool calls существует только в текущем запросе.
+- LangChain только в core; core не импортирует api/db/domain/services.
+- Схемой БД владеет Alembic; новую 0002 добавить после 0001, старые таблицы не трогать.
+- Скачивание идёт через BFF; модель не определяет файловые пути и URL.
+- Предлагаемые лимиты: 10 запросов/минуту, burst 3, две одновременные передачи на IP.
+- Логи не содержат вопросы, содержимое файлов или секреты; IP не считается личностью.
+- Не менять существующие разрешения на пользовательских данных автоматически.
+
+## Review Focus
+
+1. Отзыв разрешения между tool call и GET: старая карточка должна получить 404 (задачи 2, 6).
+2. Замена файла и повторная загрузка: ID сохраняется только при замене существующей записи, разрешение не наследуется молча (задача 1).
+3. Медленный клиент/отмена: поток не буферизуется BFF, соединение backend и слот limiter освобождаются (задача 3).
+4. Неоднозначные HTML5/Mobile HTML5 и MediaText/Premium: не выбирать файл по первому частичному совпадению (задача 4).
+5. Отсутствие БД: обычный доступный RAG-ответ не должен ломаться из-за отсутствия каталога вложений (задача 5).
+
+## Подготовка и структура файлов
+
+Перед реализацией прочитать spec и AGENTS.md, проверить рабочее дерево. Изоляцию
+выполнять по using-git-worktrees на этапе реализации, не во время написания плана.
+Не переносить реальные файлы корпуса и настройки в тестовую среду.
+
+Новые единицы ответственности:
+
+| Файл | Назначение |
+|---|---|
+| `backend/migrations/versions/0002_document_downloads.py` | ID и разрешение существующих документов |
+| `backend/ragkb/services/downloads.py` | Разрешение оригиналов и изменение флага |
+| `backend/ragkb/services/download_candidates.py` | Привязка источников к реестру и кандидаты по имени |
+| `backend/ragkb/api/schemas/downloads.py` | HTTP DTO разрешений и вложений |
+| `backend/ragkb/api/routes/downloads.py` | PATCH разрешения, GET/HEAD оригинала |
+| `backend/ragkb/core/tool_answers.py` | Ограниченный цикл вызова инструмента |
+| `backend/ragkb/core/answer_events.py` | Независимые от LangChain типы событий и callback |
+| `frontend/src/lib/server/download-limiter.js` | Частота и параллелизм по IP |
+| `frontend/src/lib/server/download-proxy.js` | Передача тела с учётом отмены и аудита |
+| `frontend/src/lib/server/request-context.js` | Доверенный request ID и контекст внешнего запроса |
+| `frontend/src/lib/components/chat/Attachments.svelte` | Карточки и ошибки скачивания |
+| `frontend/src/lib/download.js` | Клиентское скачивание оригинала с обработкой HTTP-ошибок |
+
+Изменения существующего кода перечислены в каждой задаче. Порядок задач:
+1 → 2 → 3 → 4 → 5 → 6 → 7. Отдельные коммиты позволяют проверять каждый контракт.
+
+## Task 1: Расширить реестр без потери данных
+
+**Files:** новая миграция; изменить `backend/ragkb/domain/entities.py`,
+`domain/ports.py`, `db/models.py`, `db/repos/corpus_documents.py`,
+`core/database.py`, `services/documents.py`, `tests/helpers.py`;
+создать `backend/tests/test_download_registry.py`.
+
+**Interfaces:**
+
+```python
+# CorpusDocument: новые поля; имя остаётся primary key таблицы.
+document_id: str
+download_allowed: bool = False
+
+# DocumentRegistry и оба адаптера (SQLAlchemy и MemoryRegistry):
+async def get_by_id(self, document_id: str) -> CorpusDocument | None: ...
+async def set_download_allowed(
+    self, document_id: str, allowed: bool
+) -> tuple[bool, CorpusDocument] | None: ...  # старое значение + сохранённая запись
+# record(..., download_allowed: bool = False) -> None
+# DocumentsService.upload(..., download_allowed: bool = False) -> dict
+```
+
+- [ ] Написать тест на MemoryRegistry и повторить семантику на временной SQLite:
+
+```python
+async def test_replace_resets_permission_and_keeps_id():
+    registry = MemoryRegistry()
+    await registry.record('spec.pdf', download_allowed=True)
+    original = (await registry.list_all())[0]
+    await registry.record('spec.pdf')
+    replaced = await registry.get_by_id(original.document_id)
+    assert replaced is not None
+    assert replaced.document_id == original.document_id
+    assert replaced.download_allowed is False
+    await registry.forget('spec.pdf')
+    await registry.record('spec.pdf')
+    assert (await registry.list_all())[0].document_id != original.document_id
+```
+
+- [ ] Запустить `cd backend && uv run pytest tests/test_download_registry.py -q`;
+  подтвердить падение из-за отсутствующего контракта, а не настройки окружения.
+- [ ] Добавить миграцию: nullable ID → заполнение UUID для каждой строки →
+  unique/not-null; boolean с server_default false. SQLite использовать через
+  Alembic batch_alter_table, Postgres — совместимые операции Alembic.
+  Переход downgrade удаляет только новые поля/индекс; не удаляет документы.
+
+```python
+revision = '0002_document_downloads'
+down_revision = '0001_corpus_documents'
+# UUID генерируется на каждую строку, не одним значением server_default.
+for name in connection.execute(sa.text('SELECT name FROM corpus_documents')).scalars():
+    connection.execute(
+        sa.text('UPDATE corpus_documents SET document_id=:id WHERE name=:name'),
+        {'id': str(uuid4()), 'name': name},
+    )
+```
+
+- [ ] Обновить EXPECTED_REVISION. Сохранять ID при record существующего имени,
+  явно сохранять download_allowed, новое имя получает UUID. Изменение флага
+  возвращает старое значение из той же транзакции; не вычислять его до записи
+  отдельным незащищённым чтением. SQL-адаптер и MemoryRegistry равнозначны.
+- [ ] Дописать миграционные тесты: БД на 0001 с двумя документами и посторонней
+  таблицей; upgrade сохраняет данные, создаёт разные ID и false; повторный
+  upgrade безопасен; downgrade/upgrade сохраняет прежние поля. Проверить
+  `assert_revision` после миграции. Не считать сохранение ID после downgrade
+  требованием: откат удаляет новый столбец.
+- [ ] Запустить `uv run pytest tests/test_download_registry.py tests/test_documents.py tests/test_architecture.py -q`.
+- [ ] Зафиксировать только файлы задачи: `feat: add document download permissions to registry`.
+
+## Task 2: Выдавать оригинал только через проверенный API
+
+**Files:** создать `services/downloads.py`, `api/schemas/downloads.py`,
+`api/routes/downloads.py`, `tests/test_downloads.py`; изменить `api/router.py`,
+`api/deps/services.py`, `api/routes/documents.py`, `services/documents.py`.
+
+**Interfaces:**
+
+```python
+@dataclass(frozen=True)
+class DownloadDescriptor:  # services/downloads.py, наружу путь не сериализуется
+    document_id: str
+    filename: str
+    path: Path
+    media_type: str
+    size: int
+
+class DownloadsService:
+    def __init__(self, docs_dir: Path, registry: DocumentRegistry | None): ...
+    async def resolve(self, document_id: str) -> DownloadDescriptor: ...
+    async def set_permission(self, document_id: str, allowed: bool) -> tuple[bool, CorpusDocument]: ...
+
+class DownloadPermissionUpdate(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    download_allowed: bool
+
+class DownloadPermissionResponse(BaseModel):
+    document_id: UUID
+    download_allowed: bool
+
+class Attachment(BaseModel):
+    document_id: UUID
+    filename: str
+    url: str
+    media_type: str
+    size: int = Field(ge=0)
+```
+
+- [ ] Написать API-тест с TestClient(make_app(cfg)), временной мигрированной
+  SQLite и файлом, загруженным существующим API. Сценарий:
+
+```python
+uploaded = client.post('/api/v1/admin/documents?index=false',
+    files={'file': ('spec.pdf', pdf_bytes, 'application/pdf')})
+assert uploaded.status_code == 200
+row = client.get('/api/v1/admin/documents').json()['corpus'][0]
+url = f"/api/v1/documents/{row['document_id']}/download"
+assert client.get(url).status_code == 404
+permission = url.removesuffix('/download') + '/download-permission'
+assert client.patch(permission, json={'download_allowed': True}).status_code == 200
+assert client.get(url).content == pdf_bytes
+client.patch(permission, json={'download_allowed': False})
+assert client.get(url).status_code == 404
+```
+
+  Создать pdf_bytes как небольшой валидный тестовый PDF; без реальных AdSmart.
+- [ ] Запустить `uv run pytest tests/test_downloads.py -q`, подтвердить RED.
+- [ ] Реализовать resolve: запись по ID → флаг → допустимый относительный путь
+  → существующий обычный файл. Не использовать fallback `_document_file`,
+  допускающий возврат непроверенного пути после исключения. Запретить абсолютные
+  имена, `..`, NUL и компоненты-симлинки. При открытии использовать no-follow
+  проход по компонентам относительно открытого docs_dir; передавать файл
+  из уже проверенного дескриптора, чтобы повторное открытие по имени не
+  обходило проверку симлинка. Закрывать файловые дескрипторы при отказе/отмене.
+- [ ] В API добавить PATCH и GET/HEAD по ID. Resolve вызывается при каждом
+  GET/HEAD; нет записи/разрешения/файла — 404. Список возвращает новые поля,
+  загрузка принимает `download_allowed: bool = Query(False)` вместе с index.
+  MIME определять по имени, неизвестный тип application/octet-stream.
+  Content-Disposition: attachment с корректным filename*; Cache-Control:
+  no-store. Читать открытый файл порциями, не read_bytes целиком.
+- [ ] В первой версии не реализовывать частичные ответы: GET с Range отдаёт
+  полный 200, HEAD только заголовки. Не рекламировать Accept-Ranges: bytes.
+  BFF всё равно ограничивает такие запросы. Это избежать неоднозначной
+  семантики частичных передач и повторного открытия FileResponse.
+- [ ] Добавить тесты 404 для запретного/несуществующего ID и файла вне реестра,
+  traversal, вложенного симлинка, подмены пути; кириллица/пробелы/# в имени;
+  отключённая БД; сохранение флага без перестройки индекса; HEAD и Range.
+- [ ] Логировать сохранение разрешения через существующий logger: event,
+  UTC-время, request_id, ID, old/new. Не вводить зависимости HTTP в сервис:
+  HTTP-граница получает результат операции и пишет событие после commit.
+  Для upload/replace также вернуть внутренние old/new сведения для аудита,
+  убрать их из публичного ответа через DTO или явное построение ответа.
+- [ ] Запустить `uv run pytest tests/test_downloads.py tests/test_documents.py tests/test_architecture.py -q`.
+- [ ] Коммит `feat: serve permitted document originals`.
+
+## Task 3: BFF-поток, лимиты и журнал передачи
+
+**Files:** создать `frontend/src/lib/server/download-limiter.js`,
+`download-proxy.js`, `request-context.js`, маршруты
+`frontend/src/routes/api/documents/[documentId]/download/+server.js` и
+`download-permission/+server.js`, `frontend/tests/download-proxy.test.js`,
+`download-limiter.test.js`; изменить `lib/server/backend.js`,
+`routes/api/admin/documents/+server.js`, `frontend/.env.example`.
+
+**Interfaces:**
+
+```javascript
+// Ядро limiter независимо от SvelteKit; now возвращает миллисекунды.
+createDownloadLimiter({ ratePerMinute, burst, maxConcurrent, maxKeys, now })
+// .acquire(ip) -> {ok:true, release()} | {ok:false, retryAfter:number}
+// release идемпотентен; новый ключ при полном хранилище не вытесняет активный.
+
+// DI позволяет тестировать реальные Web Streams без поднятого SvelteKit.
+proxyDownload({ request, documentId, clientAddress, requestId,
+                limiter, upstreamFetch, log }) // -> Promise<Response>
+```
+
+- [ ] Добавить тесты с управляемым временем:
+
+```javascript
+test('cancel releases a concurrency slot', () => {
+  const limiter = createDownloadLimiter({
+    ratePerMinute: 10, burst: 3, maxConcurrent: 2,
+    maxKeys: 100, now: () => 0
+  });
+  const a = limiter.acquire('192.0.2.1');
+  const b = limiter.acquire('192.0.2.1');
+  assert.equal(limiter.acquire('192.0.2.1').ok, false);
+  a.release(); a.release();
+  assert.equal(limiter.acquire('192.0.2.1').ok, true);
+  b.release();
+});
+```
+
+  В реализации отдельно тестировать, что отклонённые по частоте обращения
+  не возвращают потраченный токен и не увеличивают число активных передач.
+- [ ] Запустить `cd frontend && bun test tests/download-limiter.test.js tests/download-proxy.test.js` и подтвердить RED.
+- [ ] Реализовать token bucket (capacity=3, refill=10/60000 токенов/мс),
+  счётчик активных передач, maxKeys=10000; удалять неактивные полностью
+  восстановленные записи после 10 минут простоя. При заполнении ограниченного
+  хранилища отклонять новый ключ 429, не сбрасывать лимиты существующих.
+  Конфигурация: RAGKB_DOWNLOAD_RATE_PER_MINUTE=10,
+  RAGKB_DOWNLOAD_BURST=3, RAGKB_DOWNLOAD_MAX_CONCURRENT=2,
+  RAGKB_DOWNLOAD_MAX_KEYS=10000. Некорректные значения — ошибка конфигурации.
+- [ ] Route использует event.getClientAddress(), а не X-Forwarded-For из
+  браузера. В прямом запуске не задавать ADDRESS_HEADER. Для Angie deployment
+  документировать ADDRESS_HEADER/XFF_DEPTH только при закрытом прямом доступе
+  к BFF и перезаписи заголовка доверенным прокси. Не добавлять собственную
+  эвристику разбора forwarded-цепочки. Request ID создаётся на BFF, передаётся
+  backend, возвращается клиенту; входящий пользовательский ID не доверенный.
+- [ ] Проверять limiter до upstreamFetch. Использовать AbortController,
+  связывая request.signal и cancel потока; освобождать слот на любом пути.
+  Порционное чтение по pull сохраняет backpressure. Разрешённые заголовки:
+  Content-Type, Content-Disposition, Content-Length для неизменённого тела;
+  no-store добавляется также к ошибкам. Не передавать cookies и произвольные
+  upstream-заголовки. HEAD освобождает слот сразу после заголовков.
+
+```javascript
+const body = new ReadableStream({
+  async pull(controller) {
+    try {
+      const chunk = await reader.read();
+      if (chunk.done) { finish('completed'); controller.close(); }
+      else { bytes += chunk.value.byteLength; controller.enqueue(chunk.value); }
+    } catch (error) { finish('failed'); controller.error(error); }
+  },
+  async cancel(reason) {
+    abort.abort(reason);
+    try { await reader.cancel(reason); }
+    finally { finish('aborted'); }
+  }
+});
+```
+
+  `finish` определяется в proxyDownload: один вызов освобождает слот, удаляет
+  listener request.signal и пишет event с IP/request_id/document_id/bytes.
+  Окончание upstream — не доказательство сохранения файла на диске клиента.
+- [ ] PATCH проксировать JSON с request_id, upload передаёт то же поле аудита.
+  Протокол ошибок сохранить: JSON detail, HTTP-статус и Retry-After для 429.
+- [ ] Тестами проверить 429 без upstream-вызова, независимые IP, восстановление
+  токенов, HEAD/Range, сетевой отказ до ответа, отмену до/после headers,
+  медленный reader, повторный release, bounded memory, корреляцию аудита.
+  Integration-check адреса выполнить реальным SvelteKit запросом с подложным
+  X-Forwarded-For: он не меняет ключ в direct-режиме.
+- [ ] Запустить `bun test && bun run check`. Коммит `feat: limit and audit streamed downloads through BFF`.
+
+## Task 4: Подготовить кандидатов и контракт событий агента
+
+**Files:** создать `backend/ragkb/services/download_candidates.py`,
+`core/answer_events.py`, `tests/test_download_candidates.py`; изменить
+`core/ports.py`, `services/downloads.py`, `api/schemas/ask.py`.
+
+**Interfaces:**
+
+```python
+# core/answer_events.py, stdlib dataclasses/typing, без импортов верхних слоёв
+class ToolCandidate(TypedDict):
+    document_id: str
+    filename: str
+    download_allowed: bool
+
+ToolResult = dict[str, Any]  # success поля Attachment либо error='not_available'
+DownloadResolver = Callable[[str], Awaitable[ToolResult]]
+
+@dataclass(frozen=True)
+class AnswerEvent:
+    kind: Literal['token', 'attachment', 'warning']
+    value: str | dict[str, Any]
+
+# services/download_candidates.py
+async def prepare_candidates(question, hits, registry, docs_dir) -> list[ToolCandidate]: ...
+def match_names(question: str, names: list[str]) -> list[str]: ...
+```
+
+- [ ] Написать тесты нормализованного сопоставления:
+
+```python
+def test_html5_does_not_silently_select_mobile():
+    names = ['AdSmart HTML5.pdf', 'AdSmart Mobile HTML5.pdf']
+    assert match_names('Пришли AdSmart Mobile HTML5', names) == [names[1]]
+    assert set(match_names('Пришли требования HTML5', names)) == set(names)
+```
+
+- [ ] Запустить `uv run pytest tests/test_download_candidates.py -q`, подтвердить RED.
+- [ ] Реализовать сравнение casefold/NFKC, без расширения, пунктуация как
+  разделители; точное полное название получает приоритет, иначе совпадение
+  содержательных токенов (служебные «пришли», «требования», «к» исключаются).
+  Не превращать выбор кандидатов в автоматическое разрешение инструмента;
+  неоднозначность видна модели. До 20 кандидатов; если превышено, попросить
+  конкретизировать и не отдавать случайную усечённую подборку инструменту.
+- [ ] Объединить найденные по имени разрешённые записи с привязанными к hits
+  документами, дедуплицировать по ID. Привязка проверяет принадлежность source
+  каталогу docs_dir и реестру, не использует один basename для чужого пути.
+  Закрытые hits остаются для цитирования с false; кандидаты не содержат path.
+- [ ] Создать request-scoped callback, принимающий только разрешённые ID
+  этого набора. Внутри повторно вызвать DownloadsService.resolve; строить URL
+  из ID на сервере; отказ вернуть как error=not_available. Нет БД → пустые
+  кандидаты и отказ инструмента, без отказа обычного ответа.
+- [ ] Описать Pydantic TokenEvent/DoneEvent и Attachment на границе API,
+  не импортируя API DTO в core. DoneEvent сохраняет существующие поля и
+  добавляет attachments с default_factory=list.
+- [ ] Проверить совпадения Premium, одинаковые названия фрагментов, запрещённый
+  ID, отсутствие БД, PDF вне top-k при источнике DOCX и отзыв флага после
+  подготовки кандидатов. Запустить tests/test_download_candidates.py и
+  tests/test_architecture.py. Коммит `feat: resolve registered download candidates for answers`.
+
+## Task 5: Настоящий цикл инструментов и NDJSON
+
+**Files:** создать `backend/ragkb/core/tool_answers.py`,
+`tests/test_tool_answers.py`; изменить `core/pipeline.py`, `core/prompts.py`,
+`core/ports.py`, `services/ask.py`, `api/routes/ask.py`,
+`api/deps/services.py`, `tests/helpers.py`, `tests/test_stream.py`, `tests/test_ask.py`.
+
+**Interfaces:** добавить к AnswerEngine, оставив search/cited_sources и
+существующий синхронный путь оценки работоспособными:
+
+```python
+def stream_tool_answer(
+    self, question: str, *, hits: list[Hit], model: str,
+    candidates: list[ToolCandidate], resolve_download: DownloadResolver,
+) -> AsyncIterator[AnswerEvent]: ...
+
+# AskService: подготовка вызывается до открытия StreamingResponse.
+async def stream(self, question: str, *, model=None, top_k=None, expand=False
+) -> AsyncIterator[str]: ...
+# route: stream = await svc.stream(**req.model_dump())
+```
+
+- [ ] Расширить ScriptedChatModel поддержкой bind_tools и скриптом AIMessage/
+  AIMessageChunk с настоящими tool_calls; сохранить существующие текстовые
+  responses. Добавить детерминированный тест:
+
+```python
+request_tool = AIMessage(content='', tool_calls=[{
+    'name': 'get_download_link', 'args': {'document_id': doc_id}, 'id': 'call-1'
+}])
+final_text = AIMessage(content='Требования приложены. [1]')
+# Скрипт возвращает request_tool, затем final_text.
+# Проверить: callback вызван один раз; второй вызов модели содержит ToolMessage
+# с tool_call_id='call-1'; done.attachments[0].document_id == doc_id.
+```
+
+- [ ] Запустить `uv run pytest tests/test_tool_answers.py -q`, подтвердить RED.
+- [ ] В core связать модель с одним инструментом через bind_tools. Обрабатывать
+  astream сообщений, складывать AIMessageChunk до получения полных аргументов;
+  пользовательский текст передавать токенами, JSON аргументов не выводить.
+  После окончания раунда добавить AIMessage и соответствующие ToolMessage,
+  выполнить callback асинхронно. Tool schema: object с обязательным UUID
+  document_id и additionalProperties=false. Не использовать StrOutputParser
+  между моделью и обработчиком tool_calls.
+- [ ] Предел: до 3 раундов с инструментами и 8 вызовов суммарно; затем один
+  финальный проход без разрешённых инструментов. Превышение/неизвестный tool/
+  невалидный JSON/ID — warning и контролируемый ToolMessage. Успешный ID
+  повторно не исполнять, возвращать сохранённый результат; attachment один.
+  Не перехватывать отмену клиента как обычную ошибку и не продолжать генерацию.
+- [ ] До открытия потока сохранить существующие 400/503 проверки. Синхронный
+  retrieval выполнять через asyncio.to_thread; реестр/callback await.
+  Не выполнять asyncio.run и не блокировать loop синхронным итератором LLM.
+- [ ] AskService сериализует AnswerEvent в token и итоговый done; вложения
+  собирает только из событий attachment, цитаты только из текста/hits.
+  Ошибка генерации сохраняет полученный текст/вложения и даёт warnings;
+  truncated=true после начавшегося ответа. Не создавать карточки из слов модели.
+- [ ] Промпт определяет политику прямой просьбы/подготовки материалов/
+  неоднозначности; запрещает исполнять инструкции из источников. При уточнении
+  предлагает полную следующую формулировку без обещания памяти диалога.
+- [ ] Исправить OpenAPI /ask на application/x-ndjson; схемы token/done
+  документируют каждую строку как union, а не один JSON-массив. Проверить
+  app.openapi() без запуска реального приложения и внешних моделей.
+- [ ] Проверить частичные tool-call chunks, несколько вызовов в одном ответе,
+  повторный ID, отказ после отзыва, неизвестный инструмент, лимиты, обрыв
+  до/после вложения, отсутствие вызовов, отсутствие БД и два независимых ask.
+  Запустить `uv run pytest tests/test_tool_answers.py tests/test_stream.py tests/test_ask.py tests/test_pipeline.py tests/test_architecture.py -q`.
+- [ ] Коммит `feat: stream answers with verified download tool calls`.
+
+## Task 6: Переключатели и карточки во фронтенде
+
+**Files:** создать `frontend/src/lib/components/chat/Attachments.svelte`,
+`frontend/src/lib/download.js`, `frontend/tests/download.test.js`;
+изменить `routes/admin/documents/+page.svelte`, `lib/chat.svelte.js`,
+`lib/components/chat/Message.svelte`, `frontend/tests/answer-stream.test.js`.
+
+**Interfaces:**
+
+```javascript
+// Message.attachments: Array<{document_id, filename, url, media_type, size}>
+// attachments при старом done отсутствует и трактуется как [].
+// download.js:
+downloadAttachment(attachment, { fetchImpl = fetch, saveBlob }) // Promise<void>
+// saveBlob(blob, filename) вызывается только после response.ok.
+```
+
+- [ ] Написать тест ошибок скачивания и совместимости потока:
+
+```javascript
+test('revoked file does not save an error body', async () => {
+  let saved = false;
+  await assert.rejects(downloadAttachment(attachment, {
+    fetchImpl: async () => new Response('{"detail":"Недоступен"}', {status: 404}),
+    saveBlob: () => { saved = true; }
+  }), /недоступен/i);
+  assert.equal(saved, false);
+});
+```
+
+  attachment в тесте — фиксированный UUID, filename=spec.pdf,
+  url=/api/documents/<UUID>/download, media_type=application/pdf, size=10.
+- [ ] Запустить `bun test tests/download.test.js tests/answer-stream.test.js`,
+  подтвердить RED новых сценариев.
+- [ ] В загрузке добавить флаг false для новой пачки; snapshot значения хранить
+  в QueueItem, чтобы изменение переключателя не меняло уже запущенную очередь.
+  Передавать через URLSearchParams вместе с index=false. При замене явно
+  показывать итоговый флаг. В таблице переключатель сохраняется PATCH по ID,
+  блокируется на время запроса; при ошибке восстанавливает прежнее состояние.
+- [ ] Обновить тип Message и обработку done: attachments ?? []. Показывать
+  Attachments даже при пустом тексте ответа. Карточки: имя, размер, кнопка,
+  локальная ошибка. Validate URL как same-origin путь /api/documents/<id>/download
+  совпадающий с document_id; не скачивать произвольный URL из неизвестных данных.
+- [ ] По клику fetch файла; 404 — «Файл больше недоступен», 429 — предложение
+  повторить с Retry-After, остальные отказы — понятная ошибка. Успешное тело
+  сохранить через Blob/object URL, затем revokeObjectURL. BFF остаётся потоковым;
+  браузер собирает один файл в Blob (загрузка сейчас ограничена 20 МБ).
+  Повторные клики блокируются до завершения; не делать HEAD перед каждым GET.
+- [ ] Проверить тестами 200/404/429, вредоносный URL, старый done, вложение без
+  текста и сохранение текста после ошибки скачивания. Проверить вручную в
+  браузере загрузку, смену флага, замену, две карточки, копирование, источники,
+  очистку чата и узкий экран; клавиатурные подписи кнопок и переключателей.
+- [ ] Запустить `bun test && bun run check && bun run build`.
+- [ ] Коммит `feat: manage download permissions and show chat attachments`.
+
+## Task 7: Сквозная проверка, документация и передача
+
+**Files:** изменить `README.md`, `frontend/README.md`, `AGENTS.md`,
+`backend/tests/test_logging.py`; дополнить тесты предыдущих задач по результатам.
+
+- [ ] Обновить инструкции: 0001 → новая head через alembic upgrade head;
+  прежние удалённые исторические ревизии сначала stamp --purge 0001, затем
+  upgrade head. Не stamp сразу 0002, иначе новые столбцы не будут созданы.
+  Описать выключенный default, смену флага без reindex, замену/удаление,
+  требование tool calling и независимость вопросов.
+- [ ] Документировать limiter одного процесса, общий NAT, доверенные прокси,
+  отсутствие квоты байтов; включить настройки из задачи 3 в frontend/.env.example.
+  Указать, что скачанные файлы нельзя отозвать и аудит не устанавливает личность.
+- [ ] Дописать log-тест с caplog: успешное изменение имеет old/new и request_id,
+  неуспешное не выдаётся за сохранённое; выдача ссылки не создаёт download_completed.
+  Проверить, что текущие ротационные логи работают без новой таблицы или sink.
+- [ ] Полная проверка:
+
+```bash
+cd backend && uv run pytest
+cd frontend && bun test && bun run check && bun run build
+```
+
+  Команды запускать из соответствующего каталога, не выполнять второй cd
+  относительно backend. Проверить git diff --check. Не повторять полный набор
+  без новых изменений/сбоев.
+- [ ] На изолированной тестовой Postgres проверить upgrade с 0001 и сохранение
+  документов/посторонней таблицы. Если Docker/Postgres недоступен, записать
+  ограничение проверки явно, не выдавать SQLite за проверку Postgres.
+- [ ] Сквозной сценарий через BFF с тестовыми файлами: закрытый источник знаний
+  + разрешённый PDF; tool → done → карточка → байты; отзыв → 404; лимит → 429;
+  prompt без tool → обычный ответ. Воспроизводить детерминированно, затем
+  отдельно с настроенной моделью при её доступности. Не менять флаги реальных
+  AdSmart или DOCX без отдельной команды пользователя.
+- [ ] Провести финальное ревью diff относительно spec, включая отсутствие
+  файлов корпуса/секретов в изменениях. Выполнить verification-before-completion
+  и finishing-a-development-branch при завершении реализации.
+- [ ] Коммит документации/финальных поправок `docs: document download tools and operational limits`.
+
+## Покрытие спецификации и решения плана
+
+| Требование | Задачи |
+|---|---|
+| Реестр, UUID, default, миграция и замена | 1 |
+| Серверная проверка, пути, GET/HEAD, отзыв | 2 |
+| BFF, rate limiting, доверенный IP, аудит передачи | 3 |
+| Кандидаты вне top-k, реестр, схемы | 4 |
+| Tool calling, асинхронность, ошибки, лимиты, NDJSON | 5 |
+| Загрузка/переключатели/карточки/ошибки | 6 |
+| Аудит изменений, документация и сквозная проверка | 2, 7 |
+
+Уточнения исполнения: Range обслуживается полным 200, а не частичной выдачей;
+финальный проход модели после лимита tools запрещает новые инструменты;
+аудит добавляется в существующие логи; интерфейс скачивания буферизует в
+браузере только один файл до текущего лимита загрузки, серверный тракт потоковый.
+
+## Execution Handoff
+
+План подготовлен для проверки. Рекомендация — последовательное выполнение
+в текущей задаче: шаги сильно связаны контрактами реестра, событий и callback.
+Вариант с отдельными исполнителями и ревью каждого шага возможен по выбору
+пользователя. До проверки плана и выбора способа реализацию не начинать.
