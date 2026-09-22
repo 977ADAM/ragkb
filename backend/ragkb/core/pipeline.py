@@ -14,7 +14,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Callable, Collection, Iterator
+from collections.abc import AsyncIterator, Callable, Collection, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -26,6 +26,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from . import loaders, manifest
+from .answer_events import AnswerEvent, DownloadResolver, ToolCandidate
 from .config import Settings
 from .documents import section_documents, split_documents, with_scalar_metadata
 from .embeddings import (
@@ -36,9 +37,18 @@ from .embeddings import (
 )
 from .errors import EngineUnavailable
 from .llm import build_chat_model, chat_model_name
-from .prompts import ANSWER_TEMPLATE, QUERY_EXPANSION_PROMPT, SYSTEM_PROMPT, format_context
+from .prompts import (
+    ANSWER_TEMPLATE,
+    QUERY_EXPANSION_PROMPT,
+    SYSTEM_PROMPT,
+    TOOL_ANSWER_TEMPLATE,
+    TOOL_SYSTEM_PROMPT,
+    format_candidates,
+    format_context,
+)
 from .retrieval import Hit, build_retriever
 from .retrieval import search as run_search
+from .tool_answers import stream_answer_with_tools
 from .vectorstore import all_documents, build_store, delete_by_source, open_store
 
 log = logging.getLogger("ragkb")
@@ -194,6 +204,7 @@ class RagChain:
         self.store = open_store(cfg, self.embeddings)
         self.retriever = build_retriever(cfg, self.store)
         self.prompt = answer_prompt()
+        self.tool_prompt = tool_answer_prompt()
         self._llm: BaseChatModel | None = None
 
     def _check_indexed_with(self, indexed: dict[str, Any]) -> None:
@@ -308,6 +319,34 @@ class RagChain:
         """LCEL-цепочка ответа: промпт → модель → текст."""
         return self.prompt | self._chat_model(model) | StrOutputParser()
 
+    def stream_tool_answer(
+        self,
+        question: str,
+        *,
+        hits: list[Hit],
+        model: str | None = None,
+        candidates: Sequence[ToolCandidate] = (),
+        resolve_download: DownloadResolver | None = None,
+    ) -> AsyncIterator[AnswerEvent]:
+        """Ответ с инструментами: находки уже собраны прикладным слоем.
+
+        Поиск здесь не повторяется: кандидаты и готовность генерации
+        проверяются до открытия потока, поэтому отказ ещё можно вернуть
+        HTTP-кодом. Цикл вызовов живёт в `tool_answers`, а не в сервисе:
+        LangChain остаётся внутри ядра.
+        """
+        messages = self.tool_prompt.format_messages(
+            context=format_context(hits),
+            question=question,
+            downloads=format_candidates(candidates),
+        )
+        return stream_answer_with_tools(
+            model=self._chat_model(model),
+            messages=messages,
+            candidates=candidates,
+            resolve_download=resolve_download,
+        )
+
     def ask(
         self,
         question: str,
@@ -384,6 +423,13 @@ def answer_prompt() -> ChatPromptTemplate:
     """Промпт RAG: системные правила + контекст с пронумерованными фрагментами."""
     return ChatPromptTemplate.from_messages(
         [("system", SYSTEM_PROMPT), ("human", ANSWER_TEMPLATE)]
+    )
+
+
+def tool_answer_prompt() -> ChatPromptTemplate:
+    """Тот же ответ, но с перечнем оригиналов и правилами инструмента."""
+    return ChatPromptTemplate.from_messages(
+        [("system", TOOL_SYSTEM_PROMPT), ("human", TOOL_ANSWER_TEMPLATE)]
     )
 
 

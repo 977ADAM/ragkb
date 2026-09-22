@@ -1,10 +1,13 @@
 """Public stateless answer contract."""
 import json
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
 from helpers import ScriptedChatModel, corpus_names, make_app
 
+from ragkb.api.schemas.ask import DoneEvent
+from ragkb.core.answer_events import AnswerEvent
 from ragkb.core.config import Settings
 from ragkb.core.pipeline import build_index
 
@@ -73,18 +76,23 @@ def test_stream_failures_and_independence(public_app, mode):
     """Два клиента не делят состояние; обрыв потока виден в truncated."""
 
     class Engine:
+        """Движок нового контракта: поиск, ответ с инструментами, цитаты."""
+
         def llm_available(self, model=None):
             return True
 
-        def stream_answer(self, question, *, history=None, **kwargs):
-            assert history is None
+        def search(self, question, top_k=None, expand=False):
+            return []
 
-            def tokens():
-                yield question
+        def stream_tool_answer(
+            self, question, *, hits, model=None, candidates=(), resolve_download=None
+        ):
+            async def events():
+                yield AnswerEvent('token', question)
                 if mode == 'after':
                     raise RuntimeError('interrupted')
 
-            return [], tokens()
+            return events()
 
         def cited_sources(self, text, hits):
             return []
@@ -107,12 +115,17 @@ def test_generation_failure_before_first_token_is_reported_as_warning(public_app
         def llm_available(self, model=None):
             return True
 
-        def stream_answer(self, question, *, history=None, **kwargs):
-            def tokens():
+        def search(self, question, top_k=None, expand=False):
+            return []
+
+        def stream_tool_answer(
+            self, question, *, hits, model=None, candidates=(), resolve_download=None
+        ):
+            async def events():
                 raise RuntimeError('модель недоступна')
                 yield  # pragma: no cover
 
-            return [], tokens()
+            return events()
 
         def cited_sources(self, text, hits):
             return []
@@ -137,3 +150,110 @@ def test_answer_without_llm_address_is_rejected_before_stream(public_app):
 
     assert response.status_code == 503
     assert 'Генерация недоступна' in response.json()['detail']
+
+ATTACHMENT_ID = '11111111-1111-4111-8111-111111111111'
+
+
+def _attachment_engine(events_factory):
+    """Движок, отдающий заранее заданные события ответа."""
+
+    class Engine:
+        def llm_available(self, model=None):
+            return True
+
+        def search(self, question, top_k=None, expand=False):
+            return []
+
+        def stream_tool_answer(
+            self, question, *, hits, model=None, candidates=(), resolve_download=None
+        ):
+            return events_factory()
+
+        def cited_sources(self, text, hits):
+            return []
+
+    return Engine()
+
+
+def test_attachment_goes_into_done_and_not_into_its_own_line(public_app):
+    """Вложения — часть завершающего события, отдельных строк потока нет."""
+
+    async def events():
+        yield AnswerEvent('token', 'Требования приложены. ')
+        yield AnswerEvent(
+            'attachment',
+            {
+                'document_id': ATTACHMENT_ID,
+                'filename': 'AdSmart Multi.pdf',
+                'url': f'/api/documents/{ATTACHMENT_ID}/download',
+                'media_type': 'application/pdf',
+                'size': 1024,
+            },
+        )
+
+    public_app.state.engine = lambda: _attachment_engine(events)
+    with TestClient(public_app) as client:
+        response = client.post(
+            '/api/v1/ask', json={'question': 'Пришли требования к AdSmart Multi'}
+        )
+
+    assert response.status_code == 200
+    lines = [json.loads(line) for line in response.text.splitlines()]
+    assert [line['type'] for line in lines] == ['token', 'done']
+
+    done = DoneEvent(**lines[-1])
+    assert done.truncated is False
+    assert [str(attachment.document_id) for attachment in done.attachments] == [ATTACHMENT_ID]
+    assert done.attachments[0].filename == 'AdSmart Multi.pdf'
+    assert lines[-1]['attachments'][0]['document_id'] == ATTACHMENT_ID
+
+
+def test_attachments_survive_a_broken_generation(public_app):
+    """Обрыв после вложения сохраняет вложение: файл уже выдан."""
+
+    async def events():
+        yield AnswerEvent('token', 'Начало ответа. ')
+        yield AnswerEvent(
+            'attachment',
+            {
+                'document_id': ATTACHMENT_ID,
+                'filename': 'AdSmart Multi.pdf',
+                'url': f'/api/documents/{ATTACHMENT_ID}/download',
+                'media_type': 'application/pdf',
+                'size': 1024,
+            },
+        )
+        raise RuntimeError('обрыв')
+
+    public_app.state.engine = lambda: _attachment_engine(events)
+    with TestClient(public_app) as client:
+        response = client.post('/api/v1/ask', json={'question': 'Пришли требования'})
+
+    lines = [json.loads(line) for line in response.text.splitlines()]
+    done = DoneEvent(**lines[-1])
+    assert done.truncated is True
+    assert len(done.attachments) == 1
+    assert any('оборвался' in warning for warning in done.warnings)
+
+
+def test_attachment_identifier_is_a_valid_uuid(public_app):
+    """Идентификатор вложения обязан быть UUID: иначе карточка в интерфейсе сломается."""
+
+    async def events():
+        yield AnswerEvent(
+            'attachment',
+            {
+                'document_id': str(uuid.uuid4()),
+                'filename': 'spec.pdf',
+                'url': '/api/documents/x/download',
+                'media_type': 'application/pdf',
+                'size': 1,
+            },
+        )
+
+    public_app.state.engine = lambda: _attachment_engine(events)
+    with TestClient(public_app) as client:
+        response = client.post('/api/v1/ask', json={'question': 'Пришли spec.pdf'})
+
+    done = DoneEvent(**json.loads(response.text.splitlines()[-1]))
+    assert isinstance(done.attachments[0].document_id, uuid.UUID)

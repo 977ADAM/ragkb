@@ -5,9 +5,10 @@ RagChain удовлетворяет AnswerEngine структурно и нич�
 """
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator, Sequence
 from typing import Any, Protocol
 
+from ragkb.core.answer_events import AnswerEvent, DownloadResolver, ToolCandidate
 from ragkb.core.retrieval import Hit
 
 
@@ -24,6 +25,21 @@ class AnswerEngine(Protocol):
         expand: bool = False,
         model: str | None = None,
     ) -> tuple[list[Hit], Iterator[str]]: ...
+
+    def stream_tool_answer(
+        self,
+        question: str,
+        *,
+        hits: list[Hit],
+        model: str | None = None,
+        candidates: Sequence[ToolCandidate] = (),
+        resolve_download: DownloadResolver | None = None,
+    ) -> AsyncIterator[AnswerEvent]:
+        """Ответ с инструментами: цикл «модель → вызовы → результаты → модель».
+
+        Находки приходят снаружи: поиск и подготовка кандидатов выполняются до
+        открытия потока, чтобы отказ можно было вернуть HTTP-кодом.
+        """
 
     def cited_sources(self, text: str, hits: list[Hit]) -> list[dict[str, Any]]: ...
 

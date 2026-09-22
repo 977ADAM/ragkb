@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
@@ -198,14 +199,42 @@ class KeywordEmbeddings(Embeddings):
 
 
 class ScriptedChatModel(BaseChatModel):
-    """Модель с заданными ответами: тесты цепочки без обращения к серверу."""
+    """Модель с заданными ответами: тесты цепочки без обращения к серверу.
 
-    responses: list[str] = Field(default_factory=list)
+    `responses` принимает и строки (обычный текст), и готовые `AIMessage` с
+    `tool_calls`. Поток отдаёт текст по словам, а аргументы инструмента —
+    частями, как это делает настоящий сервер: так проверяется сборка
+    `tool_call_chunks` до полных аргументов.
+
+    `bound_tools` фиксирует, дошли ли инструменты до вызова модели: без этого
+    `bind_tools` можно было бы «потерять» и не заметить.
+    """
+
+    responses: list[Any] = Field(default_factory=list)
     calls: list[list[Any]] = Field(default_factory=list)
+    bound_tools: list[Any] = Field(default_factory=list)
 
     @property
     def _llm_type(self) -> str:
         return "scripted"
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> Any:
+        """Как у настоящих моделей: инструменты уходят в вызов через kwargs.
+
+        Базовая реализация LangChain бросает NotImplementedError, поэтому этот
+        двойник её переопределяет — иначе тест не отличил бы поддержку
+        инструментов от её отсутствия.
+        """
+        return self.bind(tools=list(tools), **kwargs)
+
+    def _next(self, messages: list[BaseMessage], kwargs: dict[str, Any]) -> AIMessage:
+        self.calls.append(list(messages))
+        self.bound_tools.append(kwargs.get("tools"))
+        index = min(len(self.calls) - 1, len(self.responses) - 1)
+        scripted = self.responses[index] if self.responses else ""
+        if isinstance(scripted, AIMessage):
+            return scripted
+        return AIMessage(content="" if scripted is None else str(scripted))
 
     def _generate(
         self,
@@ -214,9 +243,9 @@ class ScriptedChatModel(BaseChatModel):
         run_manager: Any | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        self.calls.append(list(messages))
-        index = min(len(self.calls) - 1, len(self.responses) - 1)
-        return ChatResult(generations=[ChatGeneration(message=AIMessage(self.responses[index]))])
+        return ChatResult(
+            generations=[ChatGeneration(message=self._next(messages, kwargs))]
+        )
 
     def _stream(
         self,
@@ -225,6 +254,41 @@ class ScriptedChatModel(BaseChatModel):
         run_manager: Any | None = None,
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
-        answer = self._generate(messages).generations[0].message.content
-        for piece in str(answer).split(" "):
-            yield ChatGenerationChunk(message=AIMessageChunk(content=piece + " "))
+        yield from scripted_chunks(self._next(messages, kwargs))
+
+
+def scripted_chunks(answer: AIMessage) -> Iterator[ChatGenerationChunk]:
+    """Разбивает заданный ответ на порции так, как это делает сервер.
+
+    Текст идёт по словам, аргументы инструмента — по несколько символов:
+    склеивать фрагменты обязан вызывающий, а не модель.
+    """
+    if answer.tool_calls:
+        for position, call in enumerate(answer.tool_calls):
+            call_id = str(call.get("id") or f"call-{position}")
+            args = call.get("args")
+            serialized = (
+                args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
+            )
+            for piece_index, piece in enumerate(_pieces(serialized)):
+                yield ChatGenerationChunk(
+                    message=AIMessageChunk(
+                        content="",
+                        tool_call_chunks=[
+                            {
+                                "name": str(call.get("name") or "") if piece_index == 0 else None,
+                                "args": piece,
+                                "id": call_id if piece_index == 0 else None,
+                                "index": position,
+                                "type": "tool_call_chunk",
+                            }
+                        ],
+                    )
+                )
+        return
+    for piece in str(answer.content).split(" "):
+        yield ChatGenerationChunk(message=AIMessageChunk(content=piece + " "))
+
+
+def _pieces(text: str, size: int = 7) -> list[str]:
+    return [text[index : index + size] for index in range(0, len(text), size)] or [""]

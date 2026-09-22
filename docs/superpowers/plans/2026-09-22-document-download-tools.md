@@ -387,7 +387,7 @@ async def stream(self, question: str, *, model=None, top_k=None, expand=False
 # route: stream = await svc.stream(**req.model_dump())
 ```
 
-- [ ] Расширить ScriptedChatModel поддержкой bind_tools и скриптом AIMessage/
+- [x] Расширить ScriptedChatModel поддержкой bind_tools и скриптом AIMessage/
   AIMessageChunk с настоящими tool_calls; сохранить существующие текстовые
   responses. Добавить детерминированный тест:
 
@@ -401,37 +401,37 @@ final_text = AIMessage(content='Требования приложены. [1]')
 # с tool_call_id='call-1'; done.attachments[0].document_id == doc_id.
 ```
 
-- [ ] Запустить `uv run pytest tests/test_tool_answers.py -q`, подтвердить RED.
-- [ ] В core связать модель с одним инструментом через bind_tools. Обрабатывать
+- [x] Запустить `uv run pytest tests/test_tool_answers.py -q`, подтвердить RED.
+- [x] В core связать модель с одним инструментом через bind_tools. Обрабатывать
   astream сообщений, складывать AIMessageChunk до получения полных аргументов;
   пользовательский текст передавать токенами, JSON аргументов не выводить.
   После окончания раунда добавить AIMessage и соответствующие ToolMessage,
   выполнить callback асинхронно. Tool schema: object с обязательным UUID
   document_id и additionalProperties=false. Не использовать StrOutputParser
   между моделью и обработчиком tool_calls.
-- [ ] Предел: до 3 раундов с инструментами и 8 вызовов суммарно; затем один
+- [x] Предел: до 3 раундов с инструментами и 8 вызовов суммарно; затем один
   финальный проход без разрешённых инструментов. Превышение/неизвестный tool/
   невалидный JSON/ID — warning и контролируемый ToolMessage. Успешный ID
   повторно не исполнять, возвращать сохранённый результат; attachment один.
   Не перехватывать отмену клиента как обычную ошибку и не продолжать генерацию.
-- [ ] До открытия потока сохранить существующие 400/503 проверки. Синхронный
+- [x] До открытия потока сохранить существующие 400/503 проверки. Синхронный
   retrieval выполнять через asyncio.to_thread; реестр/callback await.
   Не выполнять asyncio.run и не блокировать loop синхронным итератором LLM.
-- [ ] AskService сериализует AnswerEvent в token и итоговый done; вложения
+- [x] AskService сериализует AnswerEvent в token и итоговый done; вложения
   собирает только из событий attachment, цитаты только из текста/hits.
   Ошибка генерации сохраняет полученный текст/вложения и даёт warnings;
   truncated=true после начавшегося ответа. Не создавать карточки из слов модели.
-- [ ] Промпт определяет политику прямой просьбы/подготовки материалов/
+- [x] Промпт определяет политику прямой просьбы/подготовки материалов/
   неоднозначности; запрещает исполнять инструкции из источников. При уточнении
   предлагает полную следующую формулировку без обещания памяти диалога.
-- [ ] Исправить OpenAPI /ask на application/x-ndjson; схемы token/done
+- [x] Исправить OpenAPI /ask на application/x-ndjson; схемы token/done
   документируют каждую строку как union, а не один JSON-массив. Проверить
   app.openapi() без запуска реального приложения и внешних моделей.
-- [ ] Проверить частичные tool-call chunks, несколько вызовов в одном ответе,
+- [x] Проверить частичные tool-call chunks, несколько вызовов в одном ответе,
   повторный ID, отказ после отзыва, неизвестный инструмент, лимиты, обрыв
   до/после вложения, отсутствие вызовов, отсутствие БД и два независимых ask.
   Запустить `uv run pytest tests/test_tool_answers.py tests/test_stream.py tests/test_ask.py tests/test_pipeline.py tests/test_architecture.py -q`.
-- [ ] Коммит `feat: stream answers with verified download tool calls`.
+- [x] Коммит `feat: stream answers with verified download tool calls`.
 
 ## Task 6: Переключатели и карточки во фронтенде
 
@@ -998,3 +998,72 @@ backend не сопоставить.
   разрешается сервером.
 - Подборка по названию ограничена двадцатью: более широкая просьба оставляет
   модель без кандидатов и требует уточнения формулировки.
+### Task 5 — выполнено
+
+Новые файлы: `backend/ragkb/core/tool_answers.py`,
+`backend/tests/test_tool_answers.py`. Изменены `core/pipeline.py`,
+`core/prompts.py`, `core/ports.py`, `services/ask.py`, `api/routes/ask.py`,
+`api/deps/services.py`, `tests/helpers.py`, `tests/test_stream.py`,
+`tests/test_ask.py`.
+
+Решения по ходу (уточнения приоритетнее формулировок плана):
+
+- `AskService.stream` — корутина, а не асинхронный генератор: она выполняет
+  подготовку и возвращает генератор строк. Порядок подготовки: `resolve_model`
+  → `llm_available` (400/503 до открытия потока) → `engine.search` через
+  `asyncio.to_thread` → `prepare_candidates` → `download_resolver`. Маршрут
+  стал `async def` и вызывает `stream = await svc.stream(**req.model_dump())`.
+- На проводе только `token` и `done`. События `attachment` — внутренние:
+  `AskService` копит их и отдаёт в `done.attachments`; отдельной строки
+  `{"type": "attachment"}` нет (проверено тестом).
+- `Attachment.document_id` на границе API — UUID, ядро отдаёт строку; строки
+  NDJSON собираются с `default=str`, а соответствие схеме проверяется
+  валидацией `DoneEvent`/`Attachment` в тестах. Импортировать API-схемы в
+  сервис нельзя (архитектурный запрет), поэтому проверка стоит на тестах.
+- `ask_service` берёт реестр как `request.app.state.storage.corpus`: без базы
+  он уже `None`, кандидатов нет, обычный ответ работает.
+- `ScriptedChatModel` принимает и строки, и готовые `AIMessage` с `tool_calls`;
+  поток отдаёт `AIMessageChunk` с фрагментированными аргументами (по 7
+  символов), а `bound_tools` фиксирует, что `bind_tools` доводит инструменты до
+  вызова модели. Старые текстовые ответы работают как раньше.
+- Цикл в `tool_answers.py`: один инструмент `get_download_link` со схемой
+  `object` и обязательным `document_id` (`additionalProperties=false`);
+  `astream` с накоплением чанков до полных аргументов; текст уходит токенами,
+  JSON аргументов не выводится; после раунда — `AIMessage` и `ToolMessage`;
+  обработчик вызывается асинхронно. `StrOutputParser` между моделью и вызовом
+  не используется — он потерял бы `tool_calls`.
+- Лимиты: 3 раунда и 8 вызовов, затем финальный проход без инструментов с
+  предупреждением. Повторный успешный идентификатор не исполняется заново —
+  вложение одно. Неизвестный инструмент, невалидные аргументы, идентификатор
+  вне набора и отказ выдачи дают предупреждение и контролируемый `ToolMessage`,
+  не обрывая ответ.
+- `CancelledError` не перехватывается ни в цикле, ни в сервисе: отмена клиента
+  пробрасывается, а не превращается в предупреждение. Неподдерживаемый
+  `bind_tools` — явная `EngineUnavailable`, фолбэка на разбор ссылок в тексте
+  нет.
+- В `prompts.py` добавлены `DOWNLOAD_POLICY`, `TOOL_SYSTEM_PROMPT`,
+  `TOOL_ANSWER_TEMPLATE` с параметром `{downloads}` и `format_candidates`:
+  имя, `document_id` и доступность. Закрытые документы видны как недоступные;
+  политика описывает прямую просьбу, «что подготовить», неоднозначность с
+  полной формулировкой уточнения и запрет исполнять инструкции из источников.
+- `core/ports.py`: в `AnswerEngine` добавлен `stream_tool_answer` — именно он
+  и реализован в Task 5 (в Task 4 этот пункт был отложен).
+
+Фактические результаты:
+
+- RED: `tests/test_tool_answers.py` сначала падал на отсутствующих
+  `tool_answers` и `format_candidates`.
+- `tests/test_tool_answers.py tests/test_stream.py tests/test_ask.py
+  tests/test_pipeline.py tests/test_architecture.py` — 86 passed.
+- Полный backend-набор — 288 passed, 1 deselected; ruff — те же 11 прежних
+  замечаний.
+
+Ограничения:
+
+- Цикл исполняет вызовы последовательно, параллельные вызовы одного раунда не
+  распараллеливаются: их обычно один-два, а лишняя сложность тут не окупается.
+- Аргументы инструмента проверяются только на `document_id`; прочие поля схема
+  запрещает (`additionalProperties=false`), но модель может их прислать —
+  такие вызовы отклоняются как невалидные.
+- Проверка с настоящей tool-capable моделью остаётся за Task 7: здесь всё
+  детерминировано скриптованной моделью.

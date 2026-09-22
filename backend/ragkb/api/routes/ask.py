@@ -9,6 +9,8 @@ router = APIRouter()
 
 
 @router.post("/ask")
-def ask(req: AskRequest, svc: AskService = Depends(ask_service)) -> StreamingResponse:
-    stream = svc.stream(**req.model_dump())
+async def ask(req: AskRequest, svc: AskService = Depends(ask_service)) -> StreamingResponse:
+    # Подготовка выполняется до открытия потока: отказ (400/503) должен быть
+    # HTTP-ответом, а не первой строкой NDJSON.
+    stream = await svc.stream(**req.model_dump())
     return StreamingResponse(stream, media_type="application/x-ndjson; charset=utf-8")

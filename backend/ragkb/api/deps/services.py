@@ -25,7 +25,14 @@ def _storage(request: Request):
 
 
 def ask_service(request: Request) -> AskService:
-    return AskService(request.app.state.engine, request.app.state.models.resolve)
+    # Реестр берём у хранилища напрямую: без базы он уже None, и подготовка
+    # кандидатов просто не находит документов — обычный ответ работает.
+    return AskService(
+        request.app.state.engine,
+        request.app.state.models.resolve,
+        registry=request.app.state.storage.corpus,
+        docs_dir=request.app.state.cfg.docs_dir,
+    )
 
 
 def search_service(request: Request) -> SearchService:
