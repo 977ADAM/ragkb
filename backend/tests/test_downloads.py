@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import sqlite3
@@ -885,3 +886,80 @@ async def test_file_is_streamed_in_chunks_and_closed_on_stream_error(
     assert payload.startswith(b"".join(sent)), "порции идут по порядку"
     assert sum(len(part) for part in sent) < len(payload), "отправка оборвалась на середине"
     assert counter.closed, "обрыв отправки должен закрыть дескриптор"
+
+# ------------------------------------------------------ сквозной сценарий
+
+
+def test_answer_attaches_the_original_and_revocation_closes_it(
+    tmp_path, sqlite_url, monkeypatch
+):
+    """Закрытый источник знаний и разрешённый оригинал в одном ответе.
+
+    Ответ строится по закрытому для скачивания документу, а инструмент
+    прикладывает разрешённый PDF: карточка ведёт на тот же файл, байты
+    совпадают с загруженными, а отзыв разрешения закрывает ссылку.
+    """
+    from helpers import ScriptedChatModel
+    from langchain_core.messages import AIMessage
+
+    from ragkb.api.schemas.ask import DoneEvent
+    from ragkb.core.answer_events import TOOL_GET_DOWNLOAD_LINK
+
+    cfg = _cfg(tmp_path, sqlite_url)
+    cfg.llm.base_url = "http://llm.test/v1"
+    cfg.llm.model = "test-model"
+
+    with TestClient(make_app(cfg)) as client:
+        _upload(client, "faq.md", POLICY.encode(), index="true")
+        _upload(client, "AdSmart Multi.pdf", PDF, download_allowed="true")
+        rows = {row["name"]: row for row in client.get("/api/v1/admin/documents").json()["corpus"]}
+        faq, pdf_row = rows["faq.md"], rows["AdSmart Multi.pdf"]
+        assert faq["download_allowed"] is False
+        assert pdf_row["download_allowed"] is True
+
+        model = ScriptedChatModel(
+            responses=[
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": TOOL_GET_DOWNLOAD_LINK,
+                            "args": {"document_id": pdf_row["document_id"]},
+                            "id": "call-1",
+                        }
+                    ],
+                ),
+                AIMessage(content="Требования приложены [1]."),
+            ]
+        )
+        monkeypatch.setattr(
+            "ragkb.core.pipeline.build_chat_model", lambda *_args, **_kwargs: model
+        )
+
+        response = client.post(
+            "/api/v1/ask", json={"question": "Пришли требования к AdSmart Multi"}
+        )
+
+        assert response.status_code == 200
+        events = [json.loads(line) for line in response.text.splitlines()]
+        done = DoneEvent(**events[-1])
+        assert [str(item.document_id) for item in done.attachments] == [
+            pdf_row["document_id"]
+        ]
+        assert "приложены" in "".join(event.get("text", "") for event in events)
+
+        attachment = done.attachments[0]
+        assert attachment.filename == "AdSmart Multi.pdf"
+        # Карточка ведёт на адрес BFF, а байты отдаёт маршрут backend.
+        assert attachment.url == f"/api/documents/{pdf_row['document_id']}/download"
+        backend_url = f"/api/v1/documents/{pdf_row['document_id']}/download"
+        served = client.get(backend_url)
+        assert served.status_code == 200
+        assert served.content == PDF
+
+        # Отзыв разрешения закрывает и уже выданную ссылку.
+        client.patch(
+            f"/api/v1/documents/{pdf_row['document_id']}/download-permission",
+            json={"download_allowed": False},
+        )
+        assert client.get(backend_url).status_code == 404

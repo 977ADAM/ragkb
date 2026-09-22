@@ -30,6 +30,35 @@ make frontend
 `frontend/.env.example` и задайте `RAGKB_BACKEND_URL`. Переменная читается
 только серверной частью SvelteKit.
 
+## Выдача оригиналов
+
+Скачивание идёт через BFF: браузер не знает адреса backend.
+
+| Маршрут BFF | Назначение |
+|---|---|
+| `GET`, `HEAD /api/documents/{documentId}/download` | потоковая выдача оригинала |
+| `PATCH /api/documents/{documentId}/download-permission` | разрешение на выдачу |
+
+Тело не буферизуется: порции читаются по требованию потребителя, поэтому
+медленный клиент создаёт обратное давление. Слот ограничителя освобождается
+ровно один раз — при завершении, отмене или ошибке. Клиенту уходят только
+`content-type`, `content-disposition`, `content-length`, добавленные
+`cache-control: no-store` и `x-request-id`; cookie и прочие заголовки backend не
+пробрасываются.
+
+Ограничения частоты и одновременных передач задаются окружением (подробности и
+значения — в [основном README](../README.md#ограничение-частоты-скачиваний)):
+
+```
+RAGKB_DOWNLOAD_RATE_PER_MINUTE=10
+RAGKB_DOWNLOAD_BURST=3
+RAGKB_DOWNLOAD_MAX_CONCURRENT=2
+RAGKB_DOWNLOAD_MAX_KEYS=10000
+```
+
+Счётчики считаются по адресу соединения и живут в памяти одного процесса:
+при нескольких репликах frontend общий лимит даёт только внешний прокси.
+
 ## Сборка и проверки
 
 Из `frontend/`:
