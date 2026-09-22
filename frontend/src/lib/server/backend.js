@@ -26,6 +26,20 @@ function backendPath(path) {
 }
 
 /**
+ * Абсолютный адрес backend вместе с `/api/v1`.
+ *
+ * Нужен там, где запрос уходит напрямую через `fetch`: у потоковой выдачи
+ * свой набор заголовков, и общий JSON-обёртке `backend()` её content-type
+ * только мешал бы.
+ *
+ * @param {string} path
+ * @returns {string}
+ */
+export function backendUrl(path) {
+	return `${BASE}${backendPath(path)}`;
+}
+
+/**
  * Запрос к бэкенду. Возвращает сырой Response — стрим нельзя буферизовать.
  *
  * @param {string} path
@@ -33,11 +47,14 @@ function backendPath(path) {
  * @param {RequestInit} [init]
  */
 export function backend(path, request, init = {}) {
-	return fetch(`${BASE}${backendPath(path)}`, {
+	return fetch(backendUrl(path), {
 		...init,
 		headers: { 'content-type': 'application/json', .../** @type {Record<string, string>} */ (init.headers ?? {}) }
 	});
 }
+
+/** Метка запроса: BFF передаёт её backend, чтобы связать строки журналов. */
+export const REQUEST_ID_HEADER = 'x-request-id';
 
 /**
  * Человекочитаемое сообщение об отказе бэкенда.

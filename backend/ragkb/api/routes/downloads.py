@@ -64,11 +64,17 @@ def file_response(descriptor: DownloadDescriptor) -> StreamingResponse:
     )
 
 
-def _refusal(exc: RagkbError, document_id: str) -> JSONResponse:
-    """Отказ без кэша и без путей: одинаковый для всех причин."""
+def _refusal(exc: RagkbError, document_id: str, request_id: str) -> JSONResponse:
+    """Отказ без кэша и без путей: одинаковый для всех причин.
+
+    `request_id` приходит от BFF: по нему строки frontend и backend
+    сопоставляются, хотя посетителя в записи и не устанавливают.
+    """
     log.info(
-        "выдача оригинала: event=download result=refused status=%s document_id=%s",
+        "выдача оригинала: event=download result=refused status=%s"
+        " request_id=%s document_id=%s",
         status_for(exc),
+        request_id or "-",
         document_id or "-",
     )
     return JSONResponse(
@@ -102,11 +108,11 @@ class _FileResponse(StreamingResponse):
 
 
 @router.get("/documents/{document_id}/download")
-async def download_document(document_id: str, svc: Downloads) -> Response:
+async def download_document(document_id: str, request: Request, svc: Downloads) -> Response:
     try:
         descriptor = await svc.resolve(document_id)
     except RagkbError as exc:
-        return _refusal(exc, document_id)
+        return _refusal(exc, document_id, request_id(request))
     try:
         return file_response(descriptor)
     except Exception:
@@ -116,11 +122,11 @@ async def download_document(document_id: str, svc: Downloads) -> Response:
 
 
 @router.head("/documents/{document_id}/download")
-async def download_document_head(document_id: str, svc: Downloads) -> Response:
+async def download_document_head(document_id: str, request: Request, svc: Downloads) -> Response:
     try:
         descriptor = await svc.resolve(document_id)
     except RagkbError as exc:
-        return _refusal(exc, document_id)
+        return _refusal(exc, document_id, request_id(request))
     try:
         return Response(
             status_code=200,
@@ -145,7 +151,7 @@ async def set_download_permission(
     try:
         previous, saved = await svc.set_permission(document_id, payload.download_allowed)
     except RagkbError as exc:
-        return _refusal(exc, document_id)
+        return _refusal(exc, document_id, request_id(request))
     # Запись в журнал — после сохранения: прежнее и новое значения приходят из
     # самой транзакции, а не из чтения до неё.
     log_permission_change(

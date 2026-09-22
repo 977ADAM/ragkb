@@ -236,7 +236,7 @@ proxyDownload({ request, documentId, clientAddress, requestId,
                 limiter, upstreamFetch, log }) // -> Promise<Response>
 ```
 
-- [ ] Добавить тесты с управляемым временем:
+- [x] Добавить тесты с управляемым временем:
 
 ```javascript
 test('cancel releases a concurrency slot', () => {
@@ -255,21 +255,21 @@ test('cancel releases a concurrency slot', () => {
 
   В реализации отдельно тестировать, что отклонённые по частоте обращения
   не возвращают потраченный токен и не увеличивают число активных передач.
-- [ ] Запустить `cd frontend && bun test tests/download-limiter.test.js tests/download-proxy.test.js` и подтвердить RED.
-- [ ] Реализовать token bucket (capacity=3, refill=10/60000 токенов/мс),
+- [x] Запустить `cd frontend && bun test tests/download-limiter.test.js tests/download-proxy.test.js` и подтвердить RED.
+- [x] Реализовать token bucket (capacity=3, refill=10/60000 токенов/мс),
   счётчик активных передач, maxKeys=10000; удалять неактивные полностью
   восстановленные записи после 10 минут простоя. При заполнении ограниченного
   хранилища отклонять новый ключ 429, не сбрасывать лимиты существующих.
   Конфигурация: RAGKB_DOWNLOAD_RATE_PER_MINUTE=10,
   RAGKB_DOWNLOAD_BURST=3, RAGKB_DOWNLOAD_MAX_CONCURRENT=2,
   RAGKB_DOWNLOAD_MAX_KEYS=10000. Некорректные значения — ошибка конфигурации.
-- [ ] Route использует event.getClientAddress(), а не X-Forwarded-For из
+- [x] Route использует event.getClientAddress(), а не X-Forwarded-For из
   браузера. В прямом запуске не задавать ADDRESS_HEADER. Для Angie deployment
   документировать ADDRESS_HEADER/XFF_DEPTH только при закрытом прямом доступе
   к BFF и перезаписи заголовка доверенным прокси. Не добавлять собственную
   эвристику разбора forwarded-цепочки. Request ID создаётся на BFF, передаётся
   backend, возвращается клиенту; входящий пользовательский ID не доверенный.
-- [ ] Проверять limiter до upstreamFetch. Использовать AbortController,
+- [x] Проверять limiter до upstreamFetch. Использовать AbortController,
   связывая request.signal и cancel потока; освобождать слот на любом пути.
   Порционное чтение по pull сохраняет backpressure. Разрешённые заголовки:
   Content-Type, Content-Disposition, Content-Length для неизменённого тела;
@@ -296,14 +296,14 @@ const body = new ReadableStream({
   `finish` определяется в proxyDownload: один вызов освобождает слот, удаляет
   listener request.signal и пишет event с IP/request_id/document_id/bytes.
   Окончание upstream — не доказательство сохранения файла на диске клиента.
-- [ ] PATCH проксировать JSON с request_id, upload передаёт то же поле аудита.
+- [x] PATCH проксировать JSON с request_id, upload передаёт то же поле аудита.
   Протокол ошибок сохранить: JSON detail, HTTP-статус и Retry-After для 429.
-- [ ] Тестами проверить 429 без upstream-вызова, независимые IP, восстановление
+- [x] Тестами проверить 429 без upstream-вызова, независимые IP, восстановление
   токенов, HEAD/Range, сетевой отказ до ответа, отмену до/после headers,
   медленный reader, повторный release, bounded memory, корреляцию аудита.
   Integration-check адреса выполнить реальным SvelteKit запросом с подложным
   X-Forwarded-For: он не меняет ключ в direct-режиме.
-- [ ] Запустить `bun test && bun run check`. Коммит `feat: limit and audit streamed downloads through BFF`.
+- [x] Запустить `bun test && bun run check`. Коммит `feat: limit and audit streamed downloads through BFF`.
 
 ## Task 4: Подготовить кандидатов и контракт событий агента
 
@@ -848,3 +848,68 @@ backend-набор — 250 passed, 1 deselected; ruff — те же 11 преж�
 
 Фактические результаты: `tests/test_downloads.py` — 28 passed; полный
 backend-набор — 251 passed, 1 deselected; ruff — те же 11 прежних замечаний.
+### Task 3 — выполнено
+
+Новые файлы: `frontend/src/lib/server/download-limiter.js`,
+`download-proxy.js`, `request-context.js`,
+`frontend/src/routes/api/documents/[documentId]/download/+server.js`,
+`download-permission/+server.js`, `frontend/tests/download-limiter.test.js`,
+`download-proxy.test.js`. Изменены `lib/server/backend.js` (адрес backend
+отдельной функцией), маршрут загрузки документов (метка запроса),
+`frontend/.env.example`, а также `backend/ragkb/api/routes/downloads.py`: строка
+отказа выдачи теперь несёт `request_id` от BFF — без него события frontend и
+backend не сопоставить.
+
+Решения по ходу:
+
+- Ограничитель — чистый модуль без SvelteKit: время, значения и адрес приходят
+  снаружи, поэтому лимиты проверяются без ожидания реальных секунд. Счётчики
+  живут в процессе frontend; при нескольких репликах общий лимит даёт только
+  внешний прокси — это записано в `.env.example`.
+- Порядок проверок в `acquire`: частота → параллелизм → списание токена и слота.
+  Отклонённый запрос не тратит ни токен, ни слот передачи (проверено тестом), а
+  новый ключ при заполненном хранилище не вытесняет существующие.
+- Адрес берётся только у соединения (`event.getClientAddress()`); заголовки
+  браузера не читаются вовсе. Тест с подложенным `X-Forwarded-For` подтверждает,
+  что ключ лимита не меняется.
+- Тело не буферизуется: чтение порциями по требованию потребителя, «вперёд не
+  больше одной порции» проверено счётчиком чтений upstream. Слот освобождается
+  ровно один раз — при завершении, отмене по сигналу запроса, отмене
+  потребителем и ошибке.
+- Клиенту уходят только `content-type`, `content-disposition`, `content-length`,
+  добавленные `cache-control: no-store` и `x-request-id`; cookies и прочие
+  заголовки backend не пробрасываются, а upstream получает только метку запроса.
+- Журнал BFF различает `refused` (лимит или отказ backend), `started`,
+  `completed`, `aborted`, `failed` и несёт IP, request_id, document_id, байты и
+  длительность. Полный потоковый аудит остаётся на BFF: backend пишет изменение
+  разрешения и отказ выдачи, как договорено.
+
+Фактические результаты:
+
+- RED: новые тесты сначала падали на отсутствующих модулях.
+- `cd frontend && bun test` — 22 passed (8 ограничитель, 12 прокси, 2 потока
+  ответа).
+- `bun run check` — 0 ошибок, 0 предупреждений; `bun run build` собирается.
+- Полный backend-набор — 251 passed, 1 deselected; ruff — те же 11 прежних
+  замечаний.
+- Живая проверка на dev-сервере SvelteKit: пять запросов с разными подложенными
+  `X-Forwarded-For` дали три прохода и два `429` с `Retry-After`, в журнале у
+  всех `ip=127.0.0.1` — ключ берётся из соединения.
+- Сквозная проверка через BFF с настоящим backend на временном корпусе: `GET`
+  разрешённого документа — 200 и те же байты (23 байта, `content-type`,
+  `content-disposition` с `filename*`, `content-length`, `no-store`,
+  `x-request-id`), `HEAD` — заголовки без тела, закрытый документ — 404, журнал
+  BFF дал `started` → `completed bytes=23`, а строка отказа backend содержит тот
+  же `request_id`, что и строка BFF.
+
+Ограничения:
+
+- Лимит — одного процесса frontend: несколько реплик дают независимые счётчики,
+  и выдавать их за глобальную защиту нельзя.
+- Частота и параллелизм не задают потолок трафика: жёсткий бюджет байтов
+  требует квоты или ограничения скорости на внешнем прокси.
+- `ADDRESS_HEADER`/`XFF_DEPTH` не задаются в прямом запуске: их включает только
+  закрытый прямой доступ к BFF и доверенный прокси, иначе адрес подставляется.
+- Интеграционная проверка адреса и сквозной сценарий выполнены вручную
+  (dev-сервер и uvicorn на временном корпусе); автоматическими тестами они не
+  покрыты — поднимать SvelteKit внутри `bun test` дороже, чем польза.
