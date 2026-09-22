@@ -19,7 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
-from ragkb.core.errors import InvalidRequest, NotFound
+from ragkb.core.answer_events import ToolResult, attachment_result, not_available_result
+from ragkb.core.errors import InvalidRequest, NotFound, RagkbError
 from ragkb.domain.entities import CorpusDocument
 from ragkb.domain.ports import DocumentRegistry
 
@@ -149,6 +150,29 @@ class DownloadsService:
         if result is None:
             raise NotFound("Документ не найден в реестре корпуса")
         return result
+
+    async def tool_attachment(self, document_id: str) -> ToolResult:
+        """Результат инструмента: описание файла или структурированный отказ.
+
+        Проверки те же, что у выдачи: запись в реестре, разрешение, безопасное
+        открытие файла без симлинков. Дескриптор закрывается сразу — инструменту
+        нужны только имя, размер и тип, а байты отдаёт отдельный маршрут
+        скачивания. Отказ не обрывает полезный текстовый ответ: модель получает
+        код `not_available` и продолжает отвечать.
+        """
+        try:
+            descriptor = await self.resolve(document_id)
+        except RagkbError:
+            return not_available_result()
+        try:
+            return attachment_result(
+                document_id=descriptor.document_id,
+                filename=descriptor.filename,
+                media_type=descriptor.media_type,
+                size=descriptor.size,
+            )
+        finally:
+            descriptor.close()
 
 
 def media_type_for(name: str) -> str:
