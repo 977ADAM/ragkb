@@ -50,5 +50,26 @@ def log_permission_change(
     )
 
 
+def log_index_change(
+    *,
+    action: str,
+    document_id: str,
+    previous: bool,
+    current: bool,
+    request_id: str,
+) -> None:
+    """Пишется после сохранения: выключенный документ выпадает из поиска."""
+    log.info(
+        "участие в поиске: event=index_permission action=%s result=ok at=%s"
+        " request_id=%s document_id=%s old=%s new=%s",
+        action,
+        datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        request_id or "-",
+        document_id,
+        _flag(previous),
+        _flag(current),
+    )
+
+
 def _flag(value: bool) -> str:
     return "true" if value else "false"

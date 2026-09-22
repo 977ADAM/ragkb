@@ -12,6 +12,13 @@ class DocumentRegistry(Protocol):
 
     async def names(self) -> set[str]:
         """Имена (пути относительно каталога корпуса) принятых документов."""
+    async def index_names(self) -> set[str]:
+        """Имена документов, участвующих в поиске.
+
+        Индекс собирается только по ним: документ с выключенным
+        `index_enabled` остаётся в корпусе и доступен для скачивания, но его
+        фрагменты в ответы не попадают.
+        """
     async def list_all(self) -> list[CorpusDocument]: ...
     async def get_by_id(self, document_id: str) -> CorpusDocument | None:
         """Запись по идентификатору. None — такого документа в реестре нет."""
@@ -24,6 +31,7 @@ class DocumentRegistry(Protocol):
         size: int = 0,
         sha256: str = "",
         download_allowed: bool = False,
+        index_enabled: bool = True,
     ) -> RecordOutcome:
         """Заводит документ или обновляет сведения о нём.
 
@@ -41,6 +49,15 @@ class DocumentRegistry(Protocol):
         значение читается в той же транзакции, а не отдельным чтением до
         записи. None — документа с таким идентификатором нет.
         """
+    async def set_index_enabled(
+        self, document_id: str, enabled: bool
+    ) -> tuple[bool, CorpusDocument] | None:
+        """Включает или выключает участие документа в поиске.
+
+        Возвращает прежнее значение и сохранённую запись: новый флаг
+        применяется при следующей сборке индекса, а прежнее значение нужно
+        журналу — так же, как у разрешения на скачивание.
+        """
     async def forget(self, name: str) -> bool:
         """Убирает документ из реестра. True — запись была."""
 
@@ -50,7 +67,6 @@ class ModelCatalog(Protocol):
     def resolve(self, requested: str | None) -> str: ...
 
 
-# --- Телеметрия ---
 
 
 class EventSink(Protocol):

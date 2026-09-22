@@ -12,8 +12,6 @@ from ragkb.core.errors import Conflict
 from ragkb.db.models import CorpusDocumentRow
 from ragkb.domain.entities import ORIGIN_UI, CorpusDocument, RecordOutcome
 
-# Коды SQLite, которыми драйвер сообщает о занятости базы: SQLITE_BUSY и
-# SQLITE_LOCKED. Прочие коды — не занятость, и подменять их нельзя.
 _SQLITE_BUSY = 5
 _SQLITE_LOCKED = 6
 
@@ -72,6 +70,18 @@ class PostgresCorpusDocuments:
             rows = (await session.execute(select(CorpusDocumentRow.name))).scalars().all()
         return set(rows)
 
+    async def index_names(self) -> set[str]:
+        """Имена документов, участвующих в поиске: индекс собирается по ним."""
+        async with self.session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(CorpusDocumentRow.name).where(
+                        CorpusDocumentRow.index_enabled.is_(True)
+                    )
+                )
+            ).scalars().all()
+        return set(rows)
+
     async def list_all(self) -> list[CorpusDocument]:
         async with self.session_factory() as session:
             rows = (
@@ -107,6 +117,7 @@ class PostgresCorpusDocuments:
         size: int = 0,
         sha256: str = "",
         download_allowed: bool = False,
+        index_enabled: bool = True,
     ) -> RecordOutcome:
         """Заводит документ или обновляет сведения о нём.
 
@@ -124,7 +135,7 @@ class PostgresCorpusDocuments:
                 await _lock_document_write(session)
                 row = await session.get(CorpusDocumentRow, name, with_for_update=True)
                 if row is None:
-                    created, previous = True, False
+                    created, previous, previous_index = True, False, True
                     row = CorpusDocumentRow(
                         name=name,
                         document_id=str(uuid4()),
@@ -134,18 +145,21 @@ class PostgresCorpusDocuments:
                         size=size,
                         sha256=sha256,
                         download_allowed=download_allowed,
+                        index_enabled=index_enabled,
                     )
                     session.add(row)
                 else:
                     created, previous = False, bool(row.download_allowed)
+                    previous_index = bool(row.index_enabled)
                     row.origin = origin
                     row.uploaded_by = uploaded_by
                     row.uploaded_at = _utcnow()
                     row.size = size
                     row.sha256 = sha256
                     row.download_allowed = download_allowed
+                    row.index_enabled = index_enabled
                 await session.commit()
-                return RecordOutcome(created, previous, row.to_domain())
+                return RecordOutcome(created, previous, row.to_domain(), previous_index)
         except OperationalError as exc:
             _raise_conflict_if_locked(exc)
             raise
@@ -175,6 +189,34 @@ class PostgresCorpusDocuments:
                     return None
                 previous = bool(row.download_allowed)
                 row.download_allowed = bool(allowed)
+                await session.commit()
+                return previous, row.to_domain()
+        except OperationalError as exc:
+            _raise_conflict_if_locked(exc)
+            raise
+
+    async def set_index_enabled(
+        self, document_id: str, enabled: bool
+    ) -> tuple[bool, CorpusDocument] | None:
+        """Включает или выключает участие документа в поиске.
+
+        Читает и пишет в одной заблокированной транзакции — так же, как
+        переключение разрешения на скачивание.
+        """
+        if not document_id:
+            return None
+        try:
+            async with self.session_factory() as session:
+                await _lock_document_write(session)
+                row = await session.scalar(
+                    select(CorpusDocumentRow)
+                    .where(CorpusDocumentRow.document_id == document_id)
+                    .with_for_update()
+                )
+                if row is None:
+                    return None
+                previous = bool(row.index_enabled)
+                row.index_enabled = bool(enabled)
                 await session.commit()
                 return previous, row.to_domain()
         except OperationalError as exc:

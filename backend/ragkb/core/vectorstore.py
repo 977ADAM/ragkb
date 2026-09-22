@@ -161,6 +161,19 @@ def vectors_for(store: VectorStore, chunk_ids: list[str]) -> dict[str, list[floa
     }
 
 
+def clear_store(store: VectorStore) -> int:
+    """Удаляет из хранилища все чанки: индекс остаётся, но пустым."""
+    documents = all_documents(store)
+    chunk_ids = [
+        str(document.metadata.get("chunk_id") or "")
+        for document in documents
+        if document.metadata.get("chunk_id")
+    ]
+    if chunk_ids:
+        store.delete(chunk_ids)
+    return len(chunk_ids)
+
+
 def delete_by_source(store: VectorStore, source: str) -> int:
     """Удаляет чанки документа по исходному пути. Возвращает их число."""
     if isinstance(store, InMemoryVectorStore):

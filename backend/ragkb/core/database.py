@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase
 
 
-EXPECTED_REVISION = "0002_document_downloads"
+EXPECTED_REVISION = "0001_corpus_documents"
 
 
 class Base(DeclarativeBase):
@@ -32,7 +32,6 @@ def make_engine(url: str) -> AsyncEngine:
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
-
         return engine
     return create_async_engine(url, pool_pre_ping=True)
 

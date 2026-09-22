@@ -49,7 +49,6 @@ def make_service(cfg: Settings, registry=None, invalidate=None) -> DocumentsServ
             return RagChain(cfg)
         except (FileNotFoundError, ValueError) as exc:
             raise EngineUnavailable(str(exc)) from exc
-
     return DocumentsService(
         cfg,
         ConfigIndex(cfg, get_engine),
@@ -58,14 +57,12 @@ def make_service(cfg: Settings, registry=None, invalidate=None) -> DocumentsServ
     )
 
 
-# ------------------------------------------------------- без реестра нельзя
 
 
 async def test_list_without_registry_reports_it_is_off(tmp_path):
     cfg = make_cfg(tmp_path)
 
     body = await make_service(cfg).list_documents()
-
     assert body["registry"] == "off"
     assert body["corpus"] == []
     assert body["summary"]["corpus_files"] == 0
@@ -73,16 +70,13 @@ async def test_list_without_registry_reports_it_is_off(tmp_path):
 
 async def test_upload_without_registry_is_rejected(tmp_path):
     cfg = make_cfg(tmp_path)
-
     with pytest.raises(InvalidRequest) as exc:
         await make_service(cfg).upload("new.md", b"# N\n", index=False)
-
     assert "RAGKB_DATABASE_URL" in exc.value.detail
 
 
 async def test_delete_without_registry_is_rejected(tmp_path):
     cfg = make_cfg(tmp_path)
-
     with pytest.raises(InvalidRequest):
         await make_service(cfg).delete("policy.md")
 
@@ -90,14 +84,11 @@ async def test_delete_without_registry_is_rejected(tmp_path):
 def test_rebuild_without_registry_is_rejected(tmp_path):
     cfg = make_cfg(tmp_path)
     service = IndexService(ConfigIndex(cfg, lambda: None), lambda: None)
-
     with pytest.raises(InvalidRequest) as exc:
         asyncio.run(service.rebuild())
-
     assert "RAGKB_DATABASE_URL" in exc.value.detail
 
 
-# ----------------------------------------------------------- список корпуса
 
 
 async def test_list_after_upload_and_index(tmp_path):
@@ -107,7 +98,6 @@ async def test_list_after_upload_and_index(tmp_path):
     await svc.upload("policy.md", POLICY.encode(), "ada")
 
     body = await svc.list_documents()
-
     assert body["index"] == "ok"
     assert body["built_at"] is not None
     assert body["registry"] == "on"
@@ -128,11 +118,10 @@ async def test_file_outside_registry_is_invisible(tmp_path):
         "# Секрет\n\nКод доступа к хранилищу: КАРАНДАШ-77.\n", encoding="utf-8"
     )
     registry = registry_with(cfg, "policy.md")
-    build_index(cfg, registry.index_names())
+    build_index(cfg, registry.index_files())
 
     body = await make_service(cfg, registry).list_documents()
     hits = RagChain(cfg).search("код доступа к хранилищу", top_k=5)
-
     assert [row["name"] for row in body["corpus"]] == ["policy.md"]
     assert all("КАРАНДАШ" not in hit.text for hit in hits)
 
@@ -140,7 +129,7 @@ async def test_file_outside_registry_is_invisible(tmp_path):
 async def test_upload_without_index_is_new(tmp_path):
     cfg = make_cfg(tmp_path)
     registry = registry_with(cfg)
-    build_index(cfg, registry.index_names())
+    build_index(cfg, registry.index_files())
     svc = make_service(cfg, registry)
 
     result = (await svc.upload("new.md", "# Новый\n\nТекст.\n".encode(), index=False)).payload
@@ -155,26 +144,25 @@ async def test_upload_without_index_is_new(tmp_path):
 async def test_file_removed_behind_interface_is_missing(tmp_path):
     cfg = make_cfg(tmp_path)
     registry = registry_with(cfg)
-    build_index(cfg, registry.index_names())
+    build_index(cfg, registry.index_files())
     (Path(cfg.docs_dir) / "policy.md").unlink()
 
     body = await make_service(cfg, registry).list_documents()
 
     row = body["corpus"][0]
     assert row["state"] == "missing"
-    assert row["indexed"] is True  # в индексе он ещё есть
+    assert row["indexed"] is True
 
 
 async def test_changed_file_is_stale(tmp_path):
     cfg = make_cfg(tmp_path)
     registry = registry_with(cfg)
-    build_index(cfg, registry.index_names())
+    build_index(cfg, registry.index_files())
     target = Path(cfg.docs_dir) / "policy.md"
     future = datetime.now(timezone.utc).timestamp() + 3600
     os.utime(target, (future, future))
 
     body = await make_service(cfg, registry).list_documents()
-
     assert body["corpus"][0]["state"] == "stale"
 
 
@@ -183,13 +171,11 @@ async def test_list_without_index(tmp_path):
     registry = registry_with(cfg)
 
     body = await make_service(cfg, registry).list_documents()
-
     assert body["index"] == "no_index"
     assert body["corpus"][0]["state"] is None
     assert body["corpus"][0]["indexed"] is False
 
 
-# ---------------------------------------------------------------- загрузка
 
 
 async def test_upload_saves_file_and_indexes(tmp_path):
@@ -201,7 +187,6 @@ async def test_upload_saves_file_and_indexes(tmp_path):
     result = (
         await svc.upload("new.md", "# Новый\n\nПравило: 28 дней.\n".encode(), "ada")
     ).payload
-
     assert result["indexed"] is True
     assert result["files"] == 1
     assert result["chunks"] >= 1
@@ -238,15 +223,12 @@ async def test_upload_rolls_back_when_text_is_empty(tmp_path):
     cfg = make_cfg(tmp_path)
     registry = MemoryRegistry()
     svc = make_service(cfg, registry)
-
     with pytest.raises(InvalidRequest):
         await svc.upload("scan.pdf", b"not a pdf at all")
-
     assert "scan.pdf" not in registry.rows
     assert not (Path(cfg.docs_dir) / "scan.pdf").exists()
 
 
-# ---------------------------------------------------------------- удаление
 
 
 async def test_delete_removes_file_registry_row_and_index_entry(tmp_path):
@@ -255,7 +237,6 @@ async def test_delete_removes_file_registry_row_and_index_entry(tmp_path):
     svc = make_service(cfg, registry)
     await svc.upload("policy.md", POLICY.encode())
     await svc.upload("keep.md", "# Keep\n\nДругой текст.\n".encode())
-
     await svc.delete("policy.md")
 
     body = await svc.list_documents()
@@ -271,7 +252,6 @@ async def test_delete_last_document_clears_index(tmp_path):
     registry = MemoryRegistry()
     svc = make_service(cfg, registry)
     await svc.upload("policy.md", POLICY.encode())
-
     await svc.delete("policy.md")
 
     body = await svc.list_documents()
@@ -282,7 +262,6 @@ async def test_delete_last_document_clears_index(tmp_path):
 async def test_delete_missing_file_is_404(tmp_path):
     cfg = make_cfg(tmp_path)
     registry = registry_with(cfg)
-
     with pytest.raises(NotFound):
         await make_service(cfg, registry).delete("нет-такого.md")
 
@@ -290,34 +269,27 @@ async def test_delete_missing_file_is_404(tmp_path):
 async def test_delete_rejects_path_outside_corpus(tmp_path):
     cfg = make_cfg(tmp_path)
     registry = registry_with(cfg)
-
     with pytest.raises((InvalidRequest, NotFound)):
         await make_service(cfg, registry).delete("../outside.md")
 
 
-# ------------------------------------------------------------- индексация
 
 
 def test_build_index_without_documents_explains_what_to_do(tmp_path):
     cfg = make_cfg(tmp_path)
-
     with pytest.raises(ValueError) as exc:
         build_index(cfg, frozenset())
-
     assert "загрузите их на странице" in str(exc.value).lower()
 
 
 def test_build_index_skips_missing_registry_rows(tmp_path):
     cfg = make_cfg(tmp_path)
     (Path(cfg.docs_dir) / "policy.md").unlink()
-
     with pytest.raises(ValueError) as exc:
         build_index(cfg, frozenset({"policy.md"}))
-
     assert "файл не найден" in str(exc.value)
 
 
-# ------------------------------------------------------------ публичный API
 
 
 def _migrate_sqlite(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -409,7 +381,6 @@ def test_public_batch_upload_uses_single_rebuild(tmp_path, sqlite_url):
             )
             assert res.status_code == 200
             assert res.json()["indexed"] is False
-
         assert client.get("/api/v1/admin/documents").json()["index"] == "no_index"
 
         rebuilt = client.post("/api/v1/index/rebuild")

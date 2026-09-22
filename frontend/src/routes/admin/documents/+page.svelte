@@ -6,6 +6,7 @@
 	 *   name: string,
 	 *   document_id: string | null,
 	 *   download_allowed: boolean,
+	 *   index_enabled: boolean,
 	 *   size: number,
 	 *   mtime: string,
 	 *   indexed: boolean,
@@ -19,6 +20,7 @@
 	 * @typedef {{ corpus_files: number, indexed_docs: number, chunks: number }} Summary
 	 * @typedef {{
 	 *   id: string, name: string, size: number, file: File, download_allowed: boolean,
+	 *   index_enabled: boolean,
 	 *   status: 'wait' | 'upload' | 'done' | 'error', percent: number, error: string
 	 * }} QueueItem
 	 * @typedef {{ files?: number, chunks?: number, elapsed_sec?: number }} Report
@@ -46,8 +48,11 @@
 	let report = $state(null);
 	/** Разрешение на выдачу оригинала для новой пачки: по умолчанию выключено. */
 	let batchDownloadAllowed = $state(false);
+	let batchIndexEnabled = $state(true);
 	/** Идентификаторы документов, у которых флаг сохраняется прямо сейчас. */
 	let savingPermissions = $state(/** @type {Record<string, boolean>} */ ({}));
+	let savingIndexFlags = $state(/** @type {Record<string, boolean>} */ ({}));
+	let indexStale = $state(false);
 
 	onMount(load);
 
@@ -76,6 +81,7 @@
 		if (state === 'stale') return 'изменён, нужна переиндексация';
 		if (state === 'unknown') return 'в индексе (дата неизвестна)';
 		if (state === 'missing') return 'файла нет — удалён мимо интерфейса';
+		if (state === 'excluded') return 'исключён из поиска';
 		return 'индекс не собран';
 	}
 
@@ -136,9 +142,12 @@
 			const permission = batchDownloadAllowed
 				? 'Оригиналы новых версий будут доступны для скачивания.'
 				: 'Оригиналы новых версий будут закрыты для скачивания.';
+			const indexing = batchIndexEnabled
+				? 'Новые версии будут участвовать в поиске.'
+				: 'Новые версии не будут индексироваться.';
 			if (
 				!confirm(
-					`Эти документы уже есть в корпусе и будут заменены: ${names}. ${permission} Продолжить?`
+					`Эти документы уже есть в корпусе и будут заменены: ${names}. ${permission} ${indexing} Продолжить?`
 				)
 			) {
 				return;
@@ -152,6 +161,7 @@
 				file,
 				// Снимок переключателя: изменение флага не меняет уже начатую очередь.
 				download_allowed: batchDownloadAllowed,
+				index_enabled: batchIndexEnabled,
 				status: 'wait',
 				percent: 0,
 				error: ''
@@ -199,7 +209,8 @@
 			// index=false: файл принимается сразу, сборка будет одна на пачку.
 			const query = new URLSearchParams({
 				index: 'false',
-				download_allowed: item.download_allowed ? 'true' : 'false'
+				download_allowed: item.download_allowed ? 'true' : 'false',
+				index_enabled: item.index_enabled ? 'true' : 'false'
 			});
 			request.open('POST', `/api/admin/documents?${query}`);
 			request.withCredentials = true;
@@ -244,6 +255,7 @@
 			error = String(err);
 		} finally {
 			indexing = false;
+			indexStale = false;
 			await load();
 		}
 	}
@@ -286,6 +298,43 @@
 			error = String(err);
 		} finally {
 			delete savingPermissions[documentId];
+		}
+	}
+
+	/**
+	 * @param {CorpusRow} row
+	 * @param {boolean} enabled
+	 */
+	async function setIndexEnabled(row, enabled) {
+		const documentId = row.document_id;
+		if (!documentId || savingIndexFlags[documentId]) return;
+		const previous = row.index_enabled;
+		row.index_enabled = enabled;
+		savingIndexFlags[documentId] = true;
+		error = '';
+		try {
+			const response = await fetch(`/api/documents/${documentId}/index-permission`, {
+				method: 'PATCH',
+				headers: { 'content-type': 'application/json' },
+				credentials: 'include',
+				body: JSON.stringify({ index_enabled: enabled })
+			});
+			const body = await response.json().catch(() => ({}));
+			if (!response.ok) {
+				row.index_enabled = previous;
+				error =
+					typeof body.detail === 'string'
+						? body.detail
+						: 'Не удалось изменить участие в поиске';
+				return;
+			}
+			row.index_enabled = body.index_enabled ?? enabled;
+			indexStale = true;
+		} catch (err) {
+			row.index_enabled = previous;
+			error = String(err);
+		} finally {
+			delete savingIndexFlags[documentId];
 		}
 	}
 
@@ -357,6 +406,14 @@
 	</span>
 </label>
 
+<label class="mb-2 flex items-center gap-2 text-sm">
+	<input type="checkbox" bind:checked={batchIndexEnabled} disabled={uploading || indexing} />
+	Индексировать новые документы (участие в поиске)
+	<span class="text-stone-500 dark:text-stone-400">
+		(выключенный документ не попадает в ответы, но оригинал по-прежнему можно скачать)
+	</span>
+</label>
+
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	class="mb-4 rounded-lg border-2 border-dashed p-4 text-center transition-colors {dragging
@@ -402,6 +459,16 @@
 	/>
 </div>
 
+<div class="mb-3 flex flex-wrap items-center gap-3">
+	<button class="btn" type="button" disabled={uploading || indexing} onclick={reindex}>
+		{indexing ? 'Пересборка…' : 'Пересобрать индекс'}
+	</button>
+	{#if indexStale && !indexing}
+		<span class="text-sm text-amber-600 dark:text-amber-400">
+			Участие в поиске изменилось — пересоберите индекс, чтобы оно применилось
+		</span>
+	{/if}
+</div>
 {#if indexing}
 	<p class="mb-3 text-stone-500 dark:text-stone-400">Индексация…</p>
 {/if}
@@ -460,6 +527,7 @@
 			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">
 				Скачивание оригинала
 			</th>
+			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">Поиск</th>
 			<th class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700"></th>
 		</tr>
 	</thead>
@@ -500,6 +568,28 @@
 							/>
 							<span class="text-sm text-stone-500 dark:text-stone-400">
 								{savingPermissions[row.document_id] ? 'сохранение…' : ''}
+							</span>
+						</label>
+					{:else}
+						<span class="text-stone-500 dark:text-stone-400">—</span>
+					{/if}
+				</td>
+				<td class="border-b border-stone-300 px-2 py-1.5 dark:border-stone-700">
+					{#if row.document_id}
+						<label class="flex items-center gap-2">
+							<input
+								type="checkbox"
+								checked={row.index_enabled}
+								disabled={Boolean(savingIndexFlags[row.document_id])}
+								aria-label={`Индексировать документ: ${row.name}`}
+								onchange={(event) =>
+									setIndexEnabled(
+										row,
+										/** @type {HTMLInputElement} */ (event.currentTarget).checked
+									)}
+							/>
+							<span class="text-sm text-stone-500 dark:text-stone-400">
+								{savingIndexFlags[row.document_id] ? 'сохранение…' : ''}
 							</span>
 						</label>
 					{:else}

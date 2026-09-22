@@ -17,6 +17,19 @@ class DownloadPermissionResponse(BaseModel):
     download_allowed: bool
 
 
+class IndexPermissionUpdate(BaseModel):
+    """Тело PATCH: участвует ли документ в поиске."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    index_enabled: bool
+
+
+class IndexPermissionResponse(BaseModel):
+    document_id: UUID
+    index_enabled: bool
+
+
 class Attachment(BaseModel):
     """Файл, приложенный к ответу чата.
 

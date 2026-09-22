@@ -17,18 +17,14 @@ class CorpusDocument:
     """
 
     name: str
-    # Идентификатор для новых маршрутов и вложений: имя остаётся ключом
-    # операций загрузки и удаления, а ID переживает замену файла и не
-    # является секретом. Пустой ID у записи реестра невозможен.
     document_id: str
     origin: str = ORIGIN_UI
     uploaded_by: str = ""
     uploaded_at: str = ""
     size: int = 0
     sha256: str = ""
-    # Разрешение на выдачу оригинала. Поиск, ответы и цитаты по документу
-    # от него не зависят: закрыт только файл.
     download_allowed: bool = False
+    index_enabled: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -40,6 +36,7 @@ class CorpusDocument:
             "size": self.size,
             "sha256": self.sha256,
             "download_allowed": self.download_allowed,
+            "index_enabled": self.index_enabled,
         }
 
 
@@ -54,3 +51,4 @@ class RecordOutcome(NamedTuple):
     created: bool
     previous_download_allowed: bool
     document: CorpusDocument
+    previous_index_enabled: bool = True

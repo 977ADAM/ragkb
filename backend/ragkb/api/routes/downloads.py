@@ -15,14 +15,17 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from ragkb.api.audit import log_permission_change, request_id
-from ragkb.api.deps.services import downloads_service
+from ragkb.api.audit import log_index_change, log_permission_change, request_id
+from ragkb.api.deps.services import documents_service, downloads_service
 from ragkb.api.errors import status_for
 from ragkb.api.schemas.downloads import (
     DownloadPermissionResponse,
     DownloadPermissionUpdate,
+    IndexPermissionResponse,
+    IndexPermissionUpdate,
 )
 from ragkb.core.errors import RagkbError
+from ragkb.services.documents import DocumentsService
 from ragkb.services.downloads import CHUNK_SIZE, DownloadDescriptor, DownloadsService
 
 log = logging.getLogger("ragkb")
@@ -30,6 +33,7 @@ log = logging.getLogger("ragkb")
 router = APIRouter()
 
 Downloads = Annotated[DownloadsService, Depends(downloads_service)]
+Documents = Annotated[DocumentsService, Depends(documents_service)]
 
 NO_STORE = {"cache-control": "no-store"}
 
@@ -116,7 +120,6 @@ async def download_document(document_id: str, request: Request, svc: Downloads) 
     try:
         return file_response(descriptor)
     except Exception:
-        # Ответ не собран — дескриптор закрываем здесь, а не ждём генератора.
         descriptor.close()
         raise
 
@@ -152,8 +155,6 @@ async def set_download_permission(
         previous, saved = await svc.set_permission(document_id, payload.download_allowed)
     except RagkbError as exc:
         return _refusal(exc, document_id, request_id(request))
-    # Запись в журнал — после сохранения: прежнее и новое значения приходят из
-    # самой транзакции, а не из чтения до неё.
     log_permission_change(
         action="set_permission",
         document_id=saved.document_id,
@@ -164,6 +165,37 @@ async def set_download_permission(
     return JSONResponse(
         DownloadPermissionResponse(
             document_id=saved.document_id, download_allowed=saved.download_allowed
+        ).model_dump(mode="json"),
+        headers=NO_STORE,
+    )
+
+
+@router.patch("/documents/{document_id}/index-permission")
+async def set_index_permission(
+    document_id: str,
+    payload: IndexPermissionUpdate,
+    request: Request,
+    svc: Documents,
+) -> Response:
+    """Участие документа в поиске: индексировать или исключить.
+
+    Флаг применяется следующей пересборкой индекса — интерфейс говорит об этом
+    прямо, а не делает вид, что поиск изменился сразу.
+    """
+    try:
+        previous, saved = await svc.set_index_enabled(document_id, payload.index_enabled)
+    except RagkbError as exc:
+        return _refusal(exc, document_id, request_id(request))
+    log_index_change(
+        action="set_index_permission",
+        document_id=saved.document_id,
+        previous=previous,
+        current=saved.index_enabled,
+        request_id=request_id(request),
+    )
+    return JSONResponse(
+        IndexPermissionResponse(
+            document_id=saved.document_id, index_enabled=saved.index_enabled
         ).model_dump(mode="json"),
         headers=NO_STORE,
     )

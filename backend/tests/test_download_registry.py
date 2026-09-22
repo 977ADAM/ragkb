@@ -37,15 +37,12 @@ from ragkb.core.database import (
 from ragkb.db.repos.corpus_documents import PostgresCorpusDocuments
 from ragkb.domain.entities import ORIGIN_UI
 
-FIRST_REVISION = "0001_corpus_documents"
-
 SEED = (
     ("a.pdf", 11, "a" * 64),
     ("b.docx", 22, "b" * 64),
 )
 
 
-# --------------------------------------------------------------- миграции
 
 
 def _sqlite_url(tmp_path: Path) -> str:
@@ -68,50 +65,46 @@ def _downgrade(url: str, revision: str, monkeypatch: pytest.MonkeyPatch) -> None
     command.downgrade(_alembic_config(), revision)
 
 
-def _seed_at_0001(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """База на 0001 с документами и посторонней таблицей — как у заказчика."""
-    _migrate(url, FIRST_REVISION, monkeypatch)
-    engine = create_engine(alembic_sync_url(url))
-    try:
-        with engine.begin() as conn:
-            for name, size, sha256 in SEED:
-                conn.execute(
-                    text(
-                        "INSERT INTO corpus_documents"
-                        " (name, origin, uploaded_by, uploaded_at, size, sha256)"
-                        " VALUES (:name, 'ui', 'ada', '2026-09-10T00:00:00+00:00',"
-                        " :size, :sha256)"
-                    ),
-                    {"name": name, "size": size, "sha256": sha256},
-                )
-            # Схему аккаунтов миграция не создаёт — но и не удаляет чужое.
-            conn.execute(text("CREATE TABLE legacy_accounts (id INTEGER PRIMARY KEY, login TEXT)"))
-            conn.execute(text("INSERT INTO legacy_accounts (id, login) VALUES (1, 'ada')"))
-    finally:
-        engine.dispose()
+def _migrated_sqlite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """База, собранная единственной миграцией: полная схема реестра."""
+    url = _sqlite_url(tmp_path)
+    _migrate(url, "head", monkeypatch)
+    return url
 
 
-def _rows(url: str) -> list[Any]:
-    engine = create_engine(alembic_sync_url(url))
-    try:
-        with engine.connect() as conn:
-            return list(
-                conn.execute(
-                    text(
-                        "SELECT name, document_id, download_allowed"
-                        " FROM corpus_documents ORDER BY name"
-                    )
-                ).all()
-            )
-    finally:
-        engine.dispose()
+def _connect(url: str):
+    return create_engine(alembic_sync_url(url))
 
 
 def _columns(url: str) -> set[str]:
-    engine = create_engine(alembic_sync_url(url))
+    engine = _connect(url)
     try:
         with engine.connect() as conn:
             return {row[1] for row in conn.execute(text("PRAGMA table_info(corpus_documents)"))}
+    finally:
+        engine.dispose()
+
+
+def _insert(url: str, name: str, document_id: str, **flags: Any) -> None:
+    engine = _connect(url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO corpus_documents"
+                    " (name, document_id, uploaded_at, size, sha256,"
+                    "  download_allowed, index_enabled)"
+                    " VALUES (:name, :document_id, '2026-09-22T00:00:00+00:00', 10, :sha256,"
+                    "  :download_allowed, :index_enabled)"
+                ),
+                {
+                    "name": name,
+                    "document_id": document_id,
+                    "sha256": "a" * 64,
+                    "download_allowed": flags.get("download_allowed", False),
+                    "index_enabled": flags.get("index_enabled", True),
+                },
+            )
     finally:
         engine.dispose()
 
@@ -124,20 +117,82 @@ def _is_uuid(value: Any) -> bool:
     return True
 
 
-def test_upgrade_from_0001_keeps_documents_and_closes_downloads(tmp_path, monkeypatch):
-    url = _sqlite_url(tmp_path)
-    _seed_at_0001(url, monkeypatch)
+def test_initial_schema_carries_both_switches(tmp_path, monkeypatch):
+    """Единственная миграция создаёт схему целиком: ID и два переключателя."""
+    url = _migrated_sqlite(tmp_path, monkeypatch)
+    assert _columns(url) == {
+        "name",
+        "document_id",
+        "origin",
+        "uploaded_by",
+        "uploaded_at",
+        "size",
+        "sha256",
+        "download_allowed",
+        "index_enabled",
+    }
+
+    engine = _connect(url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO corpus_documents (name, document_id, uploaded_at)"
+                    " VALUES ('defaults.pdf', :document_id, '2026-09-22T00:00:00+00:00')"
+                ),
+                {"document_id": str(uuid.uuid4())},
+            )
+            row = conn.execute(
+                text(
+                    "SELECT download_allowed, index_enabled FROM corpus_documents"
+                    " WHERE name = 'defaults.pdf'"
+                )
+            ).one()
+            assert (bool(row[0]), bool(row[1])) == (False, True)
+            with pytest.raises(IntegrityError):
+                conn.execute(
+                    text(
+                        "INSERT INTO corpus_documents (name, uploaded_at)"
+                        " VALUES ('no-id.pdf', '2026-09-22T00:00:00+00:00')"
+                    )
+                )
+    finally:
+        engine.dispose()
+
+
+def test_identifiers_are_unique(tmp_path, monkeypatch):
+    url = _migrated_sqlite(tmp_path, monkeypatch)
+    shared = str(uuid.uuid4())
+    _insert(url, "a.pdf", shared)
+    with pytest.raises(IntegrityError):
+        _insert(url, "b.pdf", shared)
+
+
+def test_upgrade_is_idempotent_and_keeps_foreign_tables(tmp_path, monkeypatch):
+    url = _migrated_sqlite(tmp_path, monkeypatch)
+    document_id = str(uuid.uuid4())
+    _insert(url, "a.pdf", document_id, download_allowed=True, index_enabled=False)
+    engine = _connect(url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE TABLE legacy_accounts (id INTEGER PRIMARY KEY, login TEXT)"))
+            conn.execute(text("INSERT INTO legacy_accounts (id, login) VALUES (1, 'ada')"))
+    finally:
+        engine.dispose()
 
     _migrate(url, "head", monkeypatch)
 
-    rows = _rows(url)
-    assert [row.name for row in rows] == ["a.pdf", "b.docx"]
-    assert len({row.document_id for row in rows}) == 2, "идентификаторы должны быть разными"
-    assert all(_is_uuid(row.document_id) for row in rows)
-    assert all(not row.download_allowed for row in rows), "прежние документы закрыты"
-    engine = create_engine(alembic_sync_url(url))
+    engine = _connect(url)
     try:
         with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT document_id, download_allowed, index_enabled"
+                    " FROM corpus_documents WHERE name = 'a.pdf'"
+                )
+            ).one()
+            assert row[0] == document_id
+            assert (bool(row[1]), bool(row[2])) == (True, False)
             assert conn.execute(text("SELECT login FROM legacy_accounts")).scalar() == "ada"
             assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == (
                 EXPECTED_REVISION
@@ -146,91 +201,35 @@ def test_upgrade_from_0001_keeps_documents_and_closes_downloads(tmp_path, monkey
         engine.dispose()
 
 
-def test_repeated_upgrade_keeps_identifiers(tmp_path, monkeypatch):
-    url = _sqlite_url(tmp_path)
-    _seed_at_0001(url, monkeypatch)
-    _migrate(url, "head", monkeypatch)
-    before = {row.name: row.document_id for row in _rows(url)}
-
-    _migrate(url, "head", monkeypatch)
-
-    assert {row.name: row.document_id for row in _rows(url)} == before
-
-
-def test_downgrade_and_upgrade_keep_documents(tmp_path, monkeypatch):
-    url = _sqlite_url(tmp_path)
-    _seed_at_0001(url, monkeypatch)
-    _migrate(url, "head", monkeypatch)
-
-    _downgrade(url, FIRST_REVISION, monkeypatch)
-
-    # Откат уносит только новые столбцы: идентификатор хранится в них же.
-    assert _columns(url) == {"name", "origin", "uploaded_by", "uploaded_at", "size", "sha256"}
-    engine = create_engine(alembic_sync_url(url))
-    try:
-        with engine.connect() as conn:
-            assert conn.execute(text("SELECT count(*) FROM corpus_documents")).scalar() == 2
-            assert conn.execute(text("SELECT login FROM legacy_accounts")).scalar() == "ada"
-    finally:
-        engine.dispose()
-
-    _migrate(url, "head", monkeypatch)
-
-    rows = _rows(url)
-    assert [row.name for row in rows] == ["a.pdf", "b.docx"]
-    assert all(_is_uuid(row.document_id) for row in rows)
-    assert all(not row.download_allowed for row in rows)
-
-
-def test_new_rows_require_identifier_and_default_to_disallowed(tmp_path, monkeypatch):
-    url = _sqlite_url(tmp_path)
-    _migrate(url, "head", monkeypatch)
-    engine = create_engine(alembic_sync_url(url))
-    try:
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    "INSERT INTO corpus_documents"
-                    " (name, document_id, uploaded_at) VALUES ('c.md', :id, '2026-09-10T00:00:00')"
-                ),
-                {"id": str(uuid.uuid4())},
-            )
-            # Умолчание задаёт схема, а не приложение: без него старые версии
-            # кода открыли бы выдачу оригинала.
-            assert not conn.execute(
-                text("SELECT download_allowed FROM corpus_documents WHERE name = 'c.md'")
-            ).scalar()
-        with pytest.raises(IntegrityError), engine.begin() as conn:
-            conn.execute(
-                text(
-                    "INSERT INTO corpus_documents (name, uploaded_at)"
-                    " VALUES ('d.md', '2026-09-10T00:00:00')"
-                )
-            )
-        with pytest.raises(IntegrityError), engine.begin() as conn:
-            conn.execute(
-                text(
-                    "INSERT INTO corpus_documents (name, document_id, uploaded_at)"
-                    " VALUES ('e.md', :id, '2026-09-10T00:00:00')"
-                ),
-                {"id": _rows(url)[0].document_id},
-            )
-    finally:
-        engine.dispose()
-
-
-async def test_migrated_database_reports_expected_revision(tmp_path, monkeypatch):
-    url = _sqlite_url(tmp_path)
-    _migrate(url, "head", monkeypatch)
+def test_migrated_database_reports_expected_revision(tmp_path, monkeypatch):
+    url = _migrated_sqlite(tmp_path, monkeypatch)
     engine = make_engine(url)
     try:
-        async with make_session_factory(engine)() as session:
-            await assert_revision(session)
+        session_factory = make_session_factory(engine)
+        asyncio.run(_assert_revision(session_factory))
     finally:
-        await engine.dispose()
+        asyncio.run(engine.dispose())
 
 
-# ------------------------------------------------- реестр: общий контракт
+async def _assert_revision(session_factory) -> None:
+    async with session_factory() as session:
+        await assert_revision(session)
+
+
+def test_downgrade_drops_only_the_registry(tmp_path, monkeypatch):
+    """Откат начальной миграции убирает реестр — это её собственная таблица."""
+    url = _migrated_sqlite(tmp_path, monkeypatch)
+    _insert(url, "a.pdf", str(uuid.uuid4()))
+
+    _downgrade(url, "base", monkeypatch)
+    assert _columns(url) == set()
+    _migrate(url, "head", monkeypatch)
+    engine = _connect(url)
+    try:
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT count(*) FROM corpus_documents")).scalar() == 0
+    finally:
+        engine.dispose()
 
 
 @asynccontextmanager
@@ -250,8 +249,6 @@ async def _contract(registry) -> None:
     recorded = await registry.record(
         "spec.pdf", origin=ORIGIN_UI, uploaded_by="ada", size=10, sha256="c" * 64
     )
-    # Прежнее разрешение и признак создания приходят из самой записи: журнал
-    # загрузки не должен вычислять их отдельным чтением до неё.
     assert recorded.created is True
     assert recorded.previous_download_allowed is False
     saved = recorded.document
@@ -262,22 +259,32 @@ async def _contract(registry) -> None:
     assert previous is False
     assert allowed.download_allowed is True
     assert (await registry.get_by_id(saved.document_id)).download_allowed is True
+    assert recorded.document.index_enabled is True
+    assert await registry.index_names() == {"spec.pdf"}
+    previous_index, indexed = await registry.set_index_enabled(saved.document_id, False)
+    assert (previous_index, indexed.index_enabled) == (True, False)
+    assert await registry.index_names() == set()
+    assert (await registry.get_by_id(saved.document_id)).index_enabled is False
+    assert await registry.set_index_enabled("нет-такого-id", True) is None
 
-    # Замена файла: тот же документ, новая версия — идентификатор сохраняется,
-    # а разрешение берётся из явного параметра, а не из прежней записи.
     replaced = await registry.record(
-        "spec.pdf", origin=ORIGIN_UI, uploaded_by="ada", size=20, sha256="d" * 64
+        "spec.pdf",
+        origin=ORIGIN_UI,
+        uploaded_by="ada",
+        size=20,
+        sha256="d" * 64,
+        index_enabled=True,
     )
     assert replaced.created is False
     assert replaced.previous_download_allowed is True
     assert replaced.document.download_allowed is False
+    assert replaced.previous_index_enabled is False
+    assert replaced.document.index_enabled is True
     current = await registry.get_by_id(saved.document_id)
     assert current is not None
     assert current.document_id == saved.document_id
     assert current.size == 20
     assert current.download_allowed is False
-
-    # Удаление: идентификатор перестаёт работать, повторная загрузка даёт новый.
     assert await registry.forget("spec.pdf") is True
     assert await registry.get_by_id(saved.document_id) is None
     assert await registry.set_download_allowed(saved.document_id, True) is None
@@ -296,7 +303,6 @@ async def test_memory_registry_ids_are_unique_per_document():
     await registry.record("two.pdf")
 
     ids = [doc.document_id for doc in await registry.list_all()]
-
     assert len(set(ids)) == 2
     assert await registry.get_by_id("не-uuid") is None
 
@@ -315,7 +321,6 @@ async def test_sequential_permission_changes_report_previous_values(tmp_path, mo
         first = await registry.set_download_allowed(document.document_id, True)
         second = await registry.set_download_allowed(document.document_id, False)
         third = await registry.set_download_allowed(document.document_id, False)
-
         assert (first[0], first[1].download_allowed) == (False, True)
         assert (second[0], second[1].download_allowed) == (True, False)
         assert (third[0], third[1].download_allowed) == (False, False)
@@ -370,7 +375,6 @@ async def test_simultaneous_permission_changes_report_distinct_previous_values(
         release.set()
         results = await asyncio.gather(*tasks)
         monkeypatch.setattr(AsyncSession, "scalar", working_scalar)
-
         assert reads == 2
         assert sorted(result[0] for result in results) == [False, True]
         assert all(result[1].download_allowed is True for result in results)
@@ -391,7 +395,6 @@ async def test_failed_permission_change_keeps_value_and_releases_lock(tmp_path, 
         with pytest.raises(RuntimeError):
             await registry.set_download_allowed(document.document_id, True)
         monkeypatch.setattr(AsyncSession, "commit", working_commit)
-
         assert (await registry.get_by_id(document.document_id)).download_allowed is False
         previous, saved = await registry.set_download_allowed(document.document_id, True)
         assert (previous, saved.download_allowed) == (False, True)
@@ -461,7 +464,6 @@ async def test_simultaneous_replacement_and_permission_change_agree(tmp_path, mo
         monkeypatch.setattr(AsyncSession, "scalar", working_scalar)
         monkeypatch.setattr(AsyncSession, "get", working_get)
         final = (await registry.get_by_id(document.document_id)).download_allowed
-
     assert reads == 2
     assert sorted([replacement.previous_download_allowed, permission[0]]) == [False, True]
     assert final is False

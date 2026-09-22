@@ -30,8 +30,6 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 _HIDDEN_PREFIXES = (".", "~$")
 
-# Один текст на все операции без реестра: документы берутся только из него,
-# поэтому без базы знаний работать не с чем — и это надо сказать прямо.
 _NO_REGISTRY = (
     "Реестр документов не подключён: задайте RAGKB_DATABASE_URL. "
     "Документы добавляются только загрузкой через эту страницу."
@@ -67,6 +65,8 @@ class UploadResult:
     created: bool
     previous_download_allowed: bool
     download_allowed: bool
+    previous_index_enabled: bool
+    index_enabled: bool
 
     @property
     def replaced(self) -> bool:
@@ -90,7 +90,6 @@ class DocumentsService:
     def registry_enabled(self) -> bool:
         return self._registry is not None
 
-    # ------------------------------------------------------------- состояние
 
     async def list_documents(self) -> dict[str, Any]:
         docs_dir = Path(self.cfg.docs_dir)
@@ -116,8 +115,6 @@ class DocumentsService:
         built_at_raw = (manifest or {}).get("built_at")
         built_at = _parse_ts(built_at_raw)
         documents = (manifest or {}).get("documents", [])
-        # Путь надёжнее имени: два каталога корпуса могут содержать файлы
-        # с одинаковым именем, а манифест хранит именно путь.
         by_source = {d.get("source", ""): d for d in documents}
         by_name = {Path(d.get("source", "")).name: d for d in documents}
 
@@ -146,10 +143,10 @@ class DocumentsService:
                         built_at,
                         exists=exists,
                         has_index=manifest is not None,
+                        in_search=document.index_enabled,
                     ),
                 }
             )
-
         return {
             "docs_dir": str(docs_dir.expanduser().resolve()),
             "index": "ok" if manifest is not None else "no_index",
@@ -164,7 +161,6 @@ class DocumentsService:
             },
         }
 
-    # -------------------------------------------------------------- операции
 
     async def upload(
         self,
@@ -174,6 +170,7 @@ class DocumentsService:
         *,
         index: bool = True,
         download_allowed: bool = False,
+        index_enabled: bool = True,
         on_permission_change: Callable[[PermissionChange], None] | None = None,
     ) -> UploadResult:
         """Сохраняет документ и заводит его в реестре.
@@ -183,6 +180,9 @@ class DocumentsService:
         `download_allowed` — разрешение на выдачу оригинала; по умолчанию
         выключено, а при замене файла берётся из этого вызова, а не из
         прежней записи.
+        `index_enabled=False` — документ не попадает в поиск: его фрагменты не
+        участвуют в ответах, но оригинал при этом можно выдавать. Уже
+        собранный индекс меняется только следующей пересборкой.
 
         `on_permission_change` вызывается сразу после того, как изменение
         разрешения сохранено, — до публикации файла и до индексации. Журнал
@@ -207,21 +207,11 @@ class DocumentsService:
         docs_dir = Path(self.cfg.docs_dir)
         docs_dir.mkdir(parents=True, exist_ok=True)
         target = docs_dir / name
-        # Новый контент сначала лежит во временном файле рядом: пока запись
-        # реестра не сохранена, публиковать нечего, и отказ записи оставляет
-        # и прежний файл, и прежнее разрешение нетронутыми.
         staged = docs_dir / f".{uuid4().hex}.upload"
         try:
             staged.write_bytes(content)
             if target.exists():
-                # Режим доступа прежнего файла сохраняем: замена не должна
-                # молча его менять.
                 os.chmod(staged, stat.S_IMODE(target.stat().st_mode))
-            # Одно изменение разрешения вместо «снять и выдать заново»: пара
-            # old/new в журнале описывает ровно то, что сделала эта запись.
-            # Пока файл не опубликован, выдача нового содержимого невозможна:
-            # запись хранит хэш нового файла, а на диске ещё прежний — сверка
-            # содержимого с записью закрывает это окно отказом.
             outcome = await self._registry.record(
                 name,
                 origin=ORIGIN_UI,
@@ -229,11 +219,9 @@ class DocumentsService:
                 size=len(content),
                 sha256=hashlib.sha256(content).hexdigest(),
                 download_allowed=download_allowed,
+                index_enabled=index_enabled,
             )
             if on_permission_change is not None:
-                # Событие отдаётся здесь: запись уже сохранена, а публикация
-                # файла и индексация могут не получиться — журнал не должен
-                # зависеть от их исхода.
                 on_permission_change(
                     PermissionChange(
                         document_id=outcome.document.document_id,
@@ -262,8 +250,6 @@ class DocumentsService:
         try:
             report = await self._rebuild()
         except (ValueError, FileNotFoundError) as exc:
-            # Документ не прошёл индексацию — не оставляем его ни файлом,
-            # ни записью в реестре, иначе он будет висеть «новым» навсегда.
             target.unlink(missing_ok=True)
             await self._registry.forget(name)
             raise InvalidRequest(f"Не удалось проиндексировать: {exc}") from exc
@@ -272,31 +258,37 @@ class DocumentsService:
             _report_payload(report, registered=name, indexed=True), outcome
         )
 
+    async def set_index_enabled(
+        self, document_id: str, enabled: bool
+    ) -> tuple[bool, CorpusDocument]:
+        """Включает или выключает участие документа в поиске.
+
+        Применяется следующей пересборкой индекса: сам поиск читает индекс, а
+        не реестр, поэтому до пересборки документ ещё отвечает.
+        """
+        if self._registry is None:
+            raise InvalidRequest(_NO_REGISTRY)
+        result = await self._registry.set_index_enabled(document_id or "", enabled)
+        if result is None:
+            raise NotFound("Документ не найден в реестре корпуса")
+        return result
+
     async def delete(self, name: str) -> None:
         if self._registry is None:
             raise InvalidRequest(_NO_REGISTRY)
         docs_dir = Path(self.cfg.docs_dir)
-        # Удаляем только документы корпуса: файл, положенный в каталог мимо
-        # интерфейса, в базе знаний не участвует, и трогать его мы не вправе.
         if name not in await self._rows():
             raise NotFound(f"Документа «{name}» нет в корпусе")
         target = _document_file(docs_dir, name)
-        # Файла может уже не быть (его убрали мимо интерфейса) — тогда
-        # удаление просто приводит реестр и индекс в порядок.
         target.unlink(missing_ok=True)
-        # Документ уходит из реестра первым: индекс пересобирается по тому,
-        # что в нём осталось, и удалённый файл в корпус уже не вернётся.
         await self._registry.forget(loaders.relative_name(target, docs_dir))
-        remaining = frozenset(await self._registry.names())
+        remaining = frozenset(await self._registry.index_names())
         await asyncio.to_thread(self._index.reindex_after_delete, str(target), remaining)
         self._invalidate()
 
-    # ------------------------------------------------------------- служебное
 
     async def _rebuild(self):
-        names = frozenset(await self._registry.names()) if self._registry else frozenset()
-        # Индексация синхронная и тяжёлая: уводим её с цикла событий, иначе
-        # на время сборки перестают отвечать все остальные запросы.
+        names = frozenset(await self._registry.index_names()) if self._registry else frozenset()
         return await asyncio.to_thread(self._index.rebuild, names)
 
 
@@ -318,6 +310,8 @@ def _upload_result(payload: dict[str, Any], outcome: RecordOutcome) -> UploadRes
         created=outcome.created,
         previous_download_allowed=outcome.previous_download_allowed,
         download_allowed=outcome.document.download_allowed,
+        previous_index_enabled=outcome.previous_index_enabled,
+        index_enabled=outcome.document.index_enabled,
     )
 
 
@@ -335,6 +329,7 @@ def _registry_fields(registry: dict[str, CorpusDocument], name: str) -> dict[str
         return {
             "document_id": None,
             "download_allowed": False,
+            "index_enabled": True,
             "origin": None,
             "uploaded_by": "",
             "uploaded_at": "",
@@ -342,6 +337,7 @@ def _registry_fields(registry: dict[str, CorpusDocument], name: str) -> dict[str
     return {
         "document_id": doc.document_id,
         "download_allowed": doc.download_allowed,
+        "index_enabled": doc.index_enabled,
         "origin": doc.origin,
         "uploaded_by": doc.uploaded_by,
         "uploaded_at": doc.uploaded_at,
@@ -356,10 +352,12 @@ def _file_state(
     *,
     exists: bool,
     has_index: bool,
+    in_search: bool = True,
 ) -> str | None:
     """Состояние документа: файл на диске и запись в индексе вместе."""
+    if not in_search:
+        return "excluded"
     if not exists:
-        # Запись в реестре есть, файла нет: его удалили мимо интерфейса.
         return "missing"
     if not has_index:
         return None
@@ -410,7 +408,6 @@ def _document_state(
     indexed_hash = entry.get("sha256")
     indexed_mtime = _parse_ts(entry.get("mtime"))
     if not indexed_hash or indexed_mtime is None:
-        # Индекс собран до появления фактов — работаем по прежнему признаку.
         if built_at is None:
             return "unknown"
         mtime = _parse_ts(row["mtime"])
@@ -429,6 +426,4 @@ def _file_sha256(path: Path) -> str | None:
     try:
         return hashlib.sha256(path.read_bytes()).hexdigest()
     except OSError:
-        # Файл не читается — это отдельная проблема, и «изменён» здесь
-        # вводило бы в заблуждение: содержимое просто не удалось проверить.
         return None

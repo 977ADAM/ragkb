@@ -49,7 +49,7 @@ from .prompts import (
 from .retrieval import Hit, build_retriever
 from .retrieval import search as run_search
 from .tool_answers import stream_answer_with_tools
-from .vectorstore import all_documents, build_store, delete_by_source, open_store
+from .vectorstore import all_documents, build_store, clear_store, delete_by_source, open_store
 
 log = logging.getLogger("ragkb")
 
@@ -97,6 +97,7 @@ def build_index(
     *,
     docs_dir: str | Path | None = None,
     progress: Callable[[str], None] | None = None,
+    allow_empty: bool = False,
 ) -> IndexReport:
     """Полная переиндексация документов корпуса.
 
@@ -109,8 +110,32 @@ def build_index(
     source = Path(docs_dir or cfg.docs_dir)
     wanted = sorted(set(names))
     if not wanted:
-        raise ValueError(
-            "В корпусе нет документов: загрузите их на странице «Документы»"
+        if not allow_empty:
+            raise ValueError(
+                "В корпусе нет документов: загрузите их на странице «Документы»"
+            )
+        say("В поиске нет документов: индекс очищается")
+        embeddings = build_embeddings(cfg.embedding)
+        store = build_store(cfg, embeddings)
+        removed = clear_store(store)
+        dim = embedding_dim(embeddings) or len(embeddings.embed_query("проверка"))
+        manifest.write(
+            cfg,
+            store_backend=cfg.store.backend.lower(),
+            embedder=embedder_name(cfg.embedding),
+            dim=int(dim),
+            chunks=0,
+            documents=[],
+            skipped=[],
+        )
+        say(f"Убрано чанков: {removed}")
+        return IndexReport(
+            files=0,
+            chunks=0,
+            skipped=[],
+            elapsed=time.time() - started,
+            embedder=embedder_name(cfg.embedding),
+            store_backend=cfg.store.backend.lower(),
         )
 
     say(f"Эмбеддинги: {embedder_name(cfg.embedding)}")

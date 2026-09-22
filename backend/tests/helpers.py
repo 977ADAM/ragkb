@@ -39,7 +39,6 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
 def make_app(cfg: Settings) -> FastAPI:
-    # Как в main.py: сохранённые настройки перекрывают конфигурацию.
     apply_overrides(cfg, read_overrides(cfg.settings_file))
     raise_multipart_part_limit()
     setup_logging(level=cfg.logging.level, log_dir=cfg.logging.dir or None)
@@ -88,7 +87,11 @@ class MemoryRegistry:
         self.rows: dict[str, CorpusDocument] = {}
 
     def add(
-        self, cfg: Settings, *names: str, download_allowed: bool = False
+        self,
+        cfg: Settings,
+        *names: str,
+        download_allowed: bool = False,
+        index_enabled: bool = True,
     ) -> MemoryRegistry:
         """Заводит в реестре файлы, которые уже лежат в каталоге корпуса."""
         for name in names or tuple(p.name for p in Path(cfg.docs_dir).iterdir()):
@@ -101,14 +104,23 @@ class MemoryRegistry:
                 size=len(data),
                 sha256=hashlib.sha256(data).hexdigest(),
                 download_allowed=download_allowed,
+                index_enabled=index_enabled,
             )
         return self
 
-    def index_names(self) -> frozenset[str]:
-        return frozenset(self.rows)
+    def index_files(self) -> frozenset[str]:
+        """Синхронный помощник тестов: имена документов, участвующих в поиске.
+
+        Метод реестра `index_names` асинхронный — как и весь порт; здесь нужен
+        такой же набор, но без запуска цикла событий.
+        """
+        return frozenset(name for name, doc in self.rows.items() if doc.index_enabled)
 
     async def names(self) -> set[str]:
         return set(self.rows)
+
+    async def index_names(self) -> set[str]:
+        return set(self.index_files())
 
     async def list_all(self) -> list[CorpusDocument]:
         return list(self.rows.values())
@@ -129,6 +141,7 @@ class MemoryRegistry:
         size: int = 0,
         sha256: str = "",
         download_allowed: bool = False,
+        index_enabled: bool = True,
     ) -> RecordOutcome:
         previous = self.rows.get(name)
         saved = CorpusDocument(
@@ -140,12 +153,14 @@ class MemoryRegistry:
             size=size,
             sha256=sha256,
             download_allowed=download_allowed,
+            index_enabled=index_enabled,
         )
         self.rows[name] = saved
         return RecordOutcome(
             created=previous is None,
             previous_download_allowed=previous.download_allowed if previous else False,
             document=saved,
+            previous_index_enabled=previous.index_enabled if previous else True,
         )
 
     async def set_download_allowed(
@@ -156,6 +171,16 @@ class MemoryRegistry:
                 saved = replace(document, download_allowed=bool(allowed))
                 self.rows[name] = saved
                 return document.download_allowed, saved
+        return None
+
+    async def set_index_enabled(
+        self, document_id: str, enabled: bool
+    ) -> tuple[bool, CorpusDocument] | None:
+        for name, document in self.rows.items():
+            if document.document_id == document_id:
+                saved = replace(document, index_enabled=bool(enabled))
+                self.rows[name] = saved
+                return document.index_enabled, saved
         return None
 
     async def forget(self, name: str) -> bool:

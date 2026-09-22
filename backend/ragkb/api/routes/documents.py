@@ -36,8 +36,10 @@ async def upload_document(
     download_allowed: bool = Query(
         False, description="Разрешить скачивание оригинала документа"
     ),
+    index_enabled: bool = Query(
+        True, description="Участвует ли документ в поиске (индексируется)"
+    ),
 ) -> dict:
-    # Читаем не больше лимита+1 байта: память не растёт с размером файла.
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     name = file.filename or ""
 
@@ -62,6 +64,7 @@ async def upload_document(
         content,
         index=index,
         download_allowed=download_allowed,
+        index_enabled=index_enabled,
         on_permission_change=audit,
     )
     payload = result.payload

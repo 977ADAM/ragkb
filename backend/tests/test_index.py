@@ -45,23 +45,20 @@ def _forbidden_engine():
 
     def build():
         raise AssertionError("движок собран, хотя для этих сведений он не нужен")
-
     return build
 
 
-# ------------------------------------------------- сведения без сборки движка
 
 
 async def test_document_listing_does_not_build_engine(tmp_path):
     cfg = _cfg(tmp_path)
     registry = MemoryRegistry().add(cfg)
-    build_index(cfg, registry.index_names())
+    build_index(cfg, registry.index_files())
     svc = DocumentsService(
         cfg, ConfigIndex(cfg, _forbidden_engine()), lambda: None, registry
     )
 
     body = await svc.list_documents()
-
     assert body["index"] == "ok"
     assert [r["state"] for r in body["corpus"]] == ["indexed"]
 
@@ -71,7 +68,6 @@ def test_status_does_not_build_engine(tmp_path):
     build_index(cfg, corpus_names(cfg))
 
     status = IndexService(ConfigIndex(cfg, _forbidden_engine()), lambda: None).status()
-
     assert status["status"] == "ok"
     assert status["documents"] == 1
     assert status["chunks"] >= 1
@@ -80,7 +76,6 @@ def test_status_does_not_build_engine(tmp_path):
 def test_probe_reports_missing_index_without_engine(tmp_path):
     cfg = _cfg(tmp_path)
     index = ConfigIndex(cfg, _forbidden_engine())
-
     assert index.probe() == "no_index"
     with pytest.raises(EngineUnavailable):
         index.manifest()
@@ -112,7 +107,6 @@ def test_health_reports_missing_index(tmp_path, monkeypatch):
         assert client.get("/health").json() == {"status": "no_index"}
 
 
-# ------------------------------------------------------------------- манифест
 
 
 def test_manifest_records_what_index_was_built_with(tmp_path):
@@ -132,7 +126,6 @@ def test_broken_manifest_is_reported(tmp_path):
     cfg = _cfg(tmp_path)
     build_index(cfg, corpus_names(cfg))
     (Path(cfg.index_dir) / "manifest.json").write_text("{не json", encoding="utf-8")
-
     with pytest.raises(EngineUnavailable) as exc:
         manifest.read(cfg)
     assert "повреждён" in exc.value.detail
@@ -149,7 +142,6 @@ def test_manifest_documents_keep_file_facts(tmp_path):
     assert document["size"] > 0
 
 
-# ------------------------------------------------- одиночная пересборка
 
 
 def test_rebuild_is_single_flight(tmp_path, monkeypatch):
@@ -182,7 +174,6 @@ def test_rebuild_is_single_flight(tmp_path, monkeypatch):
     second.start()
     first.join(timeout=5)
     second.join(timeout=5)
-
     assert any(isinstance(r, Conflict) for r in results), results
     assert any(not isinstance(r, Conflict) for r in results), results
 
@@ -210,10 +201,8 @@ def test_rebuild_reports_unavailable_ollama(tmp_path):
     service = IndexService(
         ConfigIndex(cfg, _forbidden_engine()), lambda: None, registry=registry
     )
-
     with pytest.raises(EngineUnavailable) as exc:
         asyncio.run(service.rebuild())
-
     assert "Ollama недоступна" in exc.value.detail
 
 
@@ -226,7 +215,6 @@ def test_rebuild_after_delete_drops_manifest_when_corpus_is_empty(tmp_path):
 
     target.unlink()
     index.reindex_after_delete(str(target), frozenset())
-
     assert not Path(cfg.index_dir).exists()
     assert manifest.exists(cfg) is False
 

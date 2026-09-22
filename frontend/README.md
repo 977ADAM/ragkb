@@ -38,6 +38,7 @@ make frontend
 |---|---|
 | `GET`, `HEAD /api/documents/{documentId}/download` | потоковая выдача оригинала |
 | `PATCH /api/documents/{documentId}/download-permission` | разрешение на выдачу |
+| `PATCH /api/documents/{documentId}/index-permission` | участие документа в поиске |
 
 Тело не буферизуется: порции читаются по требованию потребителя, поэтому
 медленный клиент создаёт обратное давление. Слот ограничителя освобождается

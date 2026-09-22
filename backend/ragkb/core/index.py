@@ -61,7 +61,7 @@ class ConfigIndex:
         if not self._rebuild_lock.acquire(blocking=False):
             raise Conflict("Индексация уже идёт — дождитесь её завершения")
         try:
-            return build_index(self.cfg, names)
+            return build_index(self.cfg, names, allow_empty=True)
         finally:
             self._rebuild_lock.release()
 
