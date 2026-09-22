@@ -11,8 +11,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import os
 import sqlite3
+import subprocess
+import sys
+import textwrap
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -94,14 +99,27 @@ def _allow(client: TestClient, row: dict) -> None:
     assert response.status_code == 200, response.text
 
 
-def _seed_registry_row(url: str, name: str, *, allowed: bool = True) -> str:
-    """Заводит запись реестра сырым SQL: такое имя загрузка не пропустит."""
+def _seed_registry_row(
+    cfg: Settings, name: str, *, allowed: bool = True, sha256: str | None = None
+) -> str:
+    """Заводит запись реестра сырым SQL: такое имя загрузка не пропустит.
+
+    Хэш берётся у файла на диске: выдача сверяет содержимое открытого файла с
+    записью, а запись без хэша закрыта. Специальные файлы не читаются — у них
+    хэша нет по определению.
+    """
     document_id = str(uuid.uuid4())
-    with sqlite3.connect(_database_path(url)) as connection:
+    if sha256 is None:
+        target = Path(cfg.docs_dir) / name
+        sha256 = (
+            hashlib.sha256(target.read_bytes()).hexdigest() if target.is_file() else ""
+        )
+    with sqlite3.connect(_database_path(cfg.database_url)) as connection:
         connection.execute(
-            "INSERT INTO corpus_documents (name, document_id, uploaded_at, download_allowed)"
-            " VALUES (?, ?, '2026-09-22T00:00:00+00:00', ?)",
-            (name, document_id, 1 if allowed else 0),
+            "INSERT INTO corpus_documents"
+            " (name, document_id, uploaded_at, sha256, download_allowed)"
+            " VALUES (?, ?, '2026-09-22T00:00:00+00:00', ?, ?)",
+            (name, document_id, sha256, 1 if allowed else 0),
         )
     return document_id
 
@@ -221,6 +239,74 @@ def test_replacement_keeps_id_and_resets_permission_without_explicit_flag(
         assert client.get(download).content == replacement
 
 
+def test_replacement_publishes_new_content_only_after_revoking(
+    tmp_path, sqlite_url, monkeypatch
+):
+    """Новый файл появляется на диске только после снятия разрешения.
+
+    Иначе замена закрытого документа успела бы побывать доступной под прежним
+    разрешением: параллельный GET прочитал бы реестр со старым флагом и отдал
+    бы уже новый файл.
+    """
+    from ragkb.db.repos.corpus_documents import PostgresCorpusDocuments
+
+    cfg = _cfg(tmp_path, sqlite_url)
+    documents_dir = Path(cfg.docs_dir)
+    published: list[bytes] = []
+    original_record = PostgresCorpusDocuments.record
+
+    async def spying_record(self, name, **kwargs):
+        target = documents_dir / name
+        published.append(target.read_bytes() if target.is_file() else b"")
+        return await original_record(self, name, **kwargs)
+
+    monkeypatch.setattr(PostgresCorpusDocuments, "record", spying_record)
+    with TestClient(make_app(cfg)) as client:
+        _upload(client, "spec.pdf", PDF, download_allowed="true")
+        published.clear()
+        replacement = PDF + "заменено".encode()
+
+        _upload(client, "spec.pdf", replacement)
+        row = _row(client, "spec.pdf")
+        download, permission = _urls(row)
+
+        assert client.get(download).status_code == 404, "разрешение не наследуется"
+        assert client.patch(permission, json={"download_allowed": True}).status_code == 200
+        assert client.get(download).content == replacement
+
+    assert published == [PDF], "в момент отзыва на диске должен быть прежний файл"
+
+
+def test_failed_replacement_does_not_publish_new_content(
+    tmp_path, sqlite_url, monkeypatch
+):
+    """Отказ записи в реестре не оставляет новый контент под старым разрешением."""
+    from ragkb.db.repos.corpus_documents import PostgresCorpusDocuments
+
+    cfg = _cfg(tmp_path, sqlite_url)
+    with TestClient(make_app(cfg), raise_server_exceptions=False) as client:
+        _upload(client, "spec.pdf", PDF, download_allowed="true")
+        row = _row(client, "spec.pdf")
+        download, _ = _urls(row)
+
+        async def failing_record(self, name, **kwargs):
+            raise RuntimeError("база недоступна")
+
+        monkeypatch.setattr(PostgresCorpusDocuments, "record", failing_record)
+        replacement = PDF + "закрытая замена".encode()
+        failed = client.post(
+            "/api/v1/admin/documents",
+            params={"index": "false"},
+            files={"file": ("spec.pdf", replacement, "application/pdf")},
+        )
+
+        assert failed.status_code == 500
+        served = client.get(download)
+        assert served.content == PDF, "новый контент не должен быть доступен"
+
+    assert [path.name for path in Path(cfg.docs_dir).iterdir()] == ["spec.pdf"]
+
+
 # ------------------------------------------------------- отказы и пути
 
 
@@ -262,7 +348,7 @@ def test_traversal_out_of_docs_dir_is_refused(tmp_path, sqlite_url):
     (outside / "secret.pdf").write_bytes("%PDF снаружи\n".encode())
     with TestClient(make_app(cfg)) as client:
         for name in ("../outside/secret.pdf", "/etc/passwd", "sub/../../outside/secret.pdf"):
-            document_id = _seed_registry_row(sqlite_url, name)
+            document_id = _seed_registry_row(cfg, name)
             response = client.get(f"/api/v1/documents/{document_id}/download")
             assert response.status_code == 404, name
             assert "снаружи".encode() not in response.content
@@ -281,7 +367,7 @@ def test_symlink_components_are_refused(tmp_path, sqlite_url):
     (docs / "sub").symlink_to(outside)
     with TestClient(make_app(cfg)) as client:
         for name in ("inside.pdf", "escape.pdf", "sub/secret.pdf"):
-            document_id = _seed_registry_row(sqlite_url, name)
+            document_id = _seed_registry_row(cfg, name)
             response = client.get(f"/api/v1/documents/{document_id}/download")
             assert response.status_code == 404, name
             assert response.content != "%PDF снаружи\n".encode()
@@ -299,6 +385,49 @@ def test_missing_file_is_404(tmp_path, sqlite_url):
 
         assert client.get(download).status_code == 404
         assert client.head(download).status_code == 404
+
+
+def test_special_file_is_refused_without_blocking(tmp_path, sqlite_url):
+    """FIFO в корпусе не должен останавливать цикл событий.
+
+    Открытие такого файла только для чтения ждёт писателя, поэтому конечный
+    компонент открывается неблокирующим: запрос получает отказ сразу, а не
+    висит до появления данных.
+    """
+    cfg = _cfg(tmp_path, sqlite_url)
+    os.mkfifo(Path(cfg.docs_dir) / "fifo.pdf")
+    document_id = _seed_registry_row(cfg, "fifo.pdf")
+    # Запрос уходит в отдельный процесс: заблокированное открытие FIFO
+    # остановило бы и цикл событий, и завершение тестового клиента, поэтому
+    # зависание нужно ограничивать снаружи — как это делает сервер по таймауту.
+    script = textwrap.dedent(
+        f"""
+        import sys
+        sys.path[:0] = [{str(BACKEND_ROOT / "tests")!r}, {str(BACKEND_ROOT)!r}]
+        from fastapi.testclient import TestClient
+        from helpers import make_app
+        from ragkb.core.config import Settings
+
+        cfg = Settings(docs_dir={str(cfg.docs_dir)!r}, index_dir={str(cfg.index_dir)!r})
+        cfg.store.backend = "memory"
+        cfg.database_url = {sqlite_url!r}
+        with TestClient(make_app(cfg)) as client:
+            response = client.get("/api/v1/documents/{document_id}/download")
+            print("STATUS", response.status_code)
+        """
+    )
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("выдача заблокировалась на специальном файле")
+
+    assert completed.returncode == 0, completed.stderr
+    assert "STATUS 404" in completed.stdout
 
 
 def test_without_registry_download_is_404_and_change_is_400(tmp_path):
@@ -356,13 +485,100 @@ def test_unknown_extension_is_served_as_binary(tmp_path, sqlite_url):
     cfg = _cfg(tmp_path, sqlite_url)
     (Path(cfg.docs_dir) / "data.bin").write_bytes(b"\x00\x01\x02")
     with TestClient(make_app(cfg)) as client:
-        document_id = _seed_registry_row(sqlite_url, "data.bin")
+        document_id = _seed_registry_row(cfg, "data.bin")
 
         response = client.get(f"/api/v1/documents/{document_id}/download")
 
         assert response.status_code == 200
         assert response.headers["content-type"] == "application/octet-stream"
         assert response.content == b"\x00\x01\x02"
+
+
+def test_record_without_content_hash_is_not_served(tmp_path, sqlite_url):
+    """Запись без хэша закрыта: связать разрешение с байтами нечем."""
+    cfg = _cfg(tmp_path, sqlite_url)
+    (Path(cfg.docs_dir) / "legacy.pdf").write_bytes(PDF)
+    with TestClient(make_app(cfg)) as client:
+        document_id = _seed_registry_row(cfg, "legacy.pdf", sha256="")
+
+        response = client.get(f"/api/v1/documents/{document_id}/download")
+
+        assert response.status_code == 404
+        assert response.content != PDF
+
+
+# --------------------------------------------------- содержимое и запись
+
+
+def test_get_does_not_serve_content_that_replaced_the_record(
+    tmp_path, sqlite_url, monkeypatch
+):
+    """Подмена файла между чтением записи и открытием не выдаётся.
+
+    Разрешение уже прочитано (оно разрешает прежнее содержимое), а на диске к
+    моменту открытия лежит другое, закрытое. Выдача сверяет байты открытого
+    файла с записью, поэтому такой запрос получает отказ, а не новый файл.
+    """
+    from ragkb.db.repos.corpus_documents import PostgresCorpusDocuments
+
+    cfg = _cfg(tmp_path, sqlite_url)
+    with TestClient(make_app(cfg)) as client:
+        _upload(client, "spec.pdf", PDF, download_allowed="true")
+        row = _row(client, "spec.pdf")
+        download, _ = _urls(row)
+        replacement = PDF + "закрытая замена".encode()
+        swapped: list[str] = []
+        original_get = PostgresCorpusDocuments.get_by_id
+
+        async def get_then_replace(self, document_id):
+            document = await original_get(self, document_id)
+            if not swapped:
+                swapped.append(document_id)
+                # Замена мимо интерфейса: файл уже новый, запись ещё прежняя.
+                (Path(cfg.docs_dir) / "spec.pdf").write_bytes(replacement)
+            return document
+
+        monkeypatch.setattr(PostgresCorpusDocuments, "get_by_id", get_then_replace)
+        served = client.get(download)
+        monkeypatch.setattr(PostgresCorpusDocuments, "get_by_id", original_get)
+
+    assert swapped == [row["document_id"]]
+    assert served.status_code == 404, "новый контент не выдаётся под старым разрешением"
+    assert served.content != replacement
+
+
+def test_opened_file_keeps_its_bytes_when_name_is_replaced(
+    tmp_path, sqlite_url, monkeypatch
+):
+    """Подмена имени не меняет байты уже открытого файла.
+
+    `os.replace` подставляет другой inode: дескриптор, из которого идёт
+    выдача, остаётся на прежнем содержимом, и сверка с записью сходится.
+    """
+    import ragkb.services.downloads as downloads_module
+
+    cfg = _cfg(tmp_path, sqlite_url)
+    documents_dir = Path(cfg.docs_dir)
+    with TestClient(make_app(cfg)) as client:
+        _upload(client, "spec.pdf", PDF, download_allowed="true")
+        row = _row(client, "spec.pdf")
+        download, _ = _urls(row)
+        replacement = PDF + "закрытая замена".encode()
+        original_hash = downloads_module._hash_and_rewind
+
+        def hash_after_atomic_replacement(handle):
+            staged = documents_dir / ".staged.upload"
+            staged.write_bytes(replacement)
+            os.replace(staged, documents_dir / "spec.pdf")
+            return original_hash(handle)
+
+        monkeypatch.setattr(
+            downloads_module, "_hash_and_rewind", hash_after_atomic_replacement
+        )
+        served = client.get(download)
+
+    assert served.status_code == 200
+    assert served.content == PDF, "выдаётся содержимое открытого inode"
 
 
 # ------------------------------------------------------- блокировка БД
@@ -434,13 +650,23 @@ def test_permission_changes_are_written_to_audit_log(tmp_path, sqlite_url):
             json={"download_allowed": False},
             headers={"x-request-id": "req-1"},
         )
+        # Замена без явного разрешения: в журнал должно попасть то значение,
+        # которое запись реально заменила — то есть `false` от PATCH, а не
+        # `true` от первой загрузки.
+        _upload(client, "spec.pdf", PDF + "заменено".encode())
 
     lines = _audit_lines(cfg)
     assert any(
-        "result=ok" in line and "old=false" in line and "new=true" in line for line in lines
+        "action=upload" in line and "result=ok" in line and "old=false" in line
+        and "new=true" in line
+        for line in lines
     ), lines
     assert any(
         "request_id=req-1" in line and "old=true" in line and "new=false" in line
+        for line in lines
+    ), lines
+    assert any(
+        "action=replace" in line and "old=false" in line and "new=false" in line
         for line in lines
     ), lines
     assert uuid.UUID(row["document_id"])  # идентификатор есть в записи журнала
@@ -504,7 +730,7 @@ async def test_file_is_streamed_in_chunks_and_closed_on_stream_error(
     cfg = _cfg(tmp_path, sqlite_url)
     payload = b"%PDF" + b"x" * (200 * 1024)
     (Path(cfg.docs_dir) / "big.pdf").write_bytes(payload)
-    document_id = _seed_registry_row(sqlite_url, "big.pdf")
+    document_id = _seed_registry_row(cfg, "big.pdf")
     engine = make_engine(sqlite_url)
     try:
         registry = PostgresCorpusDocuments(make_session_factory(engine))

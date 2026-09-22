@@ -107,18 +107,22 @@ class PostgresCorpusDocuments:
         size: int = 0,
         sha256: str = "",
         download_allowed: bool = False,
-    ) -> None:
+    ) -> RecordOutcome:
         """Заводит документ или обновляет сведения о нём.
 
         Повторная загрузка того же имени перезаписывает запись: для корпуса
         это тот же документ, новая версия файла. Идентификатор при этом
         сохраняется, а разрешение берётся из аргумента — прежнее значение
         молча не наследуется.
+
+        Существующая строка читается с блокировкой (`FOR UPDATE` в Postgres,
+        `BEGIN IMMEDIATE` в SQLite): иначе параллельная смена разрешения прошла
+        бы между чтением и записью, и запись вернула бы чужое прежнее значение.
         """
         try:
             async with self.session_factory() as session:
                 await _lock_document_write(session)
-                row = await session.get(CorpusDocumentRow, name)
+                row = await session.get(CorpusDocumentRow, name, with_for_update=True)
                 if row is None:
                     created, previous = True, False
                     row = CorpusDocumentRow(

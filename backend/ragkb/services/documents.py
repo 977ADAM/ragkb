@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
+import stat
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from ragkb.core import loaders
 from ragkb.core.config import Settings
@@ -183,15 +186,33 @@ class DocumentsService:
         docs_dir = Path(self.cfg.docs_dir)
         docs_dir.mkdir(parents=True, exist_ok=True)
         target = docs_dir / name
-        target.write_bytes(content)
-        outcome = await self._registry.record(
-            name,
-            origin=ORIGIN_UI,
-            uploaded_by=user,
-            size=len(content),
-            sha256=hashlib.sha256(content).hexdigest(),
-            download_allowed=download_allowed,
-        )
+        # Новый контент сначала лежит во временном файле рядом: пока запись
+        # реестра не сохранена, публиковать нечего, и отказ записи оставляет
+        # и прежний файл, и прежнее разрешение нетронутыми.
+        staged = docs_dir / f".{uuid4().hex}.upload"
+        try:
+            staged.write_bytes(content)
+            if target.exists():
+                # Режим доступа прежнего файла сохраняем: замена не должна
+                # молча его менять.
+                os.chmod(staged, stat.S_IMODE(target.stat().st_mode))
+            # Одно изменение разрешения вместо «снять и выдать заново»: пара
+            # old/new в журнале описывает ровно то, что сделала эта запись.
+            # Пока файл не опубликован, выдача нового содержимого невозможна:
+            # запись хранит хэш нового файла, а на диске ещё прежний — сверка
+            # содержимого с записью закрывает это окно отказом.
+            outcome = await self._registry.record(
+                name,
+                origin=ORIGIN_UI,
+                uploaded_by=user,
+                size=len(content),
+                sha256=hashlib.sha256(content).hexdigest(),
+                download_allowed=download_allowed,
+            )
+            os.replace(staged, target)
+        except Exception:
+            staged.unlink(missing_ok=True)
+            raise
         if not index:
             self._invalidate()
             return _upload_result(

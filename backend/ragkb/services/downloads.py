@@ -10,6 +10,9 @@
 """
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import logging
 import os
 import stat as stat_module
 from dataclasses import dataclass
@@ -19,6 +22,8 @@ from typing import BinaryIO
 from ragkb.core.errors import InvalidRequest, NotFound
 from ragkb.domain.entities import CorpusDocument
 from ragkb.domain.ports import DocumentRegistry
+
+log = logging.getLogger("ragkb")
 
 _NO_REGISTRY = (
     "Реестр документов не подключён: задайте RAGKB_DATABASE_URL. "
@@ -90,12 +95,41 @@ class DownloadsService:
         document = await self._registry.get_by_id(document_id or "")
         if document is None or not document.download_allowed:
             raise NotFound(_NOT_AVAILABLE)
+        if not document.sha256:
+            # Связать разрешение с конкретными байтами нечем: запись без хэша
+            # не выдаётся. Отдавать «то, что лежит по имени» значило бы
+            # обойти проверку — такой документ нужно загрузить заново.
+            log.warning(
+                "выдача оригинала: документ %s без хэша — выдача закрыта",
+                document.document_id,
+            )
+            raise NotFound(_NOT_AVAILABLE)
         try:
             handle, size = _open_document(self._docs_dir, document.name)
         except (OSError, ValueError) as exc:
             # Файл пропал, оказался каталогом или уводит по симлинку — для
             # посетителя это тот же отказ, что и выключенное разрешение.
             raise NotFound(_NOT_AVAILABLE) from exc
+        try:
+            # Сверяем содержимое уже открытого файла с записью реестра. Имя на
+            # диске могло смениться между чтением записи и открытием, а
+            # `os.replace` не меняет байты у уже открытого inode: совпадение
+            # хэша значит, что выдаются именно те байты, вместе с которыми было
+            # прочитано разрешение. Чтение порциями уходит с цикла событий.
+            digest = await asyncio.to_thread(_hash_and_rewind, handle)
+        except OSError as exc:
+            handle.close()
+            raise NotFound(_NOT_AVAILABLE) from exc
+        except BaseException:
+            handle.close()
+            raise
+        if digest != document.sha256:
+            handle.close()
+            log.warning(
+                "выдача оригинала: содержимое документа %s не совпало с записью",
+                document.document_id,
+            )
+            raise NotFound(_NOT_AVAILABLE)
         return DownloadDescriptor(
             document_id=document.document_id,
             filename=Path(document.name).name,
@@ -122,6 +156,22 @@ def media_type_for(name: str) -> str:
     return _MEDIA_TYPES.get(Path(name).suffix.lower(), UNKNOWN_MEDIA_TYPE)
 
 
+def _hash_and_rewind(handle: BinaryIO) -> str:
+    """Считает SHA-256 открытого файла порциями и возвращает чтение в начало.
+
+    Файл не читается целиком в память, поэтому проверка годится и для
+    предельного размера загрузки.
+    """
+    digest = hashlib.sha256()
+    while True:
+        chunk = handle.read(CHUNK_SIZE)
+        if not chunk:
+            break
+        digest.update(chunk)
+    handle.seek(0)
+    return digest.hexdigest()
+
+
 def _relative_parts(name: str) -> list[str]:
     """Разбирает имя из реестра на компоненты пути или отказывает.
 
@@ -145,6 +195,12 @@ def _open_document(root: Path, name: str) -> tuple[BinaryIO, int]:
     промежуточный симлинк не уводит чтение за пределы каталога. Файл
     возвращается уже открытым — повторное открытие по имени снова сделало бы
     проверку бессмысленной.
+
+    Конечный компонент открывается ещё и с `O_NONBLOCK`: имя из реестра может
+    указывать на FIFO, а обычное открытие такого файла ждёт писателя и
+    остановило бы весь цикл событий до появления данных. Неблокирующее
+    открытие возвращается сразу, а `S_ISREG` ниже отсекает всё, кроме обычных
+    файлов. На обычных файлах флаг ни на что не влияет.
     """
     parts = _relative_parts(name)
     directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
@@ -155,7 +211,9 @@ def _open_document(root: Path, name: str) -> tuple[BinaryIO, int]:
             )
             os.close(directory)
             directory = following
-        descriptor = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+        descriptor = os.open(
+            parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
+        )
     finally:
         os.close(directory)
     try:

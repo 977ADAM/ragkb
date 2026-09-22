@@ -395,3 +395,75 @@ async def test_failed_permission_change_keeps_value_and_releases_lock(tmp_path, 
         assert (await registry.get_by_id(document.document_id)).download_allowed is False
         previous, saved = await registry.set_download_allowed(document.document_id, True)
         assert (previous, saved.download_allowed) == (False, True)
+
+
+async def test_simultaneous_replacement_and_permission_change_agree(tmp_path, monkeypatch):
+    """Замена файла и смена флага не читают строку до чужой записи.
+
+    Оба изменения снимают разрешение, а до них оно было выдано: значит,
+    включённое разрешение обязан увидеть ровно один из двух — тот, кто записал
+    первым. Если бы обе операции читали строку до чужой записи, обе увидели бы
+    `true`, и журнал показал бы два отзыва уже снятого разрешения.
+
+    Ожидание после первого чтения ограничено: под корректной блокировкой
+    второе чтение до конца первой операции невозможно, поэтому ожидание
+    истекает — это не взаимная блокировка.
+    """
+    async with _sqlite_registry(tmp_path, monkeypatch) as registry:
+        await registry.record("spec.pdf", download_allowed=True)
+        document = (await registry.list_all())[0]
+        started = 0
+        release = asyncio.Event()
+        reads = 0
+        second_read = asyncio.Event()
+        working_scalar = AsyncSession.scalar
+        working_get = AsyncSession.get
+
+        async def pause_after_read() -> None:
+            nonlocal reads
+            reads += 1
+            if reads == 1:
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(second_read.wait(), timeout=0.5)
+            else:
+                second_read.set()
+
+        async def noticing_scalar(self, statement, *args, **kwargs):
+            result = await working_scalar(self, statement, *args, **kwargs)
+            if "document_id" in str(statement):
+                await pause_after_read()
+            return result
+
+        async def noticing_get(self, entity, ident, *args, **kwargs):
+            result = await working_get(self, entity, ident, *args, **kwargs)
+            await pause_after_read()
+            return result
+
+        async def replace():
+            nonlocal started
+            started += 1
+            await release.wait()
+            return await registry.record("spec.pdf")
+
+        async def revoke():
+            nonlocal started
+            started += 1
+            await release.wait()
+            return await registry.set_download_allowed(document.document_id, False)
+
+        monkeypatch.setattr(AsyncSession, "scalar", noticing_scalar)
+        monkeypatch.setattr(AsyncSession, "get", noticing_get)
+        tasks = [asyncio.create_task(replace()), asyncio.create_task(revoke())]
+        while started < 2:
+            await asyncio.sleep(0)
+        release.set()
+        replacement, permission = await asyncio.gather(*tasks)
+        monkeypatch.setattr(AsyncSession, "scalar", working_scalar)
+        monkeypatch.setattr(AsyncSession, "get", working_get)
+        final = (await registry.get_by_id(document.document_id)).download_allowed
+
+    assert reads == 2
+    assert sorted([replacement.previous_download_allowed, permission[0]]) == [False, True]
+    assert final is False
+    assert replacement.document.download_allowed is False
+    assert permission[1].download_allowed is False
