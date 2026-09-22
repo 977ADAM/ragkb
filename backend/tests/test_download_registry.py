@@ -12,7 +12,10 @@
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +25,7 @@ from alembic.config import Config as AlembicConfig
 from helpers import BACKEND_ROOT, MemoryRegistry
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ragkb.core.database import (
     EXPECTED_REVISION,
@@ -229,6 +233,18 @@ async def test_migrated_database_reports_expected_revision(tmp_path, monkeypatch
 # ------------------------------------------------- реестр: общий контракт
 
 
+@asynccontextmanager
+async def _sqlite_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Мигрированная временная SQLite и адаптер реестра поверх неё."""
+    url = _sqlite_url(tmp_path)
+    _migrate(url, "head", monkeypatch)
+    engine = make_engine(url)
+    try:
+        yield PostgresCorpusDocuments(make_session_factory(engine))
+    finally:
+        await engine.dispose()
+
+
 async def _contract(registry) -> None:
     """Сценарий, одинаковый для SQLAlchemy-адаптера и MemoryRegistry."""
     await registry.record(
@@ -279,10 +295,96 @@ async def test_memory_registry_ids_are_unique_per_document():
 
 
 async def test_sqlalchemy_registry_matches_memory_contract(tmp_path, monkeypatch):
-    url = _sqlite_url(tmp_path)
-    _migrate(url, "head", monkeypatch)
-    engine = make_engine(url)
-    try:
-        await _contract(PostgresCorpusDocuments(make_session_factory(engine)))
-    finally:
-        await engine.dispose()
+    async with _sqlite_registry(tmp_path, monkeypatch) as registry:
+        await _contract(registry)
+
+
+async def test_sequential_permission_changes_report_previous_values(tmp_path, monkeypatch):
+    """Прежнее значение — то, что реально заменено, а не прочитано заранее."""
+    async with _sqlite_registry(tmp_path, monkeypatch) as registry:
+        await registry.record("spec.pdf")
+        document = (await registry.list_all())[0]
+
+        first = await registry.set_download_allowed(document.document_id, True)
+        second = await registry.set_download_allowed(document.document_id, False)
+        third = await registry.set_download_allowed(document.document_id, False)
+
+        assert (first[0], first[1].download_allowed) == (False, True)
+        assert (second[0], second[1].download_allowed) == (True, False)
+        assert (third[0], third[1].download_allowed) == (False, False)
+        assert await registry.set_download_allowed("нет-такого-id", True) is None
+
+
+async def test_simultaneous_permission_changes_report_distinct_previous_values(
+    tmp_path, monkeypatch
+):
+    """Два одновременных изменения не возвращают одно и то же прежнее значение.
+
+    Обе операции стартуют вместе, а после первого чтения ждут второго чтения
+    ограниченное время. Ограничение обязательно: исправленная версия держит
+    блокировку записи SQLite до конца изменения, поэтому второго чтения до
+    этого момента не будет — ожидание истекает, и это не взаимная блокировка,
+    а признак того, что чтение и запись сериализованы. Без блокировки вторая
+    операция успевает прочитать `false` до первой записи, и оба изменения
+    сообщают одно и то же прежнее значение.
+    """
+    async with _sqlite_registry(tmp_path, monkeypatch) as registry:
+        await registry.record("spec.pdf")
+        document = (await registry.list_all())[0]
+        started = 0
+        release = asyncio.Event()
+        reads = 0
+        second_read = asyncio.Event()
+        working_scalar = AsyncSession.scalar
+
+        async def scalar_noticing_read(self, statement, *args, **kwargs):
+            nonlocal reads
+            result = await working_scalar(self, statement, *args, **kwargs)
+            if "document_id" not in str(statement):
+                return result
+            reads += 1
+            if reads == 1:
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(second_read.wait(), timeout=0.5)
+            else:
+                second_read.set()
+            return result
+
+        async def change():
+            nonlocal started
+            started += 1
+            await release.wait()
+            return await registry.set_download_allowed(document.document_id, True)
+
+        monkeypatch.setattr(AsyncSession, "scalar", scalar_noticing_read)
+        tasks = [asyncio.create_task(change()) for _ in range(2)]
+        while started < 2:
+            await asyncio.sleep(0)
+        release.set()
+        results = await asyncio.gather(*tasks)
+        monkeypatch.setattr(AsyncSession, "scalar", working_scalar)
+
+        assert reads == 2
+        assert sorted(result[0] for result in results) == [False, True]
+        assert all(result[1].download_allowed is True for result in results)
+        assert (await registry.get_by_id(document.document_id)).download_allowed is True
+
+
+async def test_failed_permission_change_keeps_value_and_releases_lock(tmp_path, monkeypatch):
+    """Отказ записи откатывает изменение и не оставляет блокировку записи."""
+    async with _sqlite_registry(tmp_path, monkeypatch) as registry:
+        await registry.record("spec.pdf")
+        document = (await registry.list_all())[0]
+        working_commit = AsyncSession.commit
+
+        async def failing_commit(self):
+            raise RuntimeError("запись не удалась")
+
+        monkeypatch.setattr(AsyncSession, "commit", failing_commit)
+        with pytest.raises(RuntimeError):
+            await registry.set_download_allowed(document.document_id, True)
+        monkeypatch.setattr(AsyncSession, "commit", working_commit)
+
+        assert (await registry.get_by_id(document.document_id)).download_allowed is False
+        previous, saved = await registry.set_download_allowed(document.document_id, True)
+        assert (previous, saved.download_allowed) == (False, True)

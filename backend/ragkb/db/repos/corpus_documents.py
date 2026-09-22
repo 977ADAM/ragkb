@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ragkb.db.models import CorpusDocumentRow
@@ -13,6 +13,27 @@ from ragkb.domain.entities import ORIGIN_UI, CorpusDocument
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+async def _lock_document_write(session: AsyncSession) -> None:
+    """Берёт блокировку записи до чтения строки — на SQLite.
+
+    `SELECT ... FOR UPDATE` SQLite игнорирует, а драйвер pysqlite открывает
+    транзакцию только перед первой записью: чтение прошло бы вне транзакции,
+    и два одновременных изменения прочитали бы одно и то же прежнее значение.
+    В журнале оказались бы две одинаковые пары old/new, хотя одно из значений
+    уже заменил другой запрос.
+
+    `BEGIN IMMEDIATE` берёт блокировку записи сразу, поэтому чтение и запись
+    становятся одной сериализованной операцией. В Postgres ту же роль играет
+    `FOR UPDATE` в самом запросе: второй запрос ждёт строку, а не читает её.
+
+    Если блокировку не удаётся взять за busy timeout драйвера, изменение
+    отклоняется ошибкой базы, а не отдаёт неверное прежнее значение: молчаливая
+    потеря одной замены в журнале хуже видимой ошибки.
+    """
+    if session.get_bind().dialect.name == "sqlite":
+        await session.execute(text("BEGIN IMMEDIATE"))
 
 
 class PostgresCorpusDocuments:
@@ -102,13 +123,16 @@ class PostgresCorpusDocuments:
     ) -> tuple[bool, CorpusDocument] | None:
         """Меняет разрешение и возвращает прежнее значение с записью.
 
-        Строка читается с блокировкой и меняется в той же транзакции: прежнее
-        значение нельзя вычислять отдельным чтением до записи — иначе два
-        одновременных изменения вернули бы одно и то же «старое» значение.
+        Чтение прежнего значения и запись нового — одна сериализованная
+        операция: на SQLite её открывает `BEGIN IMMEDIATE` (см.
+        `_lock_document_write`), на Postgres — блокировка строки `FOR UPDATE`.
+        Иначе два одновременных изменения вернули бы одно и то же «старое»
+        значение, и журнал соврал бы про одну из замен.
         """
         if not document_id:
             return None
         async with self.session_factory() as session:
+            await _lock_document_write(session)
             row = await session.scalar(
                 select(CorpusDocumentRow)
                 .where(CorpusDocumentRow.document_id == document_id)
