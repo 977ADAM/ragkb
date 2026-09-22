@@ -128,12 +128,21 @@ class DocumentsService:
     # -------------------------------------------------------------- операции
 
     async def upload(
-        self, filename: str, content: bytes, user: str = "", *, index: bool = True
+        self,
+        filename: str,
+        content: bytes,
+        user: str = "",
+        *,
+        index: bool = True,
+        download_allowed: bool = False,
     ) -> dict[str, Any]:
         """Сохраняет документ и заводит его в реестре.
 
         `index=False` — файл только принимается: так грузится пачка, и одну
         индексацию делают в конце, а не после каждого файла.
+        `download_allowed` — разрешение на выдачу оригинала; по умолчанию
+        выключено, а при замене файла берётся из этого вызова, а не из
+        прежней записи.
         """
         if self._registry is None:
             raise InvalidRequest(_NO_REGISTRY)
@@ -160,6 +169,7 @@ class DocumentsService:
             uploaded_by=user,
             size=len(content),
             sha256=hashlib.sha256(content).hexdigest(),
+            download_allowed=download_allowed,
         )
         if not index:
             self._invalidate()

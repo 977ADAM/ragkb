@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -44,6 +45,17 @@ class PostgresCorpusDocuments:
             )
         return [row.to_domain() for row in rows]
 
+    async def get_by_id(self, document_id: str) -> CorpusDocument | None:
+        if not document_id:
+            return None
+        async with self.session_factory() as session:
+            row = await session.scalar(
+                select(CorpusDocumentRow).where(
+                    CorpusDocumentRow.document_id == document_id
+                )
+            )
+        return row.to_domain() if row is not None else None
+
     async def record(
         self,
         name: str,
@@ -52,11 +64,14 @@ class PostgresCorpusDocuments:
         uploaded_by: str = "",
         size: int = 0,
         sha256: str = "",
+        download_allowed: bool = False,
     ) -> None:
         """Заводит документ или обновляет сведения о нём.
 
         Повторная загрузка того же имени перезаписывает запись: для корпуса
-        это тот же документ, новая версия файла.
+        это тот же документ, новая версия файла. Идентификатор при этом
+        сохраняется, а разрешение берётся из аргумента — прежнее значение
+        молча не наследуется.
         """
         async with self.session_factory() as session:
             row = await session.get(CorpusDocumentRow, name)
@@ -64,11 +79,13 @@ class PostgresCorpusDocuments:
                 session.add(
                     CorpusDocumentRow(
                         name=name,
+                        document_id=str(uuid4()),
                         origin=origin,
                         uploaded_by=uploaded_by,
                         uploaded_at=_utcnow(),
                         size=size,
                         sha256=sha256,
+                        download_allowed=download_allowed,
                     )
                 )
             else:
@@ -77,7 +94,32 @@ class PostgresCorpusDocuments:
                 row.uploaded_at = _utcnow()
                 row.size = size
                 row.sha256 = sha256
+                row.download_allowed = download_allowed
             await session.commit()
+
+    async def set_download_allowed(
+        self, document_id: str, allowed: bool
+    ) -> tuple[bool, CorpusDocument] | None:
+        """Меняет разрешение и возвращает прежнее значение с записью.
+
+        Строка читается с блокировкой и меняется в той же транзакции: прежнее
+        значение нельзя вычислять отдельным чтением до записи — иначе два
+        одновременных изменения вернули бы одно и то же «старое» значение.
+        """
+        if not document_id:
+            return None
+        async with self.session_factory() as session:
+            row = await session.scalar(
+                select(CorpusDocumentRow)
+                .where(CorpusDocumentRow.document_id == document_id)
+                .with_for_update()
+            )
+            if row is None:
+                return None
+            previous = bool(row.download_allowed)
+            row.download_allowed = bool(allowed)
+            await session.commit()
+            return previous, row.to_domain()
 
     async def forget(self, name: str) -> bool:
         async with self.session_factory() as session:

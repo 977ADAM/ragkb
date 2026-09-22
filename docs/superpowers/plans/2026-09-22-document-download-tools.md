@@ -82,7 +82,7 @@ async def set_download_allowed(
 # DocumentsService.upload(..., download_allowed: bool = False) -> dict
 ```
 
-- [ ] Написать тест на MemoryRegistry и повторить семантику на временной SQLite:
+- [x] Написать тест на MemoryRegistry и повторить семантику на временной SQLite:
 
 ```python
 async def test_replace_resets_permission_and_keeps_id():
@@ -99,9 +99,9 @@ async def test_replace_resets_permission_and_keeps_id():
     assert (await registry.list_all())[0].document_id != original.document_id
 ```
 
-- [ ] Запустить `cd backend && uv run pytest tests/test_download_registry.py -q`;
+- [x] Запустить `cd backend && uv run pytest tests/test_download_registry.py -q`;
   подтвердить падение из-за отсутствующего контракта, а не настройки окружения.
-- [ ] Добавить миграцию: nullable ID → заполнение UUID для каждой строки →
+- [x] Добавить миграцию: nullable ID → заполнение UUID для каждой строки →
   unique/not-null; boolean с server_default false. SQLite использовать через
   Alembic batch_alter_table, Postgres — совместимые операции Alembic.
   Переход downgrade удаляет только новые поля/индекс; не удаляет документы.
@@ -117,17 +117,17 @@ for name in connection.execute(sa.text('SELECT name FROM corpus_documents')).sca
     )
 ```
 
-- [ ] Обновить EXPECTED_REVISION. Сохранять ID при record существующего имени,
+- [x] Обновить EXPECTED_REVISION. Сохранять ID при record существующего имени,
   явно сохранять download_allowed, новое имя получает UUID. Изменение флага
   возвращает старое значение из той же транзакции; не вычислять его до записи
   отдельным незащищённым чтением. SQL-адаптер и MemoryRegistry равнозначны.
-- [ ] Дописать миграционные тесты: БД на 0001 с двумя документами и посторонней
+- [x] Дописать миграционные тесты: БД на 0001 с двумя документами и посторонней
   таблицей; upgrade сохраняет данные, создаёт разные ID и false; повторный
   upgrade безопасен; downgrade/upgrade сохраняет прежние поля. Проверить
   `assert_revision` после миграции. Не считать сохранение ID после downgrade
   требованием: откат удаляет новый столбец.
-- [ ] Запустить `uv run pytest tests/test_download_registry.py tests/test_documents.py tests/test_architecture.py -q`.
-- [ ] Зафиксировать только файлы задачи: `feat: add document download permissions to registry`.
+- [x] Запустить `uv run pytest tests/test_download_registry.py tests/test_documents.py tests/test_architecture.py -q`.
+- [x] Зафиксировать только файлы задачи: `feat: add document download permissions to registry`.
 
 ## Task 2: Выдавать оригинал только через проверенный API
 
@@ -550,3 +550,55 @@ cd frontend && bun test && bun run check && bun run build
 в текущей задаче: шаги сильно связаны контрактами реестра, событий и callback.
 Вариант с отдельными исполнителями и ревью каждого шага возможен по выбору
 пользователя. До проверки плана и выбора способа реализацию не начинать.
+
+## Ход выполнения
+
+### Task 1 — выполнено
+
+Ветка `feat/document-download-tools`; спецификация и план закоммичены отдельно
+(`docs: add document download tools spec and plan`). Навыки Superpowers в этой
+сессии недоступны, поэтому процесс выполнен вручную в том же порядке:
+тест → подтверждение ожидаемого падения → реализация → проверки → ревью diff.
+
+Изменённые файлы этапа: `backend/migrations/versions/0002_document_downloads.py`
+(новый), `backend/ragkb/domain/entities.py`, `backend/ragkb/domain/ports.py`,
+`backend/ragkb/db/models.py`, `backend/ragkb/db/repos/corpus_documents.py`,
+`backend/ragkb/core/database.py`, `backend/ragkb/services/documents.py`,
+`backend/tests/helpers.py`, `backend/tests/test_guard.py`,
+`backend/tests/test_download_registry.py` (новый).
+
+Фактические результаты проверок:
+
+- RED: `cd backend && uv run pytest tests/test_download_registry.py -q` —
+  7 падений, все на `AttributeError: 'CorpusDocument' object has no attribute
+  'document_id'` и `sqlite3.OperationalError: no such column: document_id`,
+  то есть из-за отсутствующего контракта, а не настройки окружения.
+- GREEN: те же 8 тестов проходят.
+- `uv run pytest tests/test_download_registry.py tests/test_documents.py
+  tests/test_architecture.py -q` — 54 passed
+  (8 + 31 + 15).
+- Полный backend-набор: `cd backend && uv run pytest` — 219 passed,
+  1 deselected (`integration`).
+- `uv run ruff check ragkb migrations tests` — 11 замечаний, все
+  существовавшие до этапа (было 12; строка в `tests/test_guard.py` укорочена
+  при правке). Новых замечаний этап не добавил.
+
+Ограничения проверок и решения по ходу:
+
+- Миграция проверена только на временной SQLite. Postgres не проверена:
+  `docker` CLI установлен, но демон недоступен (`/var/run/docker.sock`
+  отсутствует). Локальный порт 5432 слушает, но это может быть рабочая база
+  заказчика, а её учётные данные — секрет, поэтому он не использовался.
+  Проверка на изолированной Postgres остаётся за Task 7.
+- `backend/tests/test_guard.py` пришлось поправить: тест вставлял запись
+  реестра сырым SQL без идентификатора, а с ревизии 0002 столбец обязателен.
+  Строка теперь содержит UUID; смысл теста (повторный upgrade не теряет
+  принятые документы) сохранён.
+- `document_id` в модели и миграции — `String(36)`: каноническая запись UUID
+  как единый контракт схемы.
+- Список документов (`GET /api/v1/admin/documents`) и HTTP-параметр загрузки
+  `download_allowed` намеренно не менялись — это Task 2 вместе с выдачей
+  оригинала.
+- Докстринг `0001_corpus_documents.py` («Единственная миграция проекта»)
+  устарел: переписывать 0001 план запрещает, поэтому фактическое описание
+  цепочки живёт в 0002, а README и AGENTS.md актуализируются в Task 7.

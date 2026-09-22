@@ -4,8 +4,10 @@ import hashlib
 import math
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from langchain_core.embeddings import Embeddings
@@ -74,21 +76,30 @@ def make_app(cfg: Settings) -> FastAPI:
 
 
 class MemoryRegistry:
-    """Реестр документов в памяти — замена Postgres в тестах сервисов."""
+    """Реестр документов в памяти — замена Postgres в тестах сервисов.
+
+    Повторяет контракт SQL-адаптера: идентификатор переживает замену файла,
+    новое имя получает свой, а разрешение на выдачу оригинала берётся из
+    явного аргумента записи.
+    """
 
     def __init__(self) -> None:
         self.rows: dict[str, CorpusDocument] = {}
 
-    def add(self, cfg: Settings, *names: str) -> MemoryRegistry:
+    def add(
+        self, cfg: Settings, *names: str, download_allowed: bool = False
+    ) -> MemoryRegistry:
         """Заводит в реестре файлы, которые уже лежат в каталоге корпуса."""
         for name in names or tuple(p.name for p in Path(cfg.docs_dir).iterdir()):
             data = (Path(cfg.docs_dir) / name).read_bytes()
             self.rows[name] = CorpusDocument(
                 name=name,
+                document_id=str(uuid4()),
                 origin=ORIGIN_UI,
                 uploaded_at="2026-09-10T00:00:00+00:00",
                 size=len(data),
                 sha256=hashlib.sha256(data).hexdigest(),
+                download_allowed=download_allowed,
             )
         return self
 
@@ -101,6 +112,13 @@ class MemoryRegistry:
     async def list_all(self) -> list[CorpusDocument]:
         return list(self.rows.values())
 
+    async def get_by_id(self, document_id: str) -> CorpusDocument | None:
+        if not document_id:
+            return None
+        return next(
+            (doc for doc in self.rows.values() if doc.document_id == document_id), None
+        )
+
     async def record(
         self,
         name: str,
@@ -109,15 +127,29 @@ class MemoryRegistry:
         uploaded_by: str = "",
         size: int = 0,
         sha256: str = "",
+        download_allowed: bool = False,
     ) -> None:
+        previous = self.rows.get(name)
         self.rows[name] = CorpusDocument(
             name=name,
+            document_id=previous.document_id if previous else str(uuid4()),
             origin=origin,
             uploaded_by=uploaded_by,
             uploaded_at="2026-09-10T00:00:00+00:00",
             size=size,
             sha256=sha256,
+            download_allowed=download_allowed,
         )
+
+    async def set_download_allowed(
+        self, document_id: str, allowed: bool
+    ) -> tuple[bool, CorpusDocument] | None:
+        for name, document in self.rows.items():
+            if document.document_id == document_id:
+                saved = replace(document, download_allowed=bool(allowed))
+                self.rows[name] = saved
+                return document.download_allowed, saved
+        return None
 
     async def forget(self, name: str) -> bool:
         return self.rows.pop(name, None) is not None

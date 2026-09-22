@@ -13,6 +13,8 @@ class DocumentRegistry(Protocol):
     async def names(self) -> set[str]:
         """Имена (пути относительно каталога корпуса) принятых документов."""
     async def list_all(self) -> list[CorpusDocument]: ...
+    async def get_by_id(self, document_id: str) -> CorpusDocument | None:
+        """Запись по идентификатору. None — такого документа в реестре нет."""
     async def record(
         self,
         name: str,
@@ -21,8 +23,22 @@ class DocumentRegistry(Protocol):
         uploaded_by: str = "",
         size: int = 0,
         sha256: str = "",
+        download_allowed: bool = False,
     ) -> None:
-        """Заводит документ или обновляет сведения о нём."""
+        """Заводит документ или обновляет сведения о нём.
+
+        Замена существующего имени сохраняет `document_id`, но не прежнее
+        разрешение: `download_allowed` берётся из этого вызова.
+        """
+    async def set_download_allowed(
+        self, document_id: str, allowed: bool
+    ) -> tuple[bool, CorpusDocument] | None:
+        """Меняет разрешение на выдачу оригинала.
+
+        Возвращает прежнее значение вместе с сохранённой записью — новое
+        значение читается в той же транзакции, а не отдельным чтением до
+        записи. None — документа с таким идентификатором нет.
+        """
     async def forget(self, name: str) -> bool:
         """Убирает документ из реестра. True — запись была."""
 

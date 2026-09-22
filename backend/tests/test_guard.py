@@ -23,7 +23,12 @@ def test_upgrade_head_is_idempotent_and_registry_persists(tmp_path, monkeypatch)
     migration.set_main_option('script_location', str(BACKEND_ROOT / 'migrations'))
     command.upgrade(migration, 'head')
     with sqlite3.connect(path) as connection:
-        connection.execute("INSERT INTO corpus_documents(name, uploaded_at) VALUES ('kept.md', CURRENT_TIMESTAMP)")
+        # Запись реестра без идентификатора схема больше не принимает: он
+        # обязателен с ревизии 0002.
+        connection.execute(
+            "INSERT INTO corpus_documents(name, document_id, uploaded_at)"
+            " VALUES ('kept.md', '11111111-1111-4111-8111-111111111111', CURRENT_TIMESTAMP)"
+        )
     # Повторный upgrade не падает и не трогает принятые документы.
     command.upgrade(migration, 'head')
     cfg = Settings(docs_dir=str(tmp_path / 'docs'), index_dir=str(tmp_path / 'index'))
